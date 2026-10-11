@@ -337,5 +337,6 @@
 | 권한 경계 | 관리자 소유 데이터셋 PUT/refresh는 403(X-22와 일치). 4개 권한 외 추가 권한 불필요 |
 - 결론: **조건부 가능**. 서비스 계정은 **전체 열(id, column_name, verbose_name)을 매번 보내는 방식**으로만 안전하게 표시 이름을 갱신할 수 있다. 요청 순서: 로그인·CSRF → `POST /dataset/`(응답에서 열 id) → `PUT /dataset/{id}`(전체 열) → 뷰 변경 후에는 `refresh` → `GET` → 포털이 보관한 표시 이름과 병합해 전체 열 재PUT. 데이터셋 단위 직렬화, 422 "columns do not exist"는 재조회 후 재시도.
 - **번호 이름(`c_N`)이 보이는 곳(작성자 눈높이):** 대시보드 네이티브 필터 설정의 Column 선택과 드롭다운(새 필터 이름 칸은 비어 있음), Explore의 Filters 칩(`c_1 > 120`, 기본 시간 필터 `period (No filter)`), Ordering 목록, Customize 탭, Results 창, "View query" SQL, 대시보드 "View as table", 열 툴팁("Column name: c_1 / Label: 매출"). **표시 이름이 보이는 곳:** 데이터셋 패널, 열 선택 드롭다운, 표 머리글, Drill by, CSV 내보내기 헤더(API로만 확인), 필터 바 라벨(작성자가 직접 입력), 사전 필터의 열 선택. `description`은 열 툴팁에만.
+- **표시 이름이 1,024자를 넘으면 Superset `PUT`이 원인을 알 수 없는 422**를 돌려준다(원문 결과 34줄; 앱에서 길이를 제한해야 한다). 가상 데이터셋 이름에도 길이 제한이 있을 수 있다(미확인).
 - 부수 관찰: UI에서 만든 지표는 저장 시점의 표시 이름을 라벨에 굳혀 둔다(`SUM(총매출)`)—이후 표시 이름을 바꿔도 라벨은 그대로(깨지지 않고 이름만 어긋남). 작성자 역할에서 Explore "Samples"는 `Access is Denied`.
 - 한계: Embedded guest 화면, 관리자 화면, 열 수백 개 규모, refresh와 PUT의 동시 호출은 미확인. 화면 확인은 작성자 역할(Gamma 복사본 + schema 보조 역할) 기준. 6번 대안(뷰 별칭, 계산 열)은 성공했으므로 시험하지 않았다.
