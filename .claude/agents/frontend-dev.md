@@ -2,7 +2,7 @@
 name: frontend-dev
 description: React와 AG Grid Community로 입력 그리드, 엑셀 가져오기 마법사, 데이터셋 정의 화면, 수식 편집기, Superset Embedded 화면을 테스트와 함께 구현하고 해당 제품 Skill을 갱신한다. Gate ④ 기능 개발에서 사용한다.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: haiku
+model: sonnet
 ---
 
 # frontend-dev — React 프런트엔드 구현

@@ -1,7 +1,8 @@
 # 05. REST API 계약 (FU-1 범위)
 
-**상태: 초안(승인 전)** — architect, 2026-10-11. 이름·역할·enum은 04 부록 A, 필드·권한은 06, 수식 응답은 07, 입장권·동기는 08을 그대로 쓴다.
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·역할·enum은 04 부록 A, 필드·권한은 06, 수식 응답은 07, 입장권·동기는 08을 그대로 쓴다.
 - 의존 결정: 브리프 5절 3·6·8(스텁 전제)·9·10번, `03b` 1-3·1-6·2-4·3-3·3-4·4-2·5-2(K2·K3·K7·Z6), 실험 `03c` X-24·X-28. 결정 원문은 반복하지 않고 `03b n-n`으로만 건다. 구현 상세(클래스·SQL)는 담지 않는다.
+- [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [AP]는 `03b` 6-3 기준).
 - 표지: **[제안]** 이 문서가 처음 내는 안 / **[미답]** 사용자 답 없음(기본값 사용) / **해소(03c A-27)** 표시 이름 갱신은 서버 내부 흐름이라 이 계약의 필드는 변하지 않는다(08 §2-3) / **[AP]** §6 승인 필요. 공통 규칙(경로·오류 형식·상태 코드·목록·값 형식·충돌 응답)은 사용자 답이 없어 기본값으로 쓰며 **[미답]**이다.
 
 ## 1. 공통 규칙
@@ -9,7 +10,7 @@
 | --- | --- | --- |
 | 경로 | 모든 경로는 `${APP_BASE_PATH}/api/…`이고 아래 표는 `/api` 뒤만 쓴다. 버전 접두어 없음. 프록시가 접두를 떼든 말든 같은 경로(STRIP true/false 모두). 프런트는 `config.ts`의 `apiUrl()` 한 곳에서 조립하고 경로를 하드코딩하지 않는다 | [미답], 04 §5 |
 | 경계 | 브라우저는 FastAPI만 호출한다. DB·Superset REST 직접 호출 없음(Superset은 Embedded iframe·새 창 링크만). 요청 본문의 `rls`·Superset 숫자 id는 받지 않는다 | 04 §5, 08 §4 |
-| 형식 | JSON UTF-8, 필드 snake_case, id는 정수. 날짜 `YYYY-MM-DD`(월·연 단위도 기간 첫날, 예 `2026-03-01`), 시각 ISO 8601 `+09:00`. 첫날이 아닌 날짜는 거부(`NOT_PERIOD_START`). **`number` 값은 십진 문자열 `"1234.50"`, 미입력은 `null`** [제안: `numeric` 38자리가 JS 숫자 정밀도를 넘을 수 있어 일반 JSON 숫자 기본값과 다름, 확인 필요]. 글자는 NFC로 정규화해 저장 | 03b 2-2 W3-2, 07 §3 |
+| 형식 | JSON UTF-8, 필드 snake_case, id는 정수. 날짜 `YYYY-MM-DD`(월·연 단위도 기간 첫날, 예 `2026-03-01`), 시각 ISO 8601 `+09:00`. 첫날이 아닌 날짜는 거부(`NOT_PERIOD_START`). **`number` 값은 십진 문자열 `"1234.50"`, 미입력은 `null`** [제안: `numeric` 38자리가 JS 숫자 정밀도를 넘을 수 있어 일반 JSON 숫자 기본값과 다름, 승인 03b 6-2]. 글자는 NFC로 정규화해 저장 | 03b 2-2 W3-2, 07 §3 |
 | 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
 | 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
 | 권한 표기 | `공개` 인증 불필요 / `읽기` 인증된 활성 사용자 전부(타 팀 포함) / `관리자` `users.is_admin` / `정의(팀)` 그 데이터셋 팀의 `definer`(관리자라도 팀 소속이 아니면 불가 [제안, 06 §4-1]) / `입력(팀)` 그 팀의 `entry` 또는 `definer` **[미답: 정의 담당자 입력 가부, 06 §4-1]** / `스텁` 스텁이 켜진 환경에서만 존재 | 03b 1-3, 5-2 K2, 06 §4 |
@@ -60,7 +61,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | C3 | PATCH `/datasets/{id}/rows/{row_id}` | 입력(팀) | `{expected_version, changes[{column_id, expected, value}]}` (`expected` 키 필수, §1 동시성. 한 요청의 칸 전부가 가드, 하나라도 충돌하면 전체 취소) | 200 `{row, def_version}` | 404 `ROW_NOT_FOUND`, 409 `CELL_CONFLICT`(`details.conflicts[{row_id, column_id, current}]`), `PERIOD_CONFLICT`(이미 있는 기간으로 이동), `DEFINITION_VERSION_MISMATCH`, 422, 503 `WRITE_BUSY` |
 | C4 | POST `/datasets/{id}/rows/paste` | 입력(팀) | `{expected_version, column_ids[], rows[{row_id, expected[], values[]}]}` (규칙은 아래 목록) | 200 `{updated, created, created_rows[{index, row_id}], def_version}` | 409 `PASTE_CONFLICT`(전부 취소, `details.conflicts[{row_index, row_id, column_id, kind: "cell"\|"period"\|"row_missing", current}]`), 409 `DEFINITION_VERSION_MISMATCH`, 413 `PAYLOAD_TOO_LARGE`, 422 `VALIDATION_ERROR`, 503 `WRITE_BUSY` |
 - C4 규칙: 값은 문자열\|null(파서는 화면 몫, 07 §9)이고 서버가 열 타입으로 해석·재검증한다. `row_id=null`은 새 행(`expected` 없음), 정수는 기존 행이며 이때 `expected[]`가 **필수**(칸마다 화면이 가진 이전 값, 빈 칸 `null`)다. 처리 순서는 기존 행 `row_id` 오름차순 갱신 → 새 행 기간 오름차순(기준 날짜 열이 없으면 입력 순) 삽입으로 고정해 교착을 막고, 충돌은 첫 건에서 멈추지 않고 모아 한 번에 돌려준다(06 §5). **기존 행의 기준 날짜 열 값은 C4로 바꿀 수 없다**(`VALIDATION_ERROR` 필드 코드 `READ_ONLY`; 기간 이동은 C3 단건만, 유일 인덱스 위반으로 트랜잭션이 중단되어 충돌 목록에 못 모이기 때문). 그래서 `conflicts.kind="period"`는 새 행 삽입의 기간 충돌만 뜻한다.
-- C4 요청 상한 **[제안: 사용자 확인 필요, 04 §9-2]**: 기본값 A = 5,000행·1MiB 이하(현재 nginx 기본 `client_max_body_size` 1m 안). B = 1MiB보다 큰 요청을 허용하고 `frontend/nginx/templates/default.conf.template`의 `client_max_body_size`를 "요청 상한 + 1MiB"(2MB 상한이면 3m 이상, 03c X-27 원칙)로 바꾸는 것을 FU-1 EW에 포함(`03b` 4-4 Z8에서 변경 승인됨, 변수 `APP_UPLOAD_MAX_MB`는 이월). A안의 1MiB는 nginx 기본 1m과 같아 요청이 백엔드 `PAYLOAD_TOO_LARGE`(JSON)에 닿기 전에 nginx 413(JSON 아님)을 받을 수 있으므로 프런트는 JSON이 아닌 413도 같은 안내로 처리한다.
+- C4 요청 상한 **A 승인(`03b` 6-2)**: 5,000행·요청 1MiB 이하(현재 nginx 기본 `client_max_body_size` 1m 안)이며 B안(상한을 늘리고 `frontend/nginx/templates/default.conf.template`의 `client_max_body_size`를 "요청 상한 + 1MiB"로 변경)은 채택하지 않았다. 1MiB는 nginx 기본 1m과 같아 요청이 백엔드 `PAYLOAD_TOO_LARGE`(JSON)에 닿기 전에 nginx 413(JSON 아님)을 받을 수 있으므로 프런트는 JSON이 아닌 413도 같은 안내로 처리한다.
 - **임시 행(draft) [제안]**: 필수 열 때문에 한 칸씩 입력하는 새 행은 서버에 저장하지 않는다. 화면이 클라이언트 메모리에서 필수 칸을 모두 채우면 C2를 한 번 부른다(붙여넣기 새 행은 C4 한 번). 서버에 `draft` 상태·표 열이 없다. 비용: 새로고침하면 미저장 행이 사라지고 다른 사용자에게 보이지 않으며, 같은 기간 충돌은 저장 때 알려진다. 대안(서버 draft 열)은 `ds_`·뷰·요약에 제외 조건이 들어가 후속 비용이 커서 비추천.
 - 삭제·보관 엔드포인트는 FU-1에 없다.
 
@@ -83,7 +84,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | --- | --- | --- | --- | --- | --- |
 | E1 | GET `/superset/datasets` | 읽기 | 목록 | 200 `{dataset_id, superset_name, sync_status, synced_at, last_error}` 목록. 등록 행이 없는 데이터셋은 `pending`(04 A-3). `last_error`는 관리자에게만, 다른 사용자는 `null` [제안: 06 §4-1은 동기 현황을 관리자로 두었으나 04 S2 목록이 상태 열을 가짐] | - |
 | E2 | POST `/superset/sync` | 관리자 | `{dataset_ids?}` (생략 = `pending`·`failed` 전부) | 202 `{accepted[dataset_id]}`. 결과는 E1로 확인. Superset 불가가 다른 API를 막지 않는다(08 §2-1) | 404 |
-| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 확인 필요]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - |
+| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 승인]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - |
 | E4 | POST `/dashboards` | 관리자 | `{name, embedded_uuid}` (관리자가 Superset에서 임베드를 켜고 받은 번호를 수동 입력) | 201 dashboard | 409 `ALREADY_EXISTS`, 422(uuid 형식) |
 | E5 | PATCH `/dashboards/{id}` | 관리자 | `{name?, is_active?}` (uuid 불변. 해제는 `is_active=false`, Superset 임베드는 관리자가 따로 끈다) | 200 dashboard | 404 |
 | E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표가 아니라 Superset 쪽 임베드 설정으로 확인하므로 오타 uuid는 Superset이 거부해 502가 된다 | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
@@ -97,7 +98,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | DV2 | PUT `/dev/stub-user` | 스텁 | `{login_id}` | 204 + 스텁 신원 쿠키 설정(이름 `bi_stub_login`, HttpOnly) [제안] | 404 미등록 |
 | DV3 | DELETE `/dev/stub-user` | 스텁 | - | 204, 쿠키 삭제 | - |
 - Skill: H1·H2는 `local-environment`, DV1~DV3는 `permission-management`(04 §6). 화면 ID(S1~S9, 04 §4)와 겹치지 않게 개발용은 DV로 쓴다.
-- 스텁 안전장치(8번 미결정, 방식만 제안, fail-closed): 스위치 미설정 = 꺼짐(기본 false). 스위치가 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test 등) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부한다(`bi-review` 7-5, 시험은 04 §8). 켜진 설정에서만 스텁 어댑터와 `/dev/*`를 등록하고 꺼져 있으면 경로 자체가 없다(404). 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별하고(config.js 변경 없음), 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 8번에서 어댑터를 바꾸면 `/dev/*`만 사라지고 A1 이하 계약은 그대로다. 스위치 이름·판별 방식은 **[이 문서 AP-1 = 통합 AP-13]**(승인 전 확정 아님).
+- 스텁 안전장치(8번 미결정, 방식만 제안, fail-closed): 스위치 미설정 = 꺼짐(기본 false). 스위치가 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test 등) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부한다(`bi-review` 7-5, 시험은 04 §8). 켜진 설정에서만 스텁 어댑터와 `/dev/*`를 등록하고 꺼져 있으면 경로 자체가 없다(404). 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별하고(config.js 변경 없음), 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 8번에서 어댑터를 바꾸면 `/dev/*`만 사라지고 A1 이하 계약은 그대로다. 스위치 `AUTH_STUB_ENABLED`와 판별 방식은 **이 문서 AP-1 = 통합 AP-13으로 승인됨**(`03b` 6-3).
 
 ## 3. 오류 코드 사전 (FU-1)
 | 코드 | HTTP | `details` | 뜻 |
@@ -133,13 +134,13 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ## 5. 프런트 설정과 훅
 - `config.js`/`config.ts`는 **FU-1에서 변경하지 않는다**(새 변수 없음). Superset 새 창 링크는 기존 `supersetRoot`를 쓴다. `APP_UPLOAD_MAX_MB`는 가져오기 단위로 이월(03b 5-4). 훅은 위 ID 단위로 만들고 오류는 `error.code`로 분기한다.
 
-## 6. 승인 필요 (지금은 요청이 아님. 통합 번호는 04 §9-1: 이 문서의 AP-1 = 통합 AP-13, AP-2 = 통합 AP-14)
+## 6. 승인 상태 (`03b` 6-3. 통합 번호는 04 §9-1: 이 문서의 AP-1 = 통합 AP-13, AP-2 = 통합 AP-14)
 | 번호 | 항목 | 시점 |
 | --- | --- | --- |
-| AP-1 | 새 환경변수 후보 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 fail-closed 판별 방식(기존 `APP_ENV` 허용 목록, 04 §8·§9-1). 8번 확정 시 어댑터 변수는 따로 승인 | FU-1a 착수 전 |
-| AP-2 | 04 부록 A 갱신: 충돌 코드에 `PERIOD_CONFLICT` 추가, 이 문서의 오류 코드 사전 채택 | 05 승인 때 |
+| AP-1 | **승인**: 새 환경변수 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 fail-closed 판별(`APP_ENV` 명시 설정 + 허용 목록 local·test, 04 §8). 8번 확정 시 어댑터 변수는 따로 승인 | 승인됨 |
+| AP-2 | **승인**(통합 AP-14): 04 부록 A 갱신 — `PERIOD_CONFLICT` 추가, 이 문서의 오류 코드 사전 채택 | 승인됨 |
 | - | 새 런타임 의존성·기준선과 다른 설정·모델 변경: 이 문서 없음. `/health` 필드 추가는 03b 3-6에서 승인됨 | - |
-- 사용자 확인이 필요한 **[제안]**: 숫자 십진 문자열(일반 JSON 숫자와 다름), 이름 길이 상한·금지 문자, 붙여넣기 요청 상한 A/B, `WRITE_BUSY`, 클라이언트 임시 행, `/health` 새 필드의 메모리 값, `E3`가 `embedded_uuid`를 모두에게 노출, `E1` 상태 값을 읽기로 공개, 스텁 쿠키 방식, `LAST_ADMIN` 보호, 검사(D2)를 200으로 응답.
+- 승인된 **[제안]**(`03b` 6-2): 숫자 십진 문자열(일반 JSON 숫자와 다름), 이름 길이 상한·금지 문자, 붙여넣기 요청 상한 A/B, `WRITE_BUSY`, 클라이언트 임시 행, `/health` 새 필드의 메모리 값, `E3`가 `embedded_uuid`를 모두에게 노출, `E1` 상태 값을 읽기로 공개, 스텁 쿠키 방식, `LAST_ADMIN` 보호, 검사(D2)를 200으로 응답.
 
 ## 7. 후속 기능 단위에서 결정
 - 행 보관·복구·영구 삭제, 열·수식·데이터셋 보관·삭제 API와 영향 차트 수 안내(08 §2-1), 30일 규칙 응답(409).

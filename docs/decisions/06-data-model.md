@@ -1,8 +1,9 @@
 # 06. 데이터 모델·권한·마이그레이션 계획 (FU-1 범위)
 
-**상태: 초안(승인 전)** — architect, 2026-10-11. 이름·enum은 04 부록 A를 그대로 쓴다. 코드·전체 DDL은 담지 않는다.
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·enum은 04 부록 A를 그대로 쓴다. 코드·전체 DDL은 담지 않는다.
 - 의존 결정: 브리프 5절 2·3·8(스텁 전제)·9·11번, `03b` 2-2·2-3·2-6·3-2·3-4·3-6·4-1·4-3·5-2, 실험 `03c`. 사용자 결정은 바꾸지 않고 원문은 `03b n-n`으로만 건다.
-- 표지: **[제안]** 이 문서가 처음 내는 안(승인 때 확인) / **[미답]** 사용자 답 없음 / **해소(03c A-27)** 열 표시 이름 갱신 확인됨(§7) / **[AP-n]** §8 승인 필요. 근거: `03c X-n` = 우리 환경(PostgreSQL 16.10) 실측(**확인됨**), 공식 문서는 REL_16_STABLE(16.15) 기준(마이너 차이), 그 밖은 **추정**.
+- [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [AP-n]은 `03b` 6-3 기준).
+- 표지: **[제안]** 이 문서가 처음 내는 안 / **[미답]** 사용자 답 없음 / **해소(03c A-27)** 열 표시 이름 갱신 확인됨(§7) / **[AP-n]** §8 승인 필요. 근거: `03c X-n` = 우리 환경(PostgreSQL 16.10) 실측(**확인됨**), 공식 문서는 REL_16_STABLE(16.15) 기준(마이너 차이), 그 밖은 **추정**.
 
 ## 1. 설계 원칙
 | 원칙 | 내용 | 출처 |
@@ -63,7 +64,7 @@
 | `team` | 팀 코드 상수(형식을 제한한 `teams.code`, 불변). 이름은 예약(04 부록 A) | 03b 2-5 B8, 3-6 BY9 |
 | 재생성 | 열 추가·표현식 변경(같은 결과 형)은 `CREATE OR REPLACE`. 출력 열 삭제·형 변경·이름 변경은 `DropView`+`CreateView`(의존 뷰 포함 한 트랜잭션). 정의 해시가 같으면 DDL을 건너뜀 | 03c X-11·X-17 |
 | 읽는 표 | 자기 `ds_<id>`만 읽는다. `public` 정적 표 위에 뷰가 없어 `downgrade`가 막히지 않고(X-29), 소유자 권한 문제도 없다 | 03c X-29 |
-| 오류 칸 (07과 맞춤) | **뷰가 보이는 값**: 오류·미입력 입력이면 NULL(빈 값). **오류 판정 구조는 07 §3-1 E-A [제안: 사용자 확인 필요, 대안 = 판정 SELECT]**: 보조 뷰 `de_<id>`(`row_id` + 계산 열마다 `e_<열 id>`)를 `ddl`로 만든다. 종류가 뷰라 허용 목록(표·뷰·인덱스·제약)에 맞고, 비용은 뷰 수 2배·재생성 락 증가·이름 규칙 확장(04 부록 A). 대안은 DB 객체 없이 포털이 같은 변환기로 만든 판정 SELECT(읽기 전용 트랜잭션) | 03b 5-2 K7 ㄷ, 03c X-2 |
+| 오류 칸 (07과 맞춤) | **뷰가 보이는 값**: 오류·미입력 입력이면 NULL(빈 값). **오류 판정 구조는 07 §3-1 E-A(승인 03b 6-2)**: 보조 뷰 `de_<id>`(`row_id` + 계산 열마다 `e_<열 id>`)를 `ddl`로 만든다. 종류가 뷰라 허용 목록(표·뷰·인덱스·제약)에 맞고, 비용은 뷰 수 2배·재생성 락 증가·이름 규칙 확장(04 부록 A). 대안은 DB 객체 없이 포털이 같은 변환기로 만든 판정 SELECT(읽기 전용 트랜잭션) | 03b 5-2 K7 ㄷ, 03c X-2 |
 
 ### 3-5. 정의 변경 한 트랜잭션 (열 추가 예)
 dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets` 행 잠금 → `def_version` 확인·+1(§5) → 열 변경(`dataset_columns` INSERT로 새 `id` 확보, 원본 열이면 `ALTER TABLE ds_<id> ADD COLUMN c_<id>`[Alembic `Operations`, `bi-review` 7-4가 허용]와 기준 열이면 CHECK·UNIQUE 인덱스, 계산 열 결과 형이 바뀌면 `type` 갱신) → 정의 변경 훅(formula가 새 `id`로 `formulas`·`formula_deps`를 쓰고 `dv_`·`de_`를 `CREATE OR REPLACE`) → `def_hash` 기록. formula가 직접 쓰는 정적 표는 `formulas`·`formula_deps`뿐이다. 이 트랜잭션은 `superset_*` 표를 쓰지 않는다. 표 쓰기는 소유 모듈의 repo가 하고 모듈 사이는 서비스 함수·훅으로 부른다(04 §5). 커밋 뒤에만 `DatasetSyncPort`로 백그라운드 동기화를 요청하고, 그때 superset 모듈이 자기 표에 상태를 쓴다(등록 행이 없으면 `pending`, 08 §2-1). 중간 실패는 전부 롤백(03c X-1). `ds_` 표의 `ALTER TABLE`은 읽기와 서로 기다리므로 `lock_timeout`을 걸고 실패는 "다시 시도"(03c X-7·X-17).
@@ -81,8 +82,8 @@ dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets
 | Superset 동기 상태 보기(사유 `last_error`는 관리자만) | O | O | O | O |
 | 대시보드 목록·보기(입장권) | O | O | O | O |
 | 대시보드 연결 등록·해제, 동기 사유·뷰 재생성 현황·다시 시도 | O | X | X | X |
-- **[미답, 04 A-1] 정의 담당자의 입력 가부**: 가능으로 제안(역할을 하나만 두는 `team_members` 구조에서 정의 담당자가 입력하려고 다른 역할 행이 필요한 일을 피함). 불가이면 `role`이 팀마다 둘 이상이어야 해 PK가 바뀐다.
-- **[제안, 확인 필요] 관리자는 데이터셋 정의·입력 권한이 없다**(03b 1-3·PT-01에 열거되지 않음). 필요하면 그 팀의 `team_members`에 올라 그 역할로 한다. 관리자도 모든 팀의 정의 담당자로 할지는 사용자 결정.
+- **정의 담당자의 입력은 가능**(승인 03b 6-2; 역할을 하나만 두는 `team_members` 구조에서 입력하려고 다른 역할 행이 필요한 일을 피함).
+- **관리자는 팀 소속 역할 없이 데이터셋 정의·입력 권한이 없다**(승인 03b 6-2). 필요하면 그 팀의 `team_members`에 올라 그 역할로 한다.
 - Superset 차트 작성 계정은 관리자가 수동으로 만든다(03b 5-2 K11 ㄷ). 작성 권한 자체는 DB가 아니라 Superset 역할이다(08).
 
 ### 4-2. DB 계정 권한 (구현은 Gate ④ 진입 전 EW-1, 03b 3-2·5-4)
@@ -101,15 +102,15 @@ dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets
 | 기간(기준 날짜) 수정 | 허용 + 확인창(화면) | 이미 있는 기간으로 옮기면 같은 유일 인덱스 위반으로 거부(03b 3-4 Y9 (b)) |
 | `pg8000` 확인 | **미확인 (CC-05)** | `rowcount`를 못 얻으면 `UPDATE … RETURNING row_id`가 0행인지 보는 방식으로 바꾼다 [제안]. Gate ④ 1c의 첫 시험 |
 | 정의 변경 직렬화 | **`datasets` 행 잠금 하나**(advisory 잠금은 쓰지 않음, 07 §8과 같음) [제안] | 정의 변경(열·수식·검증 편집)·시작 시 뷰 재생성·재시도(05 D10)는 모두 정의 변경 진입점의 맨 앞에서 `SELECT … FOR NO KEY UPDATE`(SQLAlchemy `with_for_update(key_share=True)`; `id`가 불변이라 충분하고 `FOR UPDATE`는 `superset_datasets` 같은 FK 자식 INSERT의 KEY SHARE까지 막는다)로 그 데이터셋 행을 잡는다. 편집은 읽은 `def_version`과 `expected_version`을 비교해 다르면 `DEFINITION_VERSION_MISMATCH`, 같으면 +1. 시작 시 재생성·재시도는 정의가 안 바뀌므로 잠금만 잡고 버전은 올리지 않으며 짧은 `lock_timeout`으로 못 잡으면 실패로 남긴다. 03c X-24는 같은 효과의 `UPDATE … WHERE def_version` 가드와 advisory 잠금을 확인했고 `FOR NO KEY UPDATE` 자체는 미시험이라 1b 첫 시험 |
-| 행 쓰기 ↔ 정의 | 행 요청(C2~C4)은 dataset service 함수(잠금 + 버전 확인, 04 §5)로 `datasets` 행을 `FOR SHARE`로 잡고 `def_version`을 비교한다 [제안: 03b Y8의 정의 편집 범위 밖의 요구라 사용자 확인] | 다르면 409(열 추가 때 열려 있던 그리드 입력도 409가 됨). 잠금 순서는 항상 **`datasets` 행 → `ds_` 행 → 동적 DDL**이라 정의 변경(`FOR NO KEY UPDATE`, SHARE 보유자를 기다림)과 행 쓰기 사이에 순서 역전 교착이 없다. `FOR SHARE`는 미시험이고 연속 `FOR SHARE`로 정의 변경 대기자가 굶으면 `DEFINITION_BUSY`가 되므로 1b·1c 첫 시험에 굶음 시나리오를 포함한다 |
+| 행 쓰기 ↔ 정의 | 행 요청(C2~C4)은 dataset service 함수(잠금 + 버전 확인, 04 §5)로 `datasets` 행을 `FOR SHARE`로 잡고 `def_version`을 비교한다 [제안: 03b Y8의 정의 편집 범위 밖의 요구, 승인 03b 6-2] | 다르면 409(열 추가 때 열려 있던 그리드 입력도 409가 됨). 잠금 순서는 항상 **`datasets` 행 → `ds_` 행 → 동적 DDL**이라 정의 변경(`FOR NO KEY UPDATE`, SHARE 보유자를 기다림)과 행 쓰기 사이에 순서 역전 교착이 없다. `FOR SHARE`는 미시험이고 연속 `FOR SHARE`로 정의 변경 대기자가 굶으면 `DEFINITION_BUSY`가 되므로 1b·1c 첫 시험에 굶음 시나리오를 포함한다 |
 | `datasets.def_hash` | 마지막으로 뷰를 **성공적으로** 만든 정의의 해시(표시 이름 제외, 알고리즘은 07) | 시작 시 현재 정의의 해시와 비교해 다르면 재생성, 같으면 건너뜀(03c X-17). 실패하면 저장값이 안 바뀌어 다음 시작·재시도 때 다시 대상이 되고, 그 수가 `/health`의 `views_failed_count`(05). **`/health`의 새 필드와 실패 상세(사유·시각)는 프로세스 메모리 값이고 영속되는 것은 `def_hash` 표 값뿐**이며 상세는 로그에도 남긴다. uvicorn **worker 1개 전제**(`03a`)이고 worker를 늘리면 실패 상세를 표 필드로 옮기도록 재설계한다(07 §8) |
 
 ## 6. 마이그레이션 계획 (구현은 EW-1·FU-1 단계, 03b 3-2·4-1)
 | 항목 | 내용 | 출처·상태 |
 | --- | --- | --- |
 | db-bootstrap 사전 조건 | ① 역할 `bi_owner`·`bi_app`과 비밀번호(변수 승인됨) ② 빈 `bi_data`, **소유자 `bi_owner`** [제안: 03b에 소유자 명시 없음, X-15 구성] ③ `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`(승인됨, 반복 실행 안전) ④ `bi_owner`에 `public` CREATE **[AP-5]**(PostgreSQL 15 이후 기본 구성은 `PUBLIC`에 주지 않음, `pg16-ddl.sgml:3255`; `bi_app`의 `public` CREATE 거부는 03c X-15) | 03b 3-2, 4-1 Z0, 03c X-14·X-29 |
-| 첫 실제 revision `0002`(소단위 1a) `upgrade` | 정적 표 `users`·`teams`·`team_members` 생성 → §2 명시 GRANT → `GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app` [제안: 부여 위치] → `GRANT USAGE ON SCHEMA bi_data TO bi_readonly` → `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`. 전부 `bi_owner`가 실행하는 보간 없는 고정 SQL | 03b 4-1 Z0, 03c X-29 |
-| 이후 revision | `0003`(1b) `datasets`·`dataset_columns`(순환 FK는 `create_foreign_key`로 뒤에 추가), `0004`(1d) `formulas`·`formula_deps`, `0005`(1e) `superset_*`. 소단위마다 하나 [제안] | 04 §6 |
+| 첫 실제 revision `0002_bi_data_privileges`(권한 전용, **EW-1이 만든다**) | `GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app` → `GRANT USAGE ON SCHEMA bi_data TO bi_readonly` → `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`. 실질 `downgrade()`(REVOKE). 전부 `bi_owner`가 실행하는 보간 없는 고정 SQL | 03b 4-1 Z0, 6-4, 03c X-29 |
+| 이후 revision | `0003`(1a) `users`·`teams`·`team_members`와 §2 명시 GRANT, `0004`(1b) `datasets`·`dataset_columns`(순환 FK는 `create_foreign_key`로 뒤에 추가), `0005`(1d) `formulas`·`formula_deps`, `0006`(1e) `superset_*`. 소단위마다 하나 | 04 §6·§7-1 |
 | `downgrade()` | 실질 구현: 권한 `REVOKE`, 기본 권한 `REVOKE`, 표 역순 삭제. `bi_data` schema·동적 객체·멤버십은 건드리지 않는다(D5 의미 변경 승인). 표 삭제의 `op.drop_table`은 `DROP_APPROVED`에 사용자 승인 기록이 필요하다(`test_migrations.py`) | 03b 3-2 ㄱ, D2 안전장치 |
 | `env.py` | `target_metadata`는 `core`의 정적 `MetaData` 하나(제약 이름 규칙 지정 [제안, 일반 지식]). `bi_data`용 `MetaData`는 별개 인스턴스이고 `env.py`가 가져오지 않는다. `include_schemas=False`(기본) + 안전망 `include_name`/`include_object`로 `bi_data` 제외. `compare_type=True` 유지 | 03c X-29 (`include_schemas=True`이고 필터가 없을 때만 `ds_*`가 `drop_table`로 제안됨) |
 | 점검 | `alembic check`(DB가 head, 종료 코드 0/255/1): ① 빈 DB 성공 ② `ds_1`·`dv_1`이 있는 DB도 성공 ③ 정적 모델 열을 지우면 255 ④ `DROP_APPROVED` 규칙. 권한은 `check`가 못 잡으므로 스냅샷 비교. `heads` 개수 1개 점검. `test_migrations.py`의 `get_heads()==["0001"]` 단정 갱신, `INTENTIONAL_NOOP`은 `{"0001"}` 유지 | 03c X-29 |
@@ -126,15 +127,15 @@ Superset 열 이름 = 내부 이름 `c_<id>`(팀 열은 `team` 고정), 읽기 �
 | 열 삭제·형 변경 | FU-1 없음(§3-3). 후속에서 영향 안내 필요 | 그 열을 쓰는 저장된 차트가 데이터 오류(03c X-22 확인됨) |
 - 번호 이름은 네이티브 필터 설정의 열 선택·Explore 칩·View query 등 일부 화면에서 보인다(03c A-27 확인됨, 08 §5 안내문). 작성자가 UI에서 만든 지표의 라벨은 저장 시점의 표시 이름으로 굳어(`SUM(총매출)`) 이름을 바꿔도 질의 별칭은 그대로다(깨지지는 않음, 03c A-27). `row_id`는 Superset 전체 열 `PUT`에 포함되므로 숨기지 않고 표시 이름 "행 번호"를 붙이고 `team`은 "팀"으로 둔다 [제안]. 팀 열 이름이 같아야 값 선택 필터가 동작하고 날짜 열 이름은 통일하지 않는다(03c X-5, 03b 3-6 BY9).
 
-## 8. 승인 필요 (지금은 요청이 아님. `03b` 3-7·4-7에 승인된 것은 제외)
+## 8. 승인 상태 (`03b` 6-3)
 | 번호 | 항목 | 시점 |
 | --- | --- | --- |
-| AP-5 | db-bootstrap 고정 SQL 추가: `bi_owner`에 `public` CREATE, `bi_data` 소유자 지정(위 §6 ②, 제안) | EW-1 착수 전 |
-| AP-9 | `bi_readonly` `statement_timeout`(기준선과 다른 설정, 값 30초 제안) | 06 승인 때 / EW-1 |
-| AP-10 | `bi-review` 7-4 문구: 열에 연결된 `Identity()` 암묵 시퀀스를 "시퀀스 금지"의 예외로 명시(`row_id`가 의존). 런타임 Alembic `Operations` 허용은 7-4에 이미 있어 승인 대상이 아니다 | 06 승인 때 |
-| AP-11 | `03-migration-tool.md` D2 안전장치를 "정적 표 대상"으로 좁히는 문구 재서술(선택) | 06 승인 때 |
+| AP-5 | **승인**: db-bootstrap 고정 SQL 추가 — `bi_owner`에 `public` CREATE, `bi_data` 소유자 `bi_owner`(위 §6 ②) | 승인됨 |
+| AP-9 | **승인**: `bi_readonly` `statement_timeout` 30초(기준선과 다른 설정, 효과는 EW-1에서 확인) | 승인됨 |
+| AP-10 | **승인**: `bi-review` 7-4 문구 — 열에 연결된 `Identity()` 암묵 시퀀스를 "시퀀스 금지"의 예외로 명시(`row_id`가 의존). 런타임 Alembic `Operations` 허용은 7-4에 이미 있어 승인 대상이 아니다 | 승인됨 |
+| AP-11 | **승인·반영 완료**: `03-migration-tool.md` D2 안전장치를 "정적 표 대상"으로 좁힘 | 완료 |
 | - | revision `downgrade`의 `op.drop_table`에 필요한 `DROP_APPROVED` 기록: 기존 D2 규칙의 적용이며 새 승인이 아니다 | 각 revision 때 |
-- 이 문서는 새 환경변수·새 런타임 의존성·모델 변경을 요구하지 않는다. 열 단위 UPDATE GRANT, 제약 이름 규칙은 사용자 확인용 [제안]이다.
+- 이 문서는 새 환경변수·새 런타임 의존성·모델 변경을 요구하지 않는다. 열 단위 UPDATE GRANT, 제약 이름 규칙은 [제안]이며 `03b` 6-2로 승인됐다.
 
 ## 9. 후속 기능 단위에서 결정
 - 기준값 표(숫자·글자, 적용 시작일, 추가만), 공통 요약(지표·연결·요약 뷰), 이전 행 참조·같은 데이터셋 집계(기준 날짜 열 필수 조건이 켜짐), 참조 열(`reference` 타입), 정적 표를 읽는 뷰의 `downgrade` 막힘 규칙.

@@ -4,8 +4,8 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(04~08 초안 작성·reviewer 검토 2회 완료, 사용자 확인 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
-| ④ 기능 개발 | 대기 | - | - | - |
+| ③ MODULARIZE | **승인** (FU-1 범위) | 2026-10-11 | FU-1 범위의 04~08 승인, 합계 함수 빈 칸 전파, 지원 차트 6가지, 에이전트 모델 3개 sonnet 변경, §9-2 제안·§10 기능 축소 승인, AP-1·2·5·9·10·11·12·13·14·16 승인(AP-15는 FU-1 착수 때 요청). 상세 `03b` 6절 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` |
+| ④ 기능 개발 | 대기 (진입 전 EW-1 진행 중) | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |
@@ -68,7 +68,7 @@
 | 번호 | 항목 | 결정 | 반영 위치 |
 | --- | --- | --- | --- |
 | 1 | 사후 승인 | BAT 영문(ASCII) 변환, frontend·postgres·backend 포트의 `127.0.0.1` 게시, 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`) 승인. 웹서버에서는 메인 플랫폼 프록시 위치에 따라 `FRONTEND_HOST`를 바꿔야 할 수 있다는 점을 배포 협의 목록에 추가. **하네스 규칙 신설:** 새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다 | `docs/deploy-coordination.md` 20번, `CLAUDE.md`, `bi-wizard-dev`, 에이전트 정의 |
-| 2 | 에이전트 모델 | 정의 파일은 현재대로 유지(env-engineer, qa-engineer, frontend-dev는 haiku). 호출 시 모델 변경은 사전 승인 없이 하지 않는다. 이번 Gate ② 호출 때 바꾼 에이전트와 사유는 보고했다. **Gate ④ 시작 전에 모델 판단을 다시 한다** | 아래 "모델 변경 기록", `CLAUDE.md` |
+| 2 | 에이전트 모델 | 정의 파일은 유지했다(당시 env-engineer, qa-engineer, frontend-dev는 haiku). **2026-10-11 Gate ③ 승인 때 세 에이전트를 sonnet으로 바꾸는 것을 승인했다(`CLAUDE.md` 변경 이력).** 호출 시 모델 변경은 사전 승인 없이 하지 않는다. 이번 Gate ② 호출 때 바꾼 에이전트와 사유는 보고했다. **Gate ④ 시작 전에 모델 판단을 다시 한다** | 아래 "모델 변경 기록", `CLAUDE.md` |
 | 3 | Embedded guest 역할 | 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다. **이 금지는 임베딩 대시보드를 보는 guest 역할에만 적용(2026-10-11 3라운드 확정)**, 작성자 역할은 Gamma 복사본 + schema 보조 역할 | Gate ② 결과 표, Gate ③ 인계, `bi-review` |
 | 4 | 로고 이중 접두 | 그대로 둔다(알려진 문제). 수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다 | `docs/deploy-coordination.md` 13번 |
 | 5 | Scarf | `superset_config.py`의 CSP에서 Scarf 호스트 제거, 효과 없는 `SCARF_ANALYTICS` 변수 삭제. 변경 후 Superset 화면과 임베딩(Gamma 대조 조건) 재확인 | `superset/superset_config.py`, `compose.yml`, `docs/deploy-coordination.md` 18번 |

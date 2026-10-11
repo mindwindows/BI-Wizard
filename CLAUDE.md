@@ -14,7 +14,7 @@
 
 **핵심 규칙**
 - 미결정 사항(브리프 5절)은 사용자에게 묻고, 답을 받은 뒤 진행한다.
-- **새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** (에이전트 정의 모델 유지: env-engineer·qa-engineer·frontend-dev는 haiku, 호출 시 변경 금지)
+- **새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** (에이전트 정의 모델: 모든 에이전트가 sonnet이다. 2026-10-11 사용자 승인으로 env-engineer·qa-engineer·frontend-dev를 haiku에서 sonnet으로 바꿨다. 호출 시 모델 변경은 금지)
 - 파괴적 명령(`.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`)은 실행하지 않는다. 필요하면 먼저 묻는다.
 - `main`에 직접 커밋하거나 푸시하지 않는다.
 - 클라우드 세션은 Linux이므로 BAT 파일은 작성만 하고 실행 검증은 사용자에게 요청한다.
@@ -33,3 +33,5 @@
 | 2026-10-11 | Gate ③ 3라운드 결정 반영(`docs/decisions/03b` 3절): 앱 계정 분리(`bi_owner`/`bi_app`, `POSTGRES_USER` 의미 축소는 운영 가이드와의 의도적 차이), D3 예외 2 문구를 비밀번호 리터럴 범위로 일반화(식별자 보간 금지 유지), D5·B10 의미 변경, 새 변수 `POSTGRES_APP_PASSWORD`·`POSTGRES_OWNER_PASSWORD`·`SUPERSET_SERVICE_USER`·`SUPERSET_SERVICE_PASSWORD`와 `httpx` 승인, Gamma 금지는 guest 역할에만 적용(작성자 역할은 Gamma 복사본), 미결정 7·9·10·11번 결정 | `.claude/skills/bi-review`, `env-bootstrap`, `backend-fastapi`, `AGENTS.md`, `docs/` | 3라운드 사용자 결정(2026-10-11) 반영 |
 | 2026-10-11 | Gate ③ 4라운드 결정 반영(`docs/decisions/03b` 4절): guest 역할 `bi_guest`와 `superset-init` 생성·`GUEST_TOKEN_VALIDATOR_HOOK`·발급 전용 Superset 계정 변수 2개·`APP_UPLOAD_MAX_MB` 승인, db-bootstrap `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE` 한 줄 승인, 브리프 4.7 이탈(pandas 미사용), `bi-review` 7-4 런타임 동적 DDL 규칙(내장 구성요소만·`text()` 금지·객체 종류 허용 목록) 추가, 기존 엑셀 이관 전처리 도구 범위 제외, 합성 샘플 `docs/samples/` | `.claude/skills/bi-review`, `backend-fastapi`, `env-bootstrap`, `docs/` | 4라운드 사용자 결정(2026-10-11) 반영 |
 | 2026-10-11 | Gate ③을 첫 기능 단위(FU-1) 범위로 축소(`docs/decisions/03b` 5절): 04~08은 FU-1 필요 범위만 약 800줄 이내, 후속 항목은 문서 끝 절에 나열, 인증 스텁 시작 거부 차단 규칙 `bi-review` 7-5 추가, 브리프 4.3 역할별 열 편집 권한 기능 축소 기록, EW는 FU-1 필요 항목만 | `.claude/skills/bi-review`, `docs/` | FU-1 범위 축소 사용자 결정(2026-10-11) 반영 |
+| 2026-10-11 | 에이전트 모델 변경(사전 승인 AP-17): `env-engineer`·`qa-engineer`·`frontend-dev` 정의 파일 `haiku` → `sonnet`. 사유: Gate ②에서 권한·compose 의존 순서·하위 경로 프록시처럼 복잡한 환경 작업이 haiku로는 부족해 호출 때 sonnet으로 올려 썼던 점, 권한 설정(계정 분리, 권한 매트릭스)의 보안 영향, FU-1 화면 복잡도(입력 그리드, 붙여넣기 파서, 수식 편집기, 3분할 작업공간). 비용 영향은 호출 수에 비례하며 정량 근거는 없음 | `.claude/agents/env-engineer.md`, `qa-engineer.md`, `frontend-dev.md`, `CLAUDE.md` | Gate ③ 초안 검토 결정(2026-10-11) |
+| 2026-10-11 | Gate ③ 승인(FU-1 범위): 04~08 "승인", AP-1·2·5·9·10·11·12·13·14·16 승인(`docs/decisions/03b` 6절). `bi-review` 7-1 D2를 "정적 표 대상"으로 좁힘, 7-2에 guest 권한 목록 파일 규칙·서버의 입장권 직접 서명 금지 추가, 7-4에 가상 데이터셋 SQL 고정 규칙과 소유 표에 연결된 `Identity()` 시퀀스 예외 추가, 7-5에 `AUTH_STUB_ENABLED` 기본 꺼짐 + `APP_ENV` 명시·허용 목록 규칙 반영 | `.claude/skills/bi-review`, `docs/` | Gate ③ 승인 및 AP 승인(2026-10-11) 반영 |

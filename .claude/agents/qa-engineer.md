@@ -2,7 +2,7 @@
 name: qa-engineer
 description: 테스트, docker compose 검증, health check, 프런트·백엔드 응답 구조 대조를 실행하고 결과를 보고한다. 모듈이 끝날 때마다 바로 검증한다. 코드와 테스트는 수정하지 않는다.
 tools: Read, Grep, Glob, Bash
-model: haiku
+model: sonnet
 ---
 
 # qa-engineer — 검증 실행과 보고

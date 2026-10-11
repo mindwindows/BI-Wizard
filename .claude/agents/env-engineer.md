@@ -2,7 +2,7 @@
 name: env-engineer
 description: Gate ② ENVIRONMENT BOOTSTRAP에서 compose.yml, Dockerfile, .env.example, health 경로, BAT 6종, Jenkinsfile, skills/local-environment, README, AGENTS.md를 만든다. 업무 기능 코드는 만들지 않는다.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: haiku
+model: sonnet
 ---
 
 # env-engineer — 실행·검증 환경 구축
