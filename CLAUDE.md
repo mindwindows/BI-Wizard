@@ -14,7 +14,7 @@
 
 **핵심 규칙**
 - 미결정 사항(브리프 5절)은 사용자에게 묻고, 답을 받은 뒤 진행한다.
-- **새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** (에이전트 정의 모델: 모든 에이전트가 sonnet이다. 2026-10-11 사용자 승인으로 env-engineer·qa-engineer·frontend-dev를 haiku에서 sonnet으로 바꿨다. 호출 시 모델 변경은 금지)
+- **새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경만 적용 후 보고를 허용하며, 보고서에 "적용 후 보고 항목" 목록으로 따로 표시한다. (에이전트 정의 모델: 모든 에이전트가 sonnet이다. 2026-10-11 사용자 승인으로 env-engineer·qa-engineer·frontend-dev를 haiku에서 sonnet으로 바꿨다. 호출 시 모델 변경은 금지)
 - 파괴적 명령(`.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`)은 실행하지 않는다. 필요하면 먼저 묻는다.
 - `main`에 직접 커밋하거나 푸시하지 않는다.
 - 클라우드 세션은 Linux이므로 BAT 파일은 작성만 하고 실행 검증은 사용자에게 요청한다.
@@ -36,3 +36,4 @@
 | 2026-10-11 | 에이전트 모델 변경(사전 승인 AP-17): `env-engineer`·`qa-engineer`·`frontend-dev` 정의 파일 `haiku` → `sonnet`. 사유: Gate ②에서 권한·compose 의존 순서·하위 경로 프록시처럼 복잡한 환경 작업이 haiku로는 부족해 호출 때 sonnet으로 올려 썼던 점, 권한 설정(계정 분리, 권한 매트릭스)의 보안 영향, FU-1 화면 복잡도(입력 그리드, 붙여넣기 파서, 수식 편집기, 3분할 작업공간). 비용 영향은 호출 수에 비례하며 정량 근거는 없음 | `.claude/agents/env-engineer.md`, `qa-engineer.md`, `frontend-dev.md`, `CLAUDE.md` | Gate ③ 초안 검토 결정(2026-10-11) |
 | 2026-10-11 | Gate ③ 승인(FU-1 범위): 04~08 "승인", AP-1·2·5·9·10·11·12·13·14·16 승인(`docs/decisions/03b` 6절). `bi-review` 7-1 D2를 "정적 표 대상"으로 좁힘, 7-2에 guest 권한 목록 파일 규칙·서버의 입장권 직접 서명 금지 추가, 7-4에 가상 데이터셋 SQL 고정 규칙과 소유 표에 연결된 `Identity()` 시퀀스 예외 추가, 7-5에 `AUTH_STUB_ENABLED` 기본 꺼짐 + `APP_ENV` 명시·허용 목록 규칙 반영 | `.claude/skills/bi-review`, `docs/` | Gate ③ 승인 및 AP 승인(2026-10-11) 반영 |
 | 2026-10-11 | EW-1 구현 반영: 앱 계정 분리(`bi_owner`/`bi_app`) 완료로 "Gate ② 한정 구성"·"구현은 Gate ④ 진입 전" 문구를 구현 완료 상태로 갱신하고, `bi-review` 앱 계정 항목을 "backend·migrate 슈퍼유저 접속 차단"으로 확정 | `.claude/skills/bi-review`, `env-bootstrap`, `backend-fastapi`, `.claude/agents/env-engineer.md` | EW-1 reviewer 점검(낡은 문구 지적) 반영 |
+| 2026-10-11 | 사전 승인 규칙 다듬기: 사전 승인 필수 = 새 환경변수·새 의존성·운영 가이드 기준선과 다른 설정·권한을 넓히는 변경·에이전트 모델 변경. 적용 후 보고 허용 = 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경(보고서에 "적용 후 보고 항목" 목록 필수). EW-1에서 목록 밖에 추가한 항목(`hide_input_in_errors`, `REVOKE` 2줄과 `bi_data` 소유자 지정, `log_min_error_statement` 설정, `AUTH_STUB_ENABLED` compose 필수 처리, `scripts/test-ci-validate-env.sh`)을 소급 승인 | `CLAUDE.md`, `.claude/skills/bi-wizard-dev`, `bi-review`, `.claude/agents/env-engineer.md`, `backend-dev.md`, `frontend-dev.md`, `reviewer.md` | 사용자 결정(2026-10-11, EW-1 결과 검토) |

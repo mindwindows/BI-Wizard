@@ -272,3 +272,21 @@ F 앱 계정 분리, D Explore 제공 방식(7번), W11 Superset 데이터셋 �
 ### 6-4. Gate ③ 승인과 다음 단계
 - **04~08을 "승인"** 으로 바꾸고 `gate-status.md`의 Gate ③을 **"승인"** 으로 갱신한다.
 - **다음 단계는 EW-1만 진행**한다: 계정 분리, db-bootstrap, compose 계정 연결, 마이그레이션 틀, 스텁 스위치·운영 판별, 관련 문서·환경 파일·CI 갱신을 env-engineer가 구현하고 qa-engineer가 검증한다(검증 항목: backend·migrate가 슈퍼유저로 접속하지 않음, `bi_app` 권한 매트릭스(X-15 기준), `statement_timeout` 효과, `alembic check`·왕복 테스트, 스텁 스위치와 운영 환경 시작 거부, 볼륨이 이미 있는 상태에서 재기동 시 db-bootstrap 멱등성, 로그의 비밀번호 0건). reviewer가 D3 예외 범위와 승인 목록 밖 변경 여부를 확인한다. **EW-1 결과와 검증 결과를 보고하고 멈춘다. EW-3 이후는 그 뒤에 진행한다.**
+
+## 7. EW-1 결과 검토 결정 (2026-10-11, 사용자)
+### 7-1. EW-1 목록 밖 추가 항목 소급 승인
+env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인한다. 새 환경변수나 새 의존성은 없고, 권한을 줄이거나 비밀·로그 노출을 막는 것과 호환 목적이다.
+- pydantic `hide_input_in_errors=True`(검증 오류 메시지에 비밀번호 원문이 섞이는 것을 막음)
+- `roles.sql`: `REVOKE ALL ON SCHEMA bi_data FROM PUBLIC`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `ALTER SCHEMA bi_data OWNER TO bi_owner`
+- `roles.sql`: `SET LOCAL log_min_error_statement = panic`(오류 로그에 비밀번호 문장이 남는 것을 막음)
+- `AUTH_STUB_ENABLED`의 compose 필수 처리(`${…:?}`). 기존 `.env`는 변수 3개(`AUTH_STUB_ENABLED`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`)를 추가해야 기동된다.
+- `scripts/test-ci-validate-env.sh`(`ci-validate-env.sh` 네거티브 시험, Jenkinsfile Env Validation 단계에서 실행)
+
+### 7-2. 사전 승인 규칙 다듬기
+- **사전 승인 필수:** 새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경.
+- **적용 후 보고 허용:** 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경. 보고서에 "적용 후 보고 항목" 목록(변경 내용, 위치, 이유, 되돌리는 방법)으로 반드시 따로 표시한다. 보안 강화라도 새 환경변수·새 의존성이면 사전 승인이 필요하다.
+- 반영: `CLAUDE.md`(핵심 규칙과 변경 이력), `.claude/skills/bi-wizard-dev`, `bi-review`(4번), `.claude/agents/env-engineer.md`, `backend-dev.md`, `frontend-dev.md`, `reviewer.md`.
+
+### 7-3. 세션 인계
+이 세션은 EW-1까지로 마무리한다. EW-3부터는 새 세션에서 시작하며 인계 내용은 `docs/gate-status.md` 맨 위 "다음 세션 인계" 절에 있다. 필요한 실험 기록은 `docs/research/`로 옮겼다.
+

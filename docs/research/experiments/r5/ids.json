@@ -1,0 +1,22 @@
+{
+ "svc_role": 6,
+ "svc_uid": 2,
+ "sch_pvm": 236,
+ "svc_perms": [
+  11,
+  12,
+  236,
+  192
+ ],
+ "author_copy": 7,
+ "author_schema": 8,
+ "author_uid": 3,
+ "ds": 1,
+ "scratch": 2,
+ "chart_table": 1,
+ "chart_bar": 2,
+ "dash": 1,
+ "scratch2": 3,
+ "admin_ds": 4,
+ "chart_ui": 3
+}

@@ -1,5 +1,39 @@
 # Gate 진행 상태
 
+## 다음 세션 인계 (2026-10-11 작성, 이 세션 종료 시점)
+
+### 현재 상태
+- **브랜치:** `harness/setup`(PR mindwindows/BI-Wizard#2). `main`에 직접 커밋·푸시하지 않는다. 새 PR은 만들지 않고 푸시로 갱신한다.
+- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 785줄이다. **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
+- **EW-1(앱 계정 분리) 완료·검증 통과**(QA 11항목 통과, reviewer 차단 0건, 아래 "EW-1 결과"). 목록 밖 추가 항목은 소급 승인됐다(2026-10-11, `CLAUDE.md` 변경 이력).
+- 코드 상태: backend는 `bi_app`, migrate는 `bi_owner`로만 접속한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. 인증 스텁 엔드포인트와 업무 기능 코드는 없다(`AUTH_STUB_ENABLED` 시작 거부 논리만 있음).
+
+### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
+1. **EW-3 Superset 계정:** 서비스 계정 변수 `SUPERSET_SERVICE_USER`/`_PASSWORD`(승인됨)와 발급 전용 계정 변수 2개(이름은 후보 `SUPERSET_GUEST_ISSUER_USER`/`_PASSWORD`, **EW-3에서 확정하며 새 변수이므로 적용 전 승인**), `superset-init` 확장(`sync_permissions` → 서비스 역할 4권한 → 발급 역할 → 작성자 역할 `bi_author`[Gamma 복사본]+`bi_author_schema` → 계정 멱등 생성), backend→Superset 내부 주소(compose 서비스 이름 코드 상수)와 `SUPERSET_APP_ROOT` 전달(AP-12).
+2. **EW-4 guest 역할:** `bi_guest` 생성(권한 목록 파일), `GUEST_TOKEN_VALIDATOR_HOOK`, 부정 시험, 하위 경로 + Embedded 재검증.
+3. **EW-5 문서·하네스**, **EW-6 통합 검증**(QA), **EW-7 reviewer 점검**. 계획표는 이 문서의 "FU-1용 Gate ④ 전 환경 작업(EW) 계획".
+4. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차.
+5. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
+
+### 미결 항목
+- **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
+- **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`docs/deploy-coordination.md` 6번 확인 후). BAT는 `docs/windows-bat-verification.md` 기준으로 사용자 PC 검증을 요청한다(EW-1 이후 Secret 8개·`AUTH_STUB_ENABLED` 추가 반영됨).
+- **운영 DB 슈퍼유저 문제:** db-bootstrap은 슈퍼유저 접속이 필요하다(역할·스키마·메타 DB 생성). 관리형 운영 DB에서 줄 수 없으면 DBA가 한 번 수행하는 대안이 필요하다(`deploy-coordination.md` 29번). 운영 DB `log_statement`가 `ddl`/`all`이면 비밀번호가 서버 로그에 남을 수 있어 확인한다. 35번(첫 관리자 생성 명령을 운영 서버에서 실행 가능한지), 36번(`AUTH_STUB_ENABLED` 운영 설정)도 운영자 협의 항목이다.
+- **미검증 항목:** `FOR NO KEY UPDATE`·`FOR SHARE` 잠금과 굶음 시나리오(1b·1c 첫 시험), `ON CONFLICT DO NOTHING RETURNING`과 pg8000 `rowcount`, 실제 엑셀 클립보드 형식, 일부 차트 유형의 `bi_guest` 표시(P5: 6가지를 FU-1e에서 직접 시험), `superset-init` 구현 방법(A-22·A-26), Superset 경유 `statement_timeout`, 비밀번호 변경 후 Superset 연결 유지, 정적 표 권한 매트릭스(첫 실제 표 revision `0003` 이후 실제 표로 재확인).
+- **04~08 3차 검토 미실시:** 2차 검토 반영분은 architect 자체 정합성 확인만 했다. `skills/admin-cleanup/SKILL.md`는 설계 문서 기준 초안이며 FU-1b·1d 구현 뒤 실제 DB로 검증해야 한다.
+- 합성 샘플(`docs/samples/`) 기준 수치다. 실제 팀 데이터로 검증한 것이 아니다.
+
+### 주의 사항
+- **에이전트 모델:** 정의 파일(`.claude/agents/*.md`)대로 쓴다. 현재 7개 모두 sonnet이며 호출 시 `model`을 바꾸지 않는다. 이전 세션에서는 하네스가 정의를 캐시해 env-engineer가 haiku로 실행돼 중단하고 정의와 같은 `sonnet`을 명시해 다시 호출했다. 새 세션에서는 정의가 그대로 적용돼야 하며 호출 정보에 실제 모델이 나온다. 다르면 사용자에게 알린다.
+- **사전 승인 규칙(2026-10-11 다듬음):** 사전 승인 필수 = 새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경. 적용 후 보고 허용 = 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경이며, 보고서에 "적용 후 보고 항목" 목록을 따로 표시한다. 상세는 `CLAUDE.md`, `.claude/skills/bi-wizard-dev/SKILL.md`.
+- **파괴적 명령 금지:** `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`, `docker volume prune`, 일괄 삭제. 시험 정리는 이름을 명시한 `docker rm`/`docker volume rm`만 쓰고, 볼륨 `bi-wizard_postgres_data`와 이미지는 건드리지 않는다. QA는 사용자의 `.env`를 만들거나 바꾸지 않고 `_workspace/qa/`의 임시 env 파일과 전용 compose 프로젝트명을 쓴다. 비밀값은 문서·로그에 쓰지 않는다.
+- **Docker:** 클라우드 세션에서 데몬이 꺼져 있으면 `dockerd`를 백그라운드로 직접 띄운다(`service docker start`는 ulimit 오류가 난 적 있음). BAT는 작성만 하고 실행 검증은 사용자에게 요청한다.
+- **작업 폴더:** `_workspace/`는 git 제외이고 컨테이너와 함께 사라진다. 필요한 실험 기록은 `docs/research/`로 옮겼다(README 참조). 옛 문서가 가리키는 `_workspace/gate3/facts*.md`, `round*-options.md`는 보관하지 않았다. 새 시험은 `_workspace/`에서 하고 남길 것만 docs로 옮긴다.
+- **커밋 규칙:** 한국어 메시지, 해당 Gate/EW 명시, 끝에 Co-Authored-By와 Claude-Session 줄(시스템 안내대로). `main`은 건드리지 않고 `harness/setup`에만 푸시한다.
+- **라이선스:** 운영 런타임 의존성은 허용형(MIT·BSD·Apache·PSF)만. 개발·테스트 전용과 업스트림 이미지 내부의 LGPL·MPL은 수정·재배포하지 않으면 허용. GPL·AGPL·EUPL·비오픈소스는 금지. Gamma/`PUBLIC_ROLE_LIKE` 금지는 guest 역할에만 적용(작성자 역할은 Gamma 복사본).
+- **먼저 읽을 문서:** `CLAUDE.md` → `docs/project-brief.md` → `docs/decisions/03b`(6절)·`03c` → `04~08` → `AGENTS.md`, `skills/local-environment/SKILL.md`.
+
+
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |

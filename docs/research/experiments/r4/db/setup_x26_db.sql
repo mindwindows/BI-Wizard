@@ -1,0 +1,14 @@
+\set ON_ERROR_STOP on
+CREATE SCHEMA bi_data AUTHORIZATION bi_owner;
+GRANT CREATE ON SCHEMA public TO bi_owner;
+SET ROLE bi_owner;
+GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app;
+GRANT USAGE ON SCHEMA bi_data TO bi_readonly;
+CREATE TABLE public.t (id int PRIMARY KEY, v text);
+INSERT INTO public.t VALUES (1,'a'),(2,'b');
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.t TO bi_app;
+RESET ROLE;
+GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE;
+SET ROLE bi_owner;
+ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly;
+RESET ROLE;

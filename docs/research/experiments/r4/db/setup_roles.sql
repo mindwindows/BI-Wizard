@@ -1,0 +1,6 @@
+\set ON_ERROR_STOP on
+CREATE ROLE bi_owner LOGIN PASSWORD 'dummy_owner';
+CREATE ROLE bi_app LOGIN PASSWORD 'dummy_app';
+CREATE ROLE bi_readonly LOGIN PASSWORD 'dummy_ro';
+CREATE DATABASE x26 OWNER postgres;
+CREATE DATABASE x29 OWNER postgres;
