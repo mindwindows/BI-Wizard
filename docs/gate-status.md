@@ -10,13 +10,18 @@
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |
 | --- | --- | --- | --- |
-| 1 | Azure OpenAI 항목 처리 | 운영자 확인 중 | - (사용자가 웹서버 운영자에게 문의 중. 답이 나올 때까지 환경변수 이름은 유지하고 "미결정 1번" 주석을 달며, Environment Ready의 Azure OpenAI 검증 경로는 "보류") |
+| 1 | Azure OpenAI 항목 처리 | 결정됨(제외) | 제외 (2026-10-11, 사용자 결정). `.env.example`에서 Azure OpenAI 변수를 빼고 `/health/azure-openai`는 만들지 않으며, Environment Ready 체크리스트의 해당 항목은 "해당 없음" |
 | 2 | 수식 범위 첫 버전 | 미결정 | - (Gate ③에서 질문) |
 | 3 | 새 데이터셋 생성 권한 | 미결정 | - (Gate ③에서 질문) |
 | 4 | 팀 웹서버 Superset 운영 조건 | 운영자 확인 중 | - (사용자가 웹서버 운영자에게 문의 중. 확인 전까지 Superset(및 캐시 서비스)은 로컬 `compose.yml`에만 포함하고 팀 웹서버 구성은 확정하지 않음) |
 | 5 | 디자인 방향 | 결정 | C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형) (2026-10-11, Gate ①) |
 | 6 | 수식 미리보기·자동완성을 위한 저장 전 수식 평가 경로 | 미결정 | - (Gate ③에서 결정) |
 | 7 | Superset 차트 작성 화면(Explore)을 포털에서 어떻게 제공할지 | 미결정 | - (Gate ③에서 결정. Embedded SDK로 가능한 범위를 공식 문서로 확인한 뒤 결정) |
+
+## Gate ② 진행 메모
+- 마이그레이션 도구 비교안(architect)은 `_workspace/gate2/migration-tool-options.md`에 있다(승인 전 초안, Git 제외). **사용자가 D1~D7을 검토 중이다.** 결정이 나오기 전에는 env-engineer ⇄ qa-engineer 단계를 시작하지 않는다.
+  - D1 도구, D2 동적 객체 분리, D3 마이그레이션 raw SQL 허용 범위, D4 실행 위치, D5 되돌리기 정책, D6 CI 빈 DB 검증 방식, D7 Superset 메타데이터 DB 분리
+- 미결정 1번이 "제외"로 확정되어 Azure OpenAI 변수·Health 경로·체크리스트 항목을 만들지 않는다. 미결정 4번은 운영자 확인 중이며 Superset은 로컬 `compose.yml`에만 포함한다.
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.

@@ -165,7 +165,11 @@ Environment Ready 체크리스트(전부 통과 시 기능 개발 시작):
 
 ## 5. 미결정 사항 (임의로 정하지 말 것)
 
-1. **Azure OpenAI 항목 처리**: 운영 가이드의 `.env.example`·Health Check(`/health/azure-openai`)·체크리스트에 Azure OpenAI가 포함되어 있으나, 이 프로젝트는 운영 중 LLM을 쓰지 않는다. 해당 항목을 (a) 빈 변수·N/A 처리로 남길지, (b) 제외할지 **웹서버 운영자 확인 후** 결정.
+1. **Azure OpenAI 항목 처리**: 운영 가이드의 `.env.example`·Health Check(`/health/azure-openai`)·체크리스트에 Azure OpenAI가 포함되어 있으나, 이 프로젝트는 운영 중 LLM을 쓰지 않는다. 해당 항목을 (a) 빈 변수·N/A 처리로 남길지, (b) 제외할지 **웹서버 운영자 확인 후** 결정. → **결정됨 (제외, 2026-10-11, 사용자 결정)**:
+   - `.env.example`에서 Azure OpenAI 변수(`AZURE_OPENAI_*`)를 뺀다.
+   - `/health/azure-openai`는 만들지 않는다.
+   - Environment Ready 체크리스트의 "Azure OpenAI 검증 경로" 항목은 **"해당 없음"** 으로 처리한다.
+   - 운영 가이드의 기본 구성에서 벗어나는 의도적 차이다. 이후 LLM을 쓰게 되면 사용자 승인을 받아 다시 논의한다.
 2. **수식 범위의 첫 버전**: 같은 행 안의 계산만 / 다른 표 참조(VLOOKUP류)까지 / 집계(SUMIF·롤업)까지. 사용자는 "라이선스 문제없이 가능한지"를 먼저 확인했고, 난이도는 추후 검토하기로 했다.
 3. **새 데이터셋 생성 권한**: 편집자 전원 / 관리자(또는 팀별 담당자)로 제한.
 4. **팀 웹서버의 Superset 운영 조건**: Superset 사용은 확정됐다. 다만 운영 가이드의 기본 서비스 구성은 postgres/backend/frontend이므로, 팀 웹서버에서 Superset(및 캐시용 Redis/Valkey)을 추가 서비스로 띄울 수 있는지, 포트·도메인·리소스 조건은 어떤지 **웹서버 운영자 확인**이 필요하다. 확인 전까지는 로컬 `compose.yml`에 Superset 서비스를 포함해 개발한다.
