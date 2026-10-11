@@ -219,3 +219,9 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **옵션 비교안:** `_workspace/gate3/round3-options.md` (F 앱 계정, D Explore 제공과 팀 필터 기본값, W11, 9, 10, 11, 실험이 바꾸는 이전 결정 표, 질문 Y1~Y13, 기본값 BY1~BY11). reviewer가 2회 검토했다. 사용자 결정은 아직 없다.
 - **미승인 실험 후보:** X-14~X-24(권한 부여 방식, 계정별 권한 매트릭스, Superset 일반 화면 iframe, 작성자 역할, 팀 필터 주소 지정, 서버의 Superset 등록 흐름, 삭제 후 남는 것, 동시 편집 DB 동작 등). 질문 Y13에서 승인 여부를 묻는다.
 - **상태:** 3라운드 질문 보고 후 사용자 결정 대기.
+
+### Gate ③ 4라운드 준비 (2026-10-11)
+- **사실 근거:** 새 사실 확인은 하지 않고 0라운드(Q9~Q12, Q1~Q8, Q16~Q20)와 3라운드(Q46~Q51) 사실, 3라운드 실험(03c)을 재사용했다. 상태 표기("부분 확인", 추정)는 그대로 옮겼다. 추가로 메인이 프로젝트 backend 이미지(SQLAlchemy 2.1.4)에서 `sqlalchemy.sql.ddl.CreateView`/`DropView`/`CreateTableAs`의 존재를 import로 확인했다(2라운드 E-9의 "내장 구성요소 부재" 전제 중 CREATE VIEW 부분이 바뀜, GRANT 구성자는 별도). 확인 후보 A-18~A-26은 researcher 확인 대기.
+- **옵션 비교안:** `_workspace/gate3/round4-options.md` (G guest 역할 권한, I guest token 발급·RLS, J 수식 속 글자 상수와 `CREATE VIEW`, H 업로드 한도, 인계 설계 (a)~(g), 3라운드 후속 재질문 Z0(Y1 ㄴ)·Z13(Y3 (다))·Z14(Y7), 질문 Z1~Z12, 기본값 BZ1~BZ20). reviewer가 1회 검토했고 지적을 반영했다. 사용자 결정은 아직 없다.
+- **미승인 실험 후보:** X-25(guest 역할 권한 이분 탐색), X-26(글자 상수 렌더링), X-27(가져오기 한도), X-28(입장권 발급 방식), X-29(`alembic check`·왕복 테스트 틀). 사용자 자료 요청: U-1(Excel 클립보드 샘플), U-2(익명화한 엑셀 샘플).
+- **상태:** 4라운드 질문 보고 후 사용자 결정 대기.
