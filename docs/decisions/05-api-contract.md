@@ -16,7 +16,7 @@
 | 상태 코드 | 400 형식 오류 / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 502·503 Superset 불가 / 500 `INTERNAL_ERROR`(상세는 로그에만) | BK3 [미답] |
 | 목록 | 쿼리 `limit`(기본 50, 최대 200)·`offset`, 응답 `{items, total, limit, offset}`. 그리드의 부분 로딩은 AG Grid Community 지원 확인 뒤 적용(Enterprise 방식 금지) | BK4 [미답] |
 | 동시성 | 정의를 바꾸거나 행을 쓰는 요청은 `expected_version`(읽은 `def_version`)을 싣는다. 칸 수정은 칸마다 `expected`(이전 값, 빈 칸 `null`)를 싣는다. 이미 같은 값이면 200. 모든 쓰기 성공 응답에 새 `def_version` | 03b 3-4 Y8, 06 §5, 03c X-24 |
-| 충돌 | HTTP 409 + 코드: `CELL_CONFLICT`·`PASTE_CONFLICT`·`DEFINITION_VERSION_MISMATCH`(04 후보) + `PERIOD_CONFLICT` **[제안, 04 A-3 추가 필요]**. `details`는 §3 표 | BK6 [미답] |
+| 충돌 | HTTP 409 + 코드: `CELL_CONFLICT`·`PASTE_CONFLICT`·`DEFINITION_VERSION_MISMATCH`(04 후보) + `PERIOD_CONFLICT` **[제안, 04 A-3에 반영됨]**. `details`는 §3 표 | BK6 [미답] |
 | 계약 변경 | 필드·엔드포인트 추가는 허용. 이름·타입·의미·코드·권한의 변경·삭제는 **계약 변경**: 변경 전후 비교표를 만들어 사용자 승인 → 이 문서, backend 스키마, 프런트 훅, 시험을 한 번에 고치고 reviewer가 대조 | `modularize` |
 
 ### 공통 형태
@@ -24,7 +24,7 @@
 | --- | --- |
 | Column | `{id, display_name, type, kind, required, rules, tag, position}`. `rules`: number `{min, max, decimals}` / text `{max_length}` / date `{min, max}` / choice `{options[]}` (06 §3-2). 계산 열(`kind=formula`)의 `type`은 결과 형 |
 | Dataset | `{id, team_id, name, date_unit, base_date_column_id, status, def_version, created_by{id, display_name}, created_at}`. 상세는 `team{id, code, name}`, `columns[Column]`, `permissions{define, enter}` 추가 |
-| Row | `{row_id, cells{"<column_id>": 값 또는 null}, errors{"<column_id>": "E1"}}`. 계산 열 칸은 값 `null` + `errors`로 오류 칸과 미입력을 구별한다(`errors`에 있으면 오류 칸). 구현 구조 (가)·(나)는 06 §3-4가 정하며 응답 모양은 같다 |
+| Row | `{row_id, cells{"<column_id>": 값 또는 null}, errors{"<column_id>": "E1"}}`. 계산 열 칸은 값 `null` + `errors`로 오류 칸과 미입력을 구별한다(`errors`에 있으면 오류 칸). 오류 판정 구조(07 §3-1 E-A 제안, 대안 판정 SELECT)와 무관하게 응답 모양은 같다 |
 
 ## 2. 엔드포인트
 ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식·점검, E=1e Superset). 모듈·Skill은 04 §2·§6. "오류"는 §1 공통(401·403·404·500)을 뺀 주요 코드다.
@@ -80,10 +80,10 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | --- | --- | --- | --- | --- | --- |
 | E1 | GET `/superset/datasets` | 읽기 | 목록 | 200 `{dataset_id, superset_name, sync_status, synced_at, last_error}` 목록. 등록 행이 없는 데이터셋은 `pending`(04 A-3). `last_error`는 관리자에게만, 다른 사용자는 `null` [제안: 06 §4-1은 동기 현황을 관리자로 두었으나 04 S2 목록이 상태 열을 가짐] | - |
 | E2 | POST `/superset/sync` | 관리자 | `{dataset_ids?}` (생략 = `pending`·`failed` 전부) | 202 `{accepted[dataset_id]}`. 결과는 E1로 확인. Superset 불가가 다른 API를 막지 않는다(08 §2-1) | 404 |
-| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 확인 필요] | - |
+| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 확인 필요]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - |
 | E4 | POST `/dashboards` | 관리자 | `{name, embedded_uuid}` (관리자가 Superset에서 임베드를 켜고 받은 번호를 수동 입력) | 201 dashboard | 409 `ALREADY_EXISTS`, 422(uuid 형식) |
 | E5 | PATCH `/dashboards/{id}` | 관리자 | `{name?, is_active?}` (uuid 불변. 해제는 `is_active=false`, Superset 임베드는 관리자가 따로 끈다) | 200 dashboard | 404 |
-| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4) | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
+| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표가 아니라 Superset 쪽 임베드 설정으로 확인하므로 오타 uuid는 Superset이 거부해 502가 된다 | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
 
 ### 2-6. 상태 확인 · 개발·시험 전용
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
@@ -128,7 +128,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ## 5. 프런트 설정과 훅
 - `config.js`/`config.ts`는 **FU-1에서 변경하지 않는다**(새 변수 없음). Superset 새 창 링크는 기존 `supersetRoot`를 쓴다. `APP_UPLOAD_MAX_MB`는 가져오기 단위로 이월(03b 5-4). 훅은 위 ID 단위로 만들고 오류는 `error.code`로 분기한다.
 
-## 6. 승인 필요 (지금은 요청이 아님)
+## 6. 승인 필요 (지금은 요청이 아님. 통합 번호는 04 §9-1: 이 문서의 AP-1 = 통합 AP-13, AP-2 = 통합 AP-14)
 | 번호 | 항목 | 시점 |
 | --- | --- | --- |
 | AP-1 | 새 환경변수 후보 `AUTH_STUB_ENABLED`(스텁 켜기)와 운영 판별 방식(기존 `APP_ENV` 사용 여부, 04 §9). 8번 확정 시 어댑터 변수는 따로 승인 | FU-1a 착수 전 |
