@@ -1,6 +1,6 @@
 ---
 name: local-environment
-description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, 재시작하고 로그와 Health Check를 확인하는 방법. 하위 경로(APP_BASE_PATH), APP_PROXY_STRIP_PREFIX 전환, db-bootstrap, 마이그레이션 왕복 테스트, 문제 해결을 포함한다. "서버 띄워줘", "로그 보여줘", "상태 확인", "환경 안 올라와요" 같은 요청에 사용한다.
+description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, 재시작하고 로그와 Health Check를 확인하는 방법. 하위 경로(APP_BASE_PATH), APP_PROXY_STRIP_PREFIX 전환, DB 계정 분리와 db-bootstrap, 인증 스텁 스위치(AUTH_STUB_ENABLED), 마이그레이션 왕복 테스트, 문제 해결을 포함한다. "서버 띄워줘", "로그 보여줘", "상태 확인", "환경 안 올라와요" 같은 요청에 사용한다.
 ---
 
 # local-environment — 로컬 실행 환경
@@ -8,11 +8,11 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 ## 1. 목적
 새 PC에서 저장소를 받은 사람이 Secret 값만 채운 뒤 같은 명령으로 PostgreSQL, FastAPI, 포털(Frontend), Superset을 실행하고 상태를 확인하게 한다. 사람과 AI가 같은 명령을 쓰므로 실행법을 추측하지 않는다.
 
-> **Gate ② 한정 구성:** `POSTGRES_USER`(이미지 슈퍼유저)를 앱과 `migrate` 계정으로 쓴다. Gate ④ 진입 전에 최소 권한 앱 계정으로 분리해야 한다.
+> **DB 계정 분리 (EW-1, Gate ② 한정 구성 해소):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱과 `migrate` 계정으로 썼다. 이제 `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **이미지 슈퍼유저 전용**이다(이미지 초기화, postgres healthcheck, `db-bootstrap`만 사용. 운영 가이드의 `POSTGRES_USER`=앱 계정 의미와 다른 의도적 차이, `docs/deploy-coordination.md` 29번). `migrate`는 `bi_owner`, `backend`는 `bi_app`으로 접속한다. 계정 이름은 코드 상수이고 환경변수는 비밀번호만 받는다.
 
 ## 2. 사용 조건 / 사전 요구사항
 - Docker Engine과 Docker Compose v2 (`docker compose`). Windows에서는 Docker Desktop 대신 Podman 등을 쓸 수 있으나 `service_completed_successfully` 지원은 사용자 PC에서 확인이 필요하다.
-- `.env` 파일: `.env.example`을 복사하고 비어 있는 Secret 값 6개(`POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`)를 채운다. `.env`는 Git에 올리지 않는다.
+- `.env` 파일: `.env.example`을 복사하고 비어 있는 Secret 값 8개(`POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`)를 채운다. `.env`는 Git에 올리지 않는다.
 - 메모리: 상시 서비스 한도 합계 약 4.75GB(여유 포함 8GB 안). 한도는 `compose.yml`에 고정되어 있다.
 - BAT는 Windows에서만 실행한다. Linux/macOS와 AI 세션에서는 아래 `docker compose` 명령을 직접 쓴다.
 
@@ -22,12 +22,16 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 | 변수 | 의미 | 비고 |
 | --- | --- | --- |
 | `APP_NAME`, `APP_ENV`, `APP_DEBUG` | 앱 이름, 환경, 디버그 | `APP_DEBUG=true`면 `/api/docs`가 열린다 |
+| `AUTH_STUB_ENABLED` | 인증 스텁 스위치 | 값은 `true`/`false`로 쓴다(그 밖의 값은 CI `scripts/ci-validate-env.sh`가 `.env.example`에서 거부한다). 기본 `false`. `true`는 개발·시험 전용: `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 backend가 시작한다(그 밖에는 시작 거부). 스텁 로그인 기능 자체는 FU-1a |
 | `APP_BASE_PATH` | 포털 하위 경로 | 예 `/bi-wizard`. 빈 값=루트 배포(빈 값을 허용하는 변수는 이것뿐). 앞 `/` 필수, 뒤 `/`·`//`·`.`/`..` 세그먼트 금지. 운영자 확인 필요 |
 | `APP_PROXY_STRIP_PREFIX` | 프록시가 접두를 떼고 전달하는가 | `false`(기본)=유지, `true`=제거 |
 | `SUPERSET_APP_ROOT` | Superset 하위 경로 | 예 `/bi-wizard/superset`. 형식은 같지만 빈 값 불가(로컬 프록시 재현에서 포털과 경로가 겹침). `APP_BASE_PATH`와 독립 값. 운영자 확인 필요 |
 | `FRONTEND_HOST`, `FRONTEND_PORT` | 브라우저 접속 주소(호스트 게시) | 기본 `127.0.0.1`(이 PC에서만), `5173`. LAN에 열려면 `0.0.0.0`으로 바꾸되 Superset 관리자 로그인 화면도 LAN에 노출된다 |
 | `BACKEND_HOST`, `BACKEND_PORT` | backend 바인딩(컨테이너 안) | 호스트에는 `127.0.0.1`로만 게시 |
-| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | PostgreSQL | 호스트에는 `127.0.0.1`로만 게시 |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` | PostgreSQL 주소와 DB 이름 | 호스트에는 `127.0.0.1`로만 게시 |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD` | **이미지 슈퍼유저** | postgres 이미지, healthcheck, `db-bootstrap`만 쓴다. backend·migrate에는 전달하지 않는다. `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`와 같은 이름 금지 |
+| `POSTGRES_APP_PASSWORD` | `bi_app` 비밀번호 | backend 런타임 접속. 정적 표는 마이그레이션이 부여한 권한만, `bi_data` schema에는 표·뷰 생성 권한 |
+| `POSTGRES_OWNER_PASSWORD` | `bi_owner` 비밀번호 | `migrate` 접속. 정적 표와 `bi_data` schema 소유자 |
 | `POSTGRES_READONLY_PASSWORD` | `bi_readonly` 비밀번호 | Superset 업무 데이터 연결용 |
 | `SUPERSET_DB_PASSWORD` | `superset_meta` 비밀번호 | Superset 메타 DB(`superset`) |
 | `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET` | Superset 키 | 운영 중 `SUPERSET_SECRET_KEY`를 바꾸면 저장된 암호화 값을 못 읽는다 |
@@ -40,6 +44,7 @@ Azure OpenAI 변수와 `/health/azure-openai`는 없다(브리프 5절 1번: 제
 - 컨테이너: `postgres`, `backend`, `frontend`, `superset`은 상시 실행. `db-bootstrap`, `migrate`, `superset-init`은 일회성이라 `Exited (0)`이 정상이다.
 - 접속 주소(기본값): 포털 `http://localhost:5173/bi-wizard/`, Superset `http://localhost:5173/bi-wizard/superset/`
 - 데이터: Docker 볼륨 `postgres_data`(종료해도 유지).
+- Gate ② 때 만든 볼륨이 이미 있는 PC: `.env`에 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `AUTH_STUB_ENABLED=false`를 추가하고 `up -d --build`만 하면 된다(데이터 유지). `db-bootstrap`이 새 계정을 만들고 기존 `public.alembic_version`의 소유자를 `bi_owner`로 바꾸며, `migrate`가 `0002`를 적용한다.
 
 ## 5. 실행 방법
 
@@ -88,21 +93,34 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
 - Superset 텔레메트리(Scarf): 공식 FAQ의 `SCARF_ANALYTICS=false`는 6.1.0에서 **효과가 없음을 확인해 삭제했다**(서버 소스와 빌드된 프런트엔드에 이 환경변수를 읽는 코드가 없고, 메뉴 컴포넌트가 값과 무관하게 `apachesuperset.gateway.scarf.sh` 이미지를 항상 요청한다). 대신 `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 `scarf.sh` 호스트를 제거해 브라우저가 해당 요청을 보내지 못하게 한다(Superset 내부 코드 수정 아님). 부수 효과로 브라우저 콘솔에 CSP 위반 경고(`img-src`)가 남을 수 있다. Google Fonts(`fonts.googleapis.com`, `fonts.gstatic.com`) 요청은 막지 않았다.
 - gunicorn 워커는 1개이고 주기적 재시작(`WORKER_MAX_REQUESTS`)은 쓰지 않는다. 워커 1개를 재시작하면 그 순간 요청 1건이 502가 되고 다음 요청이 지연된다. 메모리 누수 보호는 `mem_limit`과 `restart: unless-stopped`에 맡긴다. 한계: 한도에 닿으면 컨테이너가 강제 종료(137)된 뒤 재시작되며 그동안 Superset 요청이 실패한다. `docker stats`로 추세를 보고 한도는 `docs/decisions/03a-deploy-environment.md`에 따라 조정한다.
 
-### db-bootstrap (읽기 전용 계정과 Superset 메타 DB)
-`docker compose up`마다 일회성 `db-bootstrap`이 `backend/bootstrap/run.sh`를 실행해 `roles.sql`을 적용한다(멱등, `initdb.d` 미사용).
-- 역할 `bi_readonly`(읽기 전용, `default_transaction_read_only=on`), `superset_meta`, 데이터베이스 `superset`(소유 `superset_meta`)을 만든다. 이름은 코드 상수다.
-- `.env`의 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`를 바꾸면 다음 기동에서 반영된다. 비어 있으면 실패한다. `POSTGRES_USER`가 `bi_readonly`/`superset_meta`와 같으면 실패한다. 비밀번호 설정 문장이 실패해도 서버 오류 로그에 문장이 남지 않도록 `SET LOCAL log_min_error_statement = panic`을 쓴다.
-- `bi_readonly`의 `SELECT` 권한 부여는 Gate ③에서 마이그레이션으로 한다. 지금은 업무 테이블이 없다.
+### db-bootstrap (DB 계정, `bi_data` schema, Superset 메타 DB)
+`docker compose up`마다 일회성 `db-bootstrap`이 `backend/bootstrap/run.sh`를 실행해 `roles.sql`을 적용한다(멱등, `initdb.d` 미사용). 이미지 슈퍼유저로 접속하는 유일한 서비스다.
+- 역할(`LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`): `bi_owner`(마이그레이션 실행, `public` 정적 표와 `bi_data` 소유), `bi_app`(backend 런타임), `bi_readonly`(읽기 전용, `default_transaction_read_only=on`, `statement_timeout=30s`), `superset_meta`(Superset 메타 DB 소유). 데이터베이스 `superset`(소유 `superset_meta`). 이름은 코드 상수다.
+- 빈 schema `bi_data`(소유자 `bi_owner`, PUBLIC 권한 없음): 사용자 데이터 표(`ds_*`)와 수식 뷰(`dv_*`, `de_*`)가 놓일 곳. `bi_data`의 `USAGE/CREATE/SELECT` 권한 부여는 db-bootstrap이 아니라 마이그레이션 `0002`가 한다.
+- `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`: `bi_owner`가 `bi_app`의 상속 멤버여야 마이그레이션이 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app …`을 실행할 수 있다(`SET ROLE bi_app`은 불가). 반복 실행하면 NOTICE만 난다.
+- `public` schema: `bi_owner`에 `CREATE`를 주고 PUBLIC의 `CREATE`는 회수한다. Gate ② 볼륨의 `alembic_version` 소유자를 `bi_owner`로 바꾼다.
+- 비밀번호 4개(`POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`)를 바꾸면 다음 기동에서 반영된다. 하나라도 비어 있으면 실패한다. `POSTGRES_USER`가 위 역할 이름과 같으면 실패한다. 비밀번호 설정 문장이 실패해도 서버 오류 로그에 문장이 남지 않도록 `SET LOCAL log_min_error_statement = panic`을 쓴다. `roles.sql`의 psql 보간은 `PASSWORD :'var'` 4곳뿐이며 `scripts/ci-validate-env.sh`가 검사한다.
 - 수동 재실행: `docker compose run --rm db-bootstrap`
 
-### 마이그레이션 왕복 테스트 (tmpfs 테스트 DB)
-빈 DB에서 `upgrade head → downgrade base → upgrade head`가 성공하는지 확인한다. 테스트 DB `postgres-test`는 compose profile `test`에만 있고 데이터가 tmpfs(256MB 제한)라 호스트에 포트를 열지 않는다.
+### 인증 스텁 스위치 (`AUTH_STUB_ENABLED`)
+- 기본 `false`. 스텁은 개발·시험에서만 켠다. `true`로 두려면 `.env`에 `APP_ENV=local`(또는 `test`)이 **명시**되어 있어야 한다. `.env.example`을 복사했다면 이미 `APP_ENV=local`이 들어 있다.
+- `true`인데 `APP_ENV`가 없거나 비었거나 `local`/`test`가 아니면(예: `production`, `staging`, `Local`) backend는 서비스하지 않는다(compose에서는 `restart: unless-stopped` 때문에 종료와 재시작을 반복하고 포트는 열리지 않는다. `docker compose logs backend`에 "AUTH_STUB_ENABLED=true는 …" 오류). 판정은 `backend/app/config.py`, 시험은 `backend/tests/test_config.py`다.
+- 운영 배포 설정에서는 `false`로 둔다. 스텁 로그인 화면·API는 FU-1a에서 만든다(지금은 스위치만 있다).
+
+### 마이그레이션 왕복 테스트와 `alembic check` (tmpfs 테스트 DB)
+빈 DB에서 `upgrade head → downgrade base → upgrade head`가 성공하고 권한 상태가 복원되는지 확인한다. 테스트 DB `postgres-test`는 compose profile `test`에만 있고 데이터가 tmpfs(256MB 제한)라 호스트에 포트를 열지 않는다. DB 접속은 `bi_owner`다.
 ```
 docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
+docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate python -m migrations.roundtrip
+```
+`migrations/roundtrip.py`가 한 번에 한다: 스냅샷 A(db-bootstrap 직후, base) → `upgrade head` → 스냅샷 B(권한 확인) → `alembic check` → `downgrade base` → 스냅샷 A′(A와 비교) → `upgrade head` → 스냅샷 B′(B와 비교). 스냅샷은 역할 속성·멤버십, schema/표 소유자와 ACL, 기본 권한(`pg_default_acl`), `public` 표·열·인덱스다. 정규화: schema ACL의 NULL과 소유자 명시의 차이, 비어 있는 `alembic_version`. 출력 `[roundtrip] … 통과`가 모두 나오고 종료 코드 0이면 통과다. DB의 현재 revision이 base가 아니면 아무것도 하지 않고 종료 코드 2로 끝난다(쓰고 있는 DB에서 `downgrade`를 돌리지 않는다).
+
+개별 명령(필요할 때):
+```
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate alembic upgrade head
+docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate alembic check
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate alembic downgrade base
-docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate alembic upgrade head
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate alembic current
 ```
 정리(둘 중 하나, 모두 `-v` 없음):
@@ -111,8 +129,9 @@ docker compose --profile test stop postgres-test
 docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이너만 제거(tmpfs 데이터도 사라짐)
 docker compose --profile test down                    # 프로젝트 전체 종료(운영 데이터 볼륨은 유지)
 ```
-- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. 자동 생성 초안에 `DROP`이 있으면 적용하지 말고 사용자 확인을 받는다. 지금은 모델 메타데이터를 연결하지 않아(D2는 Gate ③) `alembic revision --autogenerate`와 `alembic check`는 쓸 수 없다.
-- 새 revision은 `backend/migrations/versions/`에 둔다. 마이그레이션 실행은 `migrate` 서비스뿐이며 앱 코드는 시작 때 마이그레이션을 하지 않는다.
+- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: 첫 실제 revision(`0002`)의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다.
+- 자동 생성 초안(`alembic revision --autogenerate`)에 `DROP`이 있으면 적용하지 말고 사용자 확인을 받는다(D2: `public` 정적 표 대상). 동적 객체(`bi_data`의 `ds_*`, `dv_*`, `de_*`)는 `target_metadata`(`backend/app/db_metadata.py`, 정적 표만)와 `include_name`/`include_object` 필터로 비교에서 제외되어 삭제 후보에 섞이지 않는다. 권한(GRANT)은 `alembic check`가 잡지 못하므로 위 스냅샷 비교로 확인한다.
+- 새 revision은 `backend/migrations/versions/`에 둔다. head는 항상 하나여야 한다(DB 없이 pytest가 검사: `alembic heads`가 둘이면 병합 revision이 필요). 마이그레이션 실행은 `migrate` 서비스뿐이며 앱 코드는 시작 때 마이그레이션을 하지 않는다.
 
 ## 6. 관련 UI / API / command / DB
 - UI: 포털 `${APP_BASE_PATH}/`(Gate ②에서는 API/DB 상태 표시뿐), Superset `${SUPERSET_APP_ROOT}/`
@@ -121,15 +140,16 @@ docker compose --profile test down                    # 프로젝트 전체 종�
   - `GET ${APP_BASE_PATH}/api/health/db` — PostgreSQL `SELECT 1` (정상 200, 실패 503)
   - `GET ${SUPERSET_APP_ROOT}/health` — Superset (`OK`)
 - command: `scripts\*.bat`, `docker compose …`, `alembic …`(migrate 서비스 안)
-- DB: 앱 DB(`POSTGRES_DB`, 현재 `alembic_version`만), 메타 DB `superset`, 역할 `bi_readonly`/`superset_meta`
+- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`, 빈 schema `bi_data`), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
 
 ## 7. 실패 시 확인 방법
 | 증상 | 원인 | 확인과 해결 |
 | --- | --- | --- |
 | `required variable … is missing a value` | `.env`에 변수가 없거나 비어 있음 | `scripts\validate-env.bat`이 이름을 알려 준다 |
 | 포트 사용 중 | `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT` 충돌 | `.env`의 포트를 바꾸고 `restart-local.bat` |
-| `db-bootstrap` 실패 | 비밀번호 변수 비어 있음, 또는 `POSTGRES_PASSWORD`가 볼륨 생성 때 값과 다름 | `docker compose logs db-bootstrap`. `POSTGRES_PASSWORD`는 DB 볼륨이 처음 만들어질 때만 적용된다. 값을 되돌리거나 psql에서 `\password`로 바꾼다 |
-| `backend`가 시작하지 않음 | `migrate` 실패 | `docker compose logs migrate`. 원인을 고치고 `docker compose up -d` |
+| `db-bootstrap` 실패 | 비밀번호 변수 4개 중 하나가 비어 있음, `POSTGRES_USER`가 역할 이름과 같음, 또는 `POSTGRES_PASSWORD`가 볼륨 생성 때 값과 다름 | `docker compose logs db-bootstrap`. `POSTGRES_PASSWORD`는 DB 볼륨이 처음 만들어질 때만 적용된다. 값을 되돌리거나 psql에서 `\password`로 바꾼다 |
+| `migrate` 실패 | `POSTGRES_OWNER_PASSWORD` 불일치·누락, `db-bootstrap`이 먼저 성공하지 않음(`bi_owner`·`bi_data` 없음) | `docker compose logs migrate`. `.env`의 비밀번호를 고치고 `docker compose up -d`(db-bootstrap이 비밀번호를 다시 맞춘다) |
+| `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, 또는 `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님 | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
 | `superset-init` 실패 | 메타 DB 접속 실패, 키 누락 | `docker compose logs superset-init` |
 | Superset 404 | 프록시가 접두를 뗐거나 `SUPERSET_APP_ROOT`가 다름 | Superset 경로는 접두를 유지해야 한다. `.env`의 값과 접속 주소 확인 |
 | Superset 로고 이미지 404(경로에 접두가 두 번 붙음), `static/service-worker.js` 404 | Superset 6.1.0 하위 경로 동작과 이미지 구성. 화면 기능에는 영향이 없다 | Superset 내부 코드는 수정하지 않는다. 알려진 사항이며 대안은 개발 에이전트가 보고한다 |
@@ -145,7 +165,9 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 - 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다.
 - 구성 검증: `docker compose config --quiet`
 - 수동: `scripts\health-check.bat`이 모두 `[OK]`이고 마지막에 `All checks passed.`를 출력하며 `docker compose ps`에서 상시 서비스가 `healthy`.
-- 읽기 전용 계정: `bi_readonly`로 `SELECT 1`은 되고 `CREATE TABLE`·`INSERT`는 거부된다.
+- 읽기 전용 계정: `bi_readonly`로 `SELECT 1`은 되고 `CREATE TABLE`·`INSERT`는 거부된다. `statement_timeout`은 30초다.
+- 계정 분리: backend 컨테이너의 환경에 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_OWNER_PASSWORD`가 없고(`docker compose config`), `/api/health/db`가 정상이며 `pg_stat_activity`의 backend 접속 계정이 `bi_app`이다. `bi_app`은 `public`에 `CREATE TABLE`, `SET ROLE bi_owner`, `alembic_version` 조회가 거부되고 `bi_data`에는 표·뷰를 만들 수 있다. 마이그레이션 왕복 테스트(`python -m migrations.roundtrip`) 통과.
+- 정적 검사(Docker 없이): `sh scripts/ci-validate-env.sh`(변수 목록·계정 분리·`roles.sql` 규칙), `sh scripts/test-ci-validate-env.sh`(그 검사의 네거티브 케이스).
 - 두 가지 `APP_PROXY_STRIP_PREFIX` 값 모두에서 `${APP_BASE_PATH}/api/health`가 응답하고 backend 접근 로그의 경로가 각각 `${APP_BASE_PATH}/api/health`, `/api/health`다.
 - BAT 실행 검증은 사용자 Windows PC에서 한다(AI 세션은 Linux라 실행하지 않는다).
 - 메모리 실측: `docker stats --no-stream`(결과는 `docs/deploy-coordination.md` 5번에 기록).

@@ -33,6 +33,8 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None) -
             settings.app_proxy_strip_prefix,
             settings.received_api_prefix,
         )
+        if settings.auth_stub_enabled:
+            logger.warning("인증 스텁이 켜져 있다(개발·시험 환경 전용, env=%s).", settings.app_env)
         try:
             yield
         finally:

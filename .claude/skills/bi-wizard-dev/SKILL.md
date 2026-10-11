@@ -27,7 +27,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 서브에이전트 병렬 2건, 이후 리뷰 | researcher ×2 (디자인, 기술 Reference), reviewer | 디자인 2~3안, Reference 3~5개 비교표 | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md` |
 | ② ENVIRONMENT BOOTSTRAP | 지속형 협업 (생성·검증) | architect(마이그레이션 도구 제안), env-engineer ⇄ qa-engineer, reviewer | Environment Ready 체크리스트 결과, BAT 검증 요청서 | 저장소 파일(compose, Dockerfile, `.env.example`, `AGENTS.md` 등). `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 서브에이전트 생성 후 리뷰 | architect, reviewer | 모듈 경계, 기능↔Skill 대응표, API 계약 초안, 데이터 모델, 기능 단위 순서 | `docs/decisions/04-modules.md`, `docs/decisions/05-api-contract.md` |
+| ③ MODULARIZE | 서브에이전트 생성 후 리뷰 | researcher(공식 문서 사실 확인), architect, reviewer | 사실 확인 결과(`_workspace/gate3/facts.md`), 모듈 경계, 기능↔Skill 대응표, API 계약 초안, 데이터 모델, 수식 엔진, Superset 임베딩, 기능 단위 순서 | `docs/decisions/04-modules.md`, `05-api-contract.md`, `06-data-model.md`, `07-formula-engine.md`, `08-superset-embedding.md` |
 | ④ 기능 개발 | 지속형 협업 + 기능 단위마다 리뷰 | backend-dev, frontend-dev, qa-engineer (상시), reviewer (단위 완료 시) | 기능 단위별 코드·테스트·Skill | 저장소 파일(`backend/`, `frontend/`, `skills/<기능>/`). 완료 후 커밋 |
 
 ### Gate ①: RESEARCH & DECIDE
@@ -49,7 +49,9 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 
 ### Gate ③: MODULARIZE
 - architect가 산출물을 만들고 reviewer가 리뷰한다.
-- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)**, **미결정 3번(새 데이터셋 생성 권한)**, **미결정 6번(저장 전 수식 평가 경로)**, **미결정 7번(Explore 제공 방식)**, 그리고 **마이그레이션 D2(동적 객체 분리 방식)** 를 질문한다. 옵션과 영향을 함께 준다.
+- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)**, **3번(새 데이터셋 생성 권한)**, **6번(저장 전 수식 평가 경로)**, **7번(Explore 제공 방식)**, **8번(포털 사용자 인증과 신원 출처)**, **9번(동시 편집 정책)**, **10번(Superset 데이터셋·대시보드 등록 방식)**, **11번(삭제 정책)**, 그리고 **마이그레이션 D2(동적 객체 분리 방식)**, 앱 계정 분리, guest 역할 권한 목록, RLS `clause` 규칙, `CREATE VIEW` 리터럴 처리, 업로드 상한을 질문한다. 옵션과 영향을 함께 준다.
+- **결정 라운드(0~5)** 순서를 따른다(`modularize` 스킬, `docs/gate-status.md`의 "Gate ③ 진행 계획"). 0라운드는 researcher의 공식 문서 사실 확인이고 reviewer가 출처와 본문을 대조한다. 라운드마다 질문을 올린 뒤 멈추고, 답을 받으면 바로 `gate-status.md`와 해당 decisions 문서에 기록한다. 8번(인증) 답이 늦으면 2번을 먼저 진행하고 8번에 의존하는 3번과 이후 항목은 8번 답을 받은 뒤 진행한다.
+- 사실 확인을 위해 메인이 Superset 6.1.0 소스를 이미지에서 꺼내 `_workspace/gate3/sources/superset-6.1.0/`에 둔다(reviewer와 researcher가 읽을 수 있게).
 - Gate ① 원본 대조 인계 사항과 `CREATE VIEW` 렌더링 근거(PostgreSQL·SQLAlchemy 공식 문서 확인)는 `docs/gate-status.md`의 "Gate ③ 인계 사항"을 따른다.
 - API 계약과 모듈 경계는 승인 후에만 `docs/decisions/`에 확정한다. 이후 계약 변경은 사용자 승인이 필요하다.
 
@@ -106,12 +108,15 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - 답을 받으면 `docs/gate-status.md`의 미결정 표와 관련 `docs/decisions/` 파일에 기록한다.
 - 에이전트가 답 없이 구현해야 하는 상황이면 `BLOCKED: 미결정 n번`으로 보고받고, 그 부분만 멈춘다. 나머지 작업은 계속한다.
 
-## 사전 승인 규칙 (2026-10-11 사용자 결정)
-- **새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.**
-- 새 환경변수: `.env.example`에 승인 목록 밖의 변수를 추가하려면 이름, 의미, 이유를 먼저 제안한다. 사후 보고로 대신하지 않는다.
+## 사전 승인 규칙 (2026-10-11 사용자 결정, 같은 날 다듬음)
+- **사전 승인 필수(적용 전에 제안하고 승인을 받는다):** 새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경. 사후 보고로 대신하지 않는다.
+- **적용 후 보고 허용:** 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경(예: `REVOKE`, 오류 메시지의 비밀 숨김, 로그 레벨 억제). 단 위 사전 승인 항목에 해당하면(예: 보안 강화를 위해 새 변수나 새 패키지를 넣는 경우) 사전 승인이 필요하다. 이 변경은 보고서에 **"적용 후 보고 항목" 목록**으로 따로 표시한다(변경 내용, 위치, 이유, 되돌리는 방법). 메인은 이 목록을 사용자 보고서에 그대로 옮긴다.
+- 새 환경변수: `.env.example`에 승인 목록 밖의 변수를 추가하려면 이름, 의미, 이유를 먼저 제안한다.
+- 새 의존성: 운영 런타임은 허용형 라이선스만, 패키지 이름·버전·라이선스·이유를 먼저 제안한다(개발·테스트 전용도 같다).
 - 운영 가이드 기준선과 다른 설정: 예) 포트 게시 범위, 인코딩·BAT 형식, 기본 설정과 다른 보안·네트워크 값. 차이와 이유를 먼저 제안한다.
-- 에이전트 모델 변경: 정의 파일(`.claude/agents/*.md`)의 모델을 유지하고, 호출 시 `model`을 바꾸지 않는다. 바꿔야 하면 에이전트, 사유, 비용 영향을 먼저 제안한다. Gate ④ 시작 전에 모델 판단을 다시 한다.
-- 승인받지 못한 상태에서 적용했다면(긴급 포함) 즉시 사용자에게 보고하고 되돌릴지 묻는다.
+- 권한을 넓히는 변경: `GRANT`, 기본 권한, Superset 역할 권한, 서비스 계정 권한, 접속 허용 범위의 확대. 무엇을 누구에게 왜 여는지 먼저 제안한다.
+- 에이전트 모델 변경: 정의 파일(`.claude/agents/*.md`)의 모델을 유지하고, 호출 시 `model`을 바꾸지 않는다. 바꿔야 하면 에이전트, 사유, 비용 영향을 먼저 제안한다. (하네스가 정의를 캐시해 정의 변경이 새 세션부터 적용될 수 있다. 이때는 정의 파일과 같은 모델을 호출에 명시하는 것만 허용하고 그 사실을 보고한다.)
+- 승인받지 못한 상태에서 사전 승인 항목을 적용했다면(긴급 포함) 즉시 사용자에게 보고하고 되돌릴지 묻는다.
 
 ## Git 규칙
 - `main`에 직접 커밋하거나 푸시하지 않는다.

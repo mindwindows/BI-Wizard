@@ -1,0 +1,324 @@
+"""마이그레이션 왕복 시험 틀 (D5, D6): upgrade -> downgrade -> upgrade 후 스냅샷을 비교한다.
+
+테스트 DB(compose profile `test`의 `postgres-test`)에서 실행한다. db-bootstrap 직후의 빈 DB가
+출발점이다.
+```
+docker compose --profile test up -d --wait postgres-test
+docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
+docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate \
+    python -m migrations.roundtrip
+```
+순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` -> downgrade base ->
+스냅샷 A'(A와 같아야 함) -> upgrade head -> 스냅샷 B'(B와 같아야 함).
+접속은 `bi_owner`(비밀번호 `POSTGRES_OWNER_PASSWORD`)이다.
+
+안전장치: DB의 현재 revision이 base(없음)가 아니면 아무것도 하지 않고 종료한다(이미 쓰고 있는 DB에서
+`downgrade`를 돌리지 않는다. 운영 DB에서 downgrade는 쓰지 않는다).
+
+스냅샷은 SQLAlchemy 구성요소(카탈로그 표 정의, Inspector)로만 읽는다. 정규화 항목(03c X-29):
+schema ACL이 NULL인 것과 소유자 명시의 차이, 비어 있는 `alembic_version`(표가 남는 것).
+복원 대상이 아닌 것: db-bootstrap이 만든 역할·멤버십·`bi_data` schema·`public` CREATE 권한
+(출발 상태에 이미 있다).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any
+
+import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import Engine, cast, func, select
+
+from app.config import get_settings
+from app.db import build_database_url
+
+Snapshot = dict[str, Any]
+
+_MANAGED_ROLES = ("bi_owner", "bi_app", "bi_readonly")
+_SCHEMAS = ("public", "bi_data")
+
+
+def _catalog(name: str, *columns: str) -> sa.TableClause:
+    return sa.table(name, *[sa.column(c) for c in columns], schema="pg_catalog")
+
+
+_PG_CLASS = _catalog("pg_class", "oid", "relname", "relkind", "relowner", "relnamespace", "relacl")
+_PG_NAMESPACE = _catalog("pg_namespace", "oid", "nspname", "nspowner", "nspacl")
+_PG_ROLES = _catalog(
+    "pg_roles",
+    "rolname",
+    "rolsuper",
+    "rolinherit",
+    "rolcreaterole",
+    "rolcreatedb",
+    "rolcanlogin",
+    "rolbypassrls",
+    "rolconfig",
+)
+_PG_AUTH_MEMBERS = _catalog(
+    "pg_auth_members", "roleid", "member", "admin_option", "inherit_option", "set_option"
+)
+_PG_DEFAULT_ACL = _catalog(
+    "pg_default_acl", "defaclrole", "defaclnamespace", "defaclobjtype", "defaclacl"
+)
+
+
+def _acl(value: Any) -> list[str] | None:
+    """`{a=UC/b,c=U/b}` 텍스트를 정렬된 목록으로 바꾼다(항목 순서 차이를 없앤다). NULL은 None."""
+    if value is None:
+        return None
+    return sorted(part for part in str(value).strip("{}").split(",") if part)
+
+
+def take_snapshot(engine: Engine) -> Snapshot:
+    """역할 속성, 멤버십, schema/관계 ACL·소유자, 기본 권한, `public` 표 구조를 읽는다."""
+    with engine.connect() as conn:
+        owner_of = func.pg_get_userbyid
+        text_type = sa.Text
+        roles = conn.execute(
+            select(
+                _PG_ROLES.c.rolname,
+                _PG_ROLES.c.rolsuper,
+                _PG_ROLES.c.rolinherit,
+                _PG_ROLES.c.rolcreaterole,
+                _PG_ROLES.c.rolcreatedb,
+                _PG_ROLES.c.rolcanlogin,
+                _PG_ROLES.c.rolbypassrls,
+                cast(_PG_ROLES.c.rolconfig, text_type),
+            ).where(_PG_ROLES.c.rolname.in_(_MANAGED_ROLES))
+        )
+        memberships = conn.execute(
+            select(
+                owner_of(_PG_AUTH_MEMBERS.c.roleid),
+                owner_of(_PG_AUTH_MEMBERS.c.member),
+                _PG_AUTH_MEMBERS.c.admin_option,
+                _PG_AUTH_MEMBERS.c.inherit_option,
+                _PG_AUTH_MEMBERS.c.set_option,
+            ).where(owner_of(_PG_AUTH_MEMBERS.c.member).in_(_MANAGED_ROLES))
+        )
+        schemas = conn.execute(
+            select(
+                _PG_NAMESPACE.c.nspname,
+                owner_of(_PG_NAMESPACE.c.nspowner),
+                cast(_PG_NAMESPACE.c.nspacl, text_type),
+            ).where(_PG_NAMESPACE.c.nspname.in_(_SCHEMAS))
+        )
+        relations = conn.execute(
+            select(
+                _PG_NAMESPACE.c.nspname,
+                _PG_CLASS.c.relname,
+                _PG_CLASS.c.relkind,
+                owner_of(_PG_CLASS.c.relowner),
+                cast(_PG_CLASS.c.relacl, text_type),
+            )
+            .join(_PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_CLASS.c.relnamespace)
+            .where(_PG_NAMESPACE.c.nspname.in_(_SCHEMAS))
+        )
+        default_acl = conn.execute(
+            select(
+                owner_of(_PG_DEFAULT_ACL.c.defaclrole),
+                func.coalesce(_PG_NAMESPACE.c.nspname, "(global)"),
+                _PG_DEFAULT_ACL.c.defaclobjtype,
+                cast(_PG_DEFAULT_ACL.c.defaclacl, text_type),
+            ).select_from(
+                _PG_DEFAULT_ACL.outerjoin(
+                    _PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_DEFAULT_ACL.c.defaclnamespace
+                )
+            )
+        )
+        snap: Snapshot = {
+            "roles": sorted([*r[:7], _acl(r[7])] for r in roles),
+            "memberships": sorted([str(x) for x in r] for r in memberships),
+            "schemas": sorted([r[0], r[1], _acl(r[2])] for r in schemas),
+            "relations": sorted([r[0], r[1], r[2], r[3], _acl(r[4])] for r in relations),
+            "default_acl": sorted([r[0], r[1], r[2], _acl(r[3])] for r in default_acl),
+        }
+        inspector = sa.inspect(conn)
+        tables: dict[str, Any] = {}
+        for table in sorted(inspector.get_table_names(schema="public")):
+            tables[table] = {
+                "columns": [
+                    [c["name"], str(c["type"]), c["nullable"], str(c.get("default"))]
+                    for c in inspector.get_columns(table, schema="public")
+                ],
+                "pk": inspector.get_pk_constraint(table, schema="public")["constrained_columns"],
+                "fks": sorted(
+                    str([f["constrained_columns"], f["referred_table"], f["referred_columns"]])
+                    for f in inspector.get_foreign_keys(table, schema="public")
+                ),
+                "indexes": sorted(
+                    str([i["name"], i["column_names"], i["unique"]])
+                    for i in inspector.get_indexes(table, schema="public")
+                ),
+            }
+        snap["public_tables"] = tables
+        version = None
+        if "alembic_version" in tables:
+            table = sa.table("alembic_version", sa.column("version_num"), schema="public")
+            version = sorted(r[0] for r in conn.execute(select(table.c.version_num)))
+        snap["alembic_version"] = version
+    return snap
+
+
+def normalize(snapshot: Snapshot) -> Snapshot:
+    """복원 대상이 아닌 차이를 없앤다: schema ACL NULL -> 소유자 명시, 빈 alembic_version."""
+    result: Snapshot = {key: value for key, value in snapshot.items()}
+    result["schemas"] = [
+        [name, owner, acl if acl is not None else [f"{owner}=UC/{owner}"]]
+        for name, owner, acl in snapshot["schemas"]
+    ]
+    result["relations"] = [
+        row
+        for row in snapshot["relations"]
+        # 버전 표와 그 기본키 인덱스(alembic_version_pkc)는 downgrade 뒤에도 빈 채로 남는다.
+        if not (row[0] == "public" and row[1] in {"alembic_version", "alembic_version_pkc"})
+    ]
+    result["public_tables"] = {
+        name: value
+        for name, value in snapshot["public_tables"].items()
+        if name != "alembic_version"
+    }
+    result["alembic_version"] = snapshot["alembic_version"] or None
+    return result
+
+
+def diff(left: Snapshot, right: Snapshot) -> list[str]:
+    """두 (정규화된) 스냅샷의 차이를 사람이 읽을 목록으로 돌려준다. 같으면 빈 목록."""
+    problems: list[str] = []
+    for key in sorted(set(left) | set(right)):
+        a, b = left.get(key), right.get(key)
+        if a == b:
+            continue
+        if isinstance(a, list) and isinstance(b, list):
+            only_a = [row for row in a if row not in b]
+            only_b = [row for row in b if row not in a]
+            problems.append(f"{key}: 왼쪽에만 {only_a}, 오른쪽에만 {only_b}")
+        else:
+            problems.append(f"{key}: {a!r} != {b!r}")
+    return problems
+
+
+def _bi_data_acl(snapshot: Snapshot) -> list[str]:
+    for name, owner, acl in normalize(snapshot)["schemas"]:
+        if name == "bi_data":
+            return [*acl, f"owner={owner}"]
+    return []
+
+
+def _has_default_acl(snapshot: Snapshot) -> bool:
+    return any(
+        role == "bi_app" and schema == "bi_data" and "bi_readonly=r/bi_app" in (acl or [])
+        for role, schema, _kind, acl in snapshot["default_acl"]
+    )
+
+
+def expect_bootstrap_state(snapshot: Snapshot) -> list[str]:
+    """db-bootstrap이 만든 출발 상태(역할 속성, 멤버십, bi_data 소유자)를 확인한다."""
+    problems: list[str] = []
+    roles = {row[0]: row for row in snapshot["roles"]}
+    for name in _MANAGED_ROLES:
+        row = roles.get(name)
+        # row: 이름, 슈퍼유저, 상속, ROLE 생성, DB 생성, 로그인, RLS 우회, 설정
+        if row is None:
+            problems.append(f"역할 {name} 없음(db-bootstrap을 먼저 실행하세요)")
+        elif row[1] or row[3] or row[4] or row[6] or not row[5]:
+            problems.append(f"역할 {name}의 속성이 기대와 다름: {row[1:7]}")
+    config = roles.get("bi_readonly", [None] * 8)[7] or []
+    for expected in ("default_transaction_read_only=on", "statement_timeout=30s"):
+        if expected not in config:
+            problems.append(f"bi_readonly 설정에 {expected} 없음: {config}")
+    if ["bi_app", "bi_owner", "False", "True", "False"] not in snapshot["memberships"]:
+        problems.append(
+            f"bi_owner는 bi_app의 INHERIT TRUE, SET FALSE 멤버여야 함: {snapshot['memberships']}"
+        )
+    owners = {row[0]: row[1] for row in snapshot["schemas"]}
+    if owners.get("bi_data") != "bi_owner":
+        problems.append(f"bi_data 소유자가 bi_owner가 아님: {owners.get('bi_data')}")
+    return problems
+
+
+def expect_privileges(snapshot: Snapshot, *, granted: bool) -> list[str]:
+    """0002 권한이 head에서는 있고 base에서는 없는지 확인한다."""
+    acl = _bi_data_acl(snapshot)
+    problems: list[str] = []
+    for expected in ("bi_app=UC/bi_owner", "bi_readonly=U/bi_owner"):
+        if (expected in acl) is not granted:
+            problems.append(
+                f"bi_data ACL에 {expected}가 {'없음' if granted else '남아 있음'}: {acl}"
+            )
+    if _has_default_acl(snapshot) is not granted:
+        problems.append(
+            "bi_data 기본 권한(bi_app -> bi_readonly SELECT)이 "
+            + ("없음" if granted else "남아 있음")
+        )
+    return problems
+
+
+def _current_revision(engine: Engine) -> str | None:
+    with engine.connect() as conn:
+        return MigrationContext.configure(conn).get_current_revision()
+
+
+def main() -> int:
+    backend_dir = Path(__file__).resolve().parent.parent
+    config = Config(str(backend_dir / "alembic.ini"))
+    heads = ScriptDirectory.from_config(config).get_heads()
+    if len(heads) != 1:
+        print(f"[roundtrip] 실패: head가 {len(heads)}개입니다: {heads}", file=sys.stderr)
+        return 1
+
+    engine = sa.create_engine(
+        build_database_url(get_settings(), "owner"), poolclass=sa.pool.NullPool
+    )
+    current = _current_revision(engine)
+    if current is not None:
+        print(
+            f"[roundtrip] 중단: DB의 현재 revision이 {current}입니다. "
+            "빈 테스트 DB(profile test)에서만 실행하세요.",
+            file=sys.stderr,
+        )
+        return 2
+
+    failures: list[str] = []
+
+    def step(name: str, problems: list[str]) -> None:
+        failures.extend(f"{name}: {p}" for p in problems)
+        print(f"[roundtrip] {name}: {'실패 ' + str(len(problems)) + '건' if problems else '통과'}")
+
+    base0 = take_snapshot(engine)
+    step("출발 상태(db-bootstrap)", expect_bootstrap_state(base0))
+    step("출발 상태 권한 없음", expect_privileges(base0, granted=False))
+
+    command.upgrade(config, "head")
+    head1 = take_snapshot(engine)
+    step("upgrade 후 권한", expect_privileges(head1, granted=True))
+    try:
+        command.check(config)
+        step("alembic check", [])
+    except Exception as error:
+        step("alembic check", [f"{type(error).__name__}: {error}"])
+
+    command.downgrade(config, "base")
+    base2 = take_snapshot(engine)
+    step("downgrade 후 출발 상태 복원", diff(normalize(base0), normalize(base2)))
+
+    command.upgrade(config, "head")
+    head3 = take_snapshot(engine)
+    step("재 upgrade 후 상태 복원", diff(normalize(head1), normalize(head3)))
+    engine.dispose()
+
+    for failure in failures:
+        print(f"[roundtrip] {failure}", file=sys.stderr)
+    print(
+        "[roundtrip] " + ("실패" if failures else "통과: upgrade -> downgrade -> upgrade 왕복 일치")
+    )
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

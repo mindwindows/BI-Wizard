@@ -1,8 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, validate_base_path
-from app.db import build_database_url
+from app.config import (
+    AUTH_STUB_ALLOWED_ENVS,
+    Settings,
+    check_auth_stub_allowed,
+    validate_base_path,
+)
+from app.db import APP_DB_USER, OWNER_DB_USER, build_database_url
 
 
 def test_defaults_are_root_deploy_without_strip(make_settings):
@@ -69,16 +74,15 @@ def test_invalid_log_level_fails(make_settings):
         make_settings(LOG_LEVEL="LOUD")
 
 
-@pytest.mark.parametrize("name", ["POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"])
-def test_required_postgres_values_fail_closed(monkeypatch, name):
-    monkeypatch.setenv(name, "")
+def test_required_postgres_db_fails_closed(monkeypatch):
+    monkeypatch.setenv("POSTGRES_DB", "")
     with pytest.raises(ValidationError):
         Settings()  # type: ignore[call-arg]
 
 
 def test_database_url_uses_pg8000_and_escapes_password(make_settings):
-    settings = make_settings(POSTGRES_PASSWORD="p@ss:w/rd%2f?#")
-    url = build_database_url(settings)
+    settings = make_settings(POSTGRES_APP_PASSWORD="p@ss:w/rd%2f?#")
+    url = build_database_url(settings, "app")
     assert url.drivername == "postgresql+pg8000"
     assert url.password == "p@ss:w/rd%2f?#"
     assert url.host == "db.test"
@@ -91,3 +95,140 @@ def test_database_url_uses_pg8000_and_escapes_password(make_settings):
     from sqlalchemy.engine import make_url
 
     assert make_url(url.render_as_string(hide_password=False)).password == "p@ss:w/rd%2f?#"
+
+
+def test_db_user_names_are_code_constants_and_ignore_superuser_variables(make_settings):
+    """슈퍼유저 변수(POSTGRES_USER/PASSWORD)가 있어도 접속 계정은 bi_app/bi_owner 상수다."""
+    settings = make_settings(
+        POSTGRES_USER="super",
+        POSTGRES_PASSWORD="super-secret",
+        POSTGRES_APP_PASSWORD="app-pw",
+        POSTGRES_OWNER_PASSWORD="owner-pw",
+    )
+    assert not hasattr(settings, "postgres_user")
+    assert not hasattr(settings, "postgres_password")
+    app_url = build_database_url(settings, "app")
+    owner_url = build_database_url(settings, "owner")
+    assert (APP_DB_USER, OWNER_DB_USER) == ("bi_app", "bi_owner")
+    assert (app_url.username, app_url.password) == ("bi_app", "app-pw")
+    assert (owner_url.username, owner_url.password) == ("bi_owner", "owner-pw")
+    for url in (app_url, owner_url):
+        assert "super" not in url.render_as_string(hide_password=False)
+
+
+@pytest.mark.parametrize(
+    ("role", "variable"),
+    [("app", "POSTGRES_APP_PASSWORD"), ("owner", "POSTGRES_OWNER_PASSWORD")],
+)
+def test_database_url_fails_closed_without_password(make_settings, role, variable):
+    # 다른 역할의 비밀번호만 있어도 이 역할의 접속은 만들 수 없다(컨테이너마다 필요한 것만 받는다).
+    other = "POSTGRES_OWNER_PASSWORD" if role == "app" else "POSTGRES_APP_PASSWORD"
+    with pytest.raises(ValueError, match=variable):
+        build_database_url(make_settings(**{other: "other-pw"}), role)
+    with pytest.raises(ValueError, match=variable):
+        build_database_url(make_settings(**{variable: ""}), role)
+
+
+def test_unknown_db_role_is_rejected(make_settings):
+    with pytest.raises(ValueError):
+        build_database_url(make_settings(), "postgres")  # type: ignore[arg-type]
+
+
+# --- 인증 스텁 스위치(AP-13, bi-review 7-5) ---
+
+
+def test_auth_stub_default_is_off_regardless_of_app_env(make_settings):
+    assert make_settings().auth_stub_enabled is False
+    # 꺼져 있으면 APP_ENV가 무엇이든 시작한다(운영 값 포함).
+    assert make_settings(APP_ENV="production").auth_stub_enabled is False
+    assert make_settings(AUTH_STUB_ENABLED="false", APP_ENV="staging").auth_stub_enabled is False
+
+
+@pytest.mark.parametrize("app_env", ["local", "test"])
+def test_auth_stub_on_allowed_in_explicit_local_and_test(make_settings, app_env):
+    settings = make_settings(AUTH_STUB_ENABLED="true", APP_ENV=app_env)
+    assert settings.auth_stub_enabled is True
+    assert settings.app_env == app_env
+
+
+def test_auth_stub_on_without_app_env_is_refused(make_settings):
+    """코드 기본값 local이 채운 APP_ENV는 명시 설정으로 보지 않는다."""
+    with pytest.raises(ValidationError, match="APP_ENV"):
+        make_settings(AUTH_STUB_ENABLED="true")
+
+
+@pytest.mark.parametrize(
+    "app_env",
+    [
+        "",
+        " ",
+        "production",
+        "prod",
+        "staging",
+        "stage",
+        "development",
+        "dev",
+        "Local",
+        "LOCAL",
+        "test ",
+        "local\n",
+    ],
+)
+def test_auth_stub_on_refused_for_empty_or_non_allowed_app_env(make_settings, app_env):
+    with pytest.raises(ValidationError, match="APP_ENV"):
+        make_settings(AUTH_STUB_ENABLED="true", APP_ENV=app_env)
+
+
+@pytest.mark.parametrize("value", ["maybe", "2", "enabled"])
+def test_auth_stub_value_must_be_boolean(make_settings, value):
+    with pytest.raises(ValidationError):
+        make_settings(AUTH_STUB_ENABLED=value, APP_ENV="local")
+
+
+def test_check_auth_stub_allowed_function_directly():
+    assert AUTH_STUB_ALLOWED_ENVS == {"local", "test"}
+    check_auth_stub_allowed(enabled=False, app_env="production", app_env_explicit=True)
+    check_auth_stub_allowed(enabled=True, app_env="local", app_env_explicit=True)
+    with pytest.raises(ValueError):
+        check_auth_stub_allowed(enabled=True, app_env="local", app_env_explicit=False)
+    with pytest.raises(ValueError):
+        check_auth_stub_allowed(enabled=True, app_env="production", app_env_explicit=True)
+
+
+def test_auth_stub_startup_refusal_exits_main(monkeypatch):
+    """`python -m app`의 main()은 설정 오류 때 서버를 띄우기 전에 예외로 끝난다."""
+    from app import __main__ as entry
+
+    monkeypatch.setenv("AUTH_STUB_ENABLED", "true")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("POSTGRES_APP_PASSWORD", "app-pw")
+    called = []
+    monkeypatch.setattr(entry.uvicorn, "run", lambda *a, **k: called.append(True))
+    with pytest.raises(ValidationError):
+        entry.main()
+    assert called == []
+
+
+def test_main_refuses_to_start_without_app_password(monkeypatch):
+    from app import __main__ as entry
+
+    called = []
+    monkeypatch.setattr(entry.uvicorn, "run", lambda *a, **k: called.append(True))
+    with pytest.raises(ValueError, match="POSTGRES_APP_PASSWORD"):
+        entry.main()
+    assert called == []
+
+
+def test_validation_errors_do_not_echo_secret_values(make_settings):
+    """시작 거부 오류(스텁 스위치 등)에 비밀번호 입력 값이 섞여 나오지 않는다."""
+    with pytest.raises(ValidationError) as caught:
+        make_settings(
+            AUTH_STUB_ENABLED="true",
+            APP_ENV="production",
+            POSTGRES_APP_PASSWORD="SECRET-APP-PW-123",
+            POSTGRES_OWNER_PASSWORD="SECRET-OWNER-PW-456",
+        )
+    text = str(caught.value)
+    assert "SECRET-APP-PW-123" not in text
+    assert "SECRET-OWNER-PW-456" not in text
+    assert "APP_ENV" in text

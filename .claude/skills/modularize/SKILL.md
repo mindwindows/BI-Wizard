@@ -22,6 +22,22 @@ description: Gate ③ MODULARIZE에서 기능 모듈 경계, 기능↔Skill 대�
 - 예상 단위(확정은 이 단계에서): 엑셀 가져오기, 데이터셋 정의, 수식 열, 데이터 입력, 대시보드 연결, 권한 관리
 - 내부 helper마다 Skill을 만들지 않는다. "AI가 하나의 작업으로 쓸 수 있는 기능 단위"가 기준이다.
 
+## 산출물 위치 (승인 후 `docs/decisions/`)
+| 파일 | 내용 |
+| --- | --- |
+| `04-modules.md` | 모듈 경계표, 기능↔Skill 대응표, 기능 단위 목록과 순서 |
+| `05-api-contract.md` | REST API 계약 |
+| `06-data-model.md` | 데이터 모델, D2(동적 객체 분리), 앱 계정 분리, `bi_readonly` 권한, `target_metadata`·`include_object`, 업로드 상한, 동시 편집·삭제 정책의 데이터 모델 영향 |
+| `07-formula-engine.md` | 수식 범위, 저장 전 평가 경로, 뷰 변환 규칙, `CREATE VIEW` 리터럴 처리 근거, 순환 검사 방식, 붙여넣기 파서 규격 |
+| `08-superset-embedding.md` | Explore 제공 방식, Embedded guest 역할 권한 목록, RLS `clause` 규칙, guest token 발급 흐름, Superset 데이터셋·대시보드 등록 방식 |
+
+승인 전 초안은 `_workspace/gate3/`에 둔다. 문서 사이의 용어, 필드 이름, 역할 이름, API 경로는 같아야 하며 reviewer가 대조한다. 각 문서 맨 위에 이 문서가 의존하는 결정(`gate-status.md` 번호)을 적는다.
+
+## 결정 라운드 (Gate ③, 사용자 승인 2026-10-11)
+설계 전에 사용자가 결정할 항목을 순서대로 묻는다. 순서와 이유는 `docs/gate-status.md`의 "Gate ③ 진행 계획".
+0. 공식 문서 사실 확인(researcher, reviewer 교차 검증) → 1. 8번(인증), 3번(생성 권한), 2번(수식 범위) → 2. 6번(평가 경로), D2 → 3. 앱 계정 분리, 7번(Explore), 9~11번 → 4. guest 역할 권한, RLS `clause`, `CREATE VIEW` 리터럴, 업로드 상한 → 5. 인계 설계 일괄 확인과 문서 승인.
+8번(인증)은 메인 플랫폼 운영자 확인이 필요할 수 있다. 답이 늦어지면 2번(수식 범위)을 먼저 진행하고, 8번에 의존하는 3번(생성 권한)과 그 이후 항목은 8번 답을 받은 뒤 진행한다.
+
 ## 산출물 형식
 
 ### 1. 모듈 경계표
@@ -58,6 +74,7 @@ description: Gate ③ MODULARIZE에서 기능 모듈 경계, 기능↔Skill 대�
 - **마이그레이션 D2(동적 객체 분리 방식)** 는 이 Gate에서 데이터 모델과 함께 사용자가 결정한다(`docs/decisions/03-migration-tool.md`). 옵션 S(별도 schema), N(이름 규칙 + 필터), R(등록 테이블 기반), D(별도 DB)의 장단점과, 읽기 전용 계정(D7)의 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식을 같이 적는다. 결정 전에는 자동 생성 초안의 `DROP`을 사용자 확인 없이 적용하지 않는다.
 - **최소 권한 앱 계정 분리**도 이 Gate에서 D2와 함께 설계한다. Gate ④ 진입 전 분리 완료가 필수 조건이고, 계정을 나누면 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식을 다시 정한다(`docs/gate-status.md` 인계 사항).
 - 6번(저장 전 수식 평가 경로)과 7번(Explore 제공 방식)도 이 Gate의 결정 대상이다. 옵션과 영향만 적는다.
+- 8번(포털 사용자 인증과 신원 출처), 9번(동시 편집 정책), 10번(Superset 데이터셋·대시보드 등록 방식), 11번(삭제 정책)도 이 Gate의 결정 대상이다. 옵션과 영향만 적고 확정하지 않는다.
 - `gate-status.md`의 "Gate ③ 인계 사항"(붙여넣기 파서 따옴표 안 탭, 순환 검사기 raw SQL, RLS `clause` 미검증, `CREATE VIEW` 렌더링 근거 확인)을 설계에 반영한다.
 
 ## 검토 체크리스트

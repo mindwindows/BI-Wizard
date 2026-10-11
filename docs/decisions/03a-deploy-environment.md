@@ -63,7 +63,7 @@
 - `backend/migrations/`로 승인한다(`03-migration-tool.md`).
 
 ## 3. 읽기 전용 DB 계정 (승인, 2026-10-11)
-상세는 `03-migration-tool.md`의 "읽기 전용 계정과 Superset 메타 DB 생성 방식"을 따른다. 요약: 매 기동 멱등 `db-bootstrap` 서비스(`backend/bootstrap/`, `initdb.d` 미사용), 이름 고정(`bi_readonly`, `superset_meta`, `superset`), 비밀번호만 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, D3 예외는 비밀번호 리터럴 두 곳의 psql `:'var'` 인용만. 추가 서비스 `db-bootstrap`의 메모리 한도는 128MB다(일시적, 시작 시 한 번).
+상세는 `03-migration-tool.md`의 "읽기 전용 계정과 Superset 메타 DB 생성 방식"을 따른다. 요약: 매 기동 멱등 `db-bootstrap` 서비스(`backend/bootstrap/`, `initdb.d` 미사용), 이름 고정(`bi_readonly`, `superset_meta`, `superset`), 비밀번호만 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, D3 예외는 비밀번호 리터럴의 psql `:'var'` 인용만(2026-10-11 3라운드에서 앱 계정 비밀번호 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`까지 포함하도록 승인). 추가 서비스 `db-bootstrap`의 메모리 한도는 128MB다(일시적, 시작 시 한 번).
 
 ## 4. 앱 계정 조건 (승인, 2026-10-11)
 Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고, Gate ④ 진입 전 분리 완료가 필수이며, Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다.
@@ -73,11 +73,25 @@ Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 최소 �
 
 - **사후 승인:** BAT ASCII 영문 변환, frontend·postgres·backend 포트의 `127.0.0.1` 게시, 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`). 웹서버에서는 메인 플랫폼 프록시 위치에 따라 `FRONTEND_HOST` 값을 바꿔야 할 수 있다(`deploy-coordination.md` 20번).
 - **승인 규칙(하네스):** 새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.
-- **Embedded guest 역할:** 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다(기본 `Public`은 `…/api/v1/me/roles/`가 403이라 실패하고 `Gamma`는 대조 실험에서만 성공했다).
+- **Embedded guest 역할:** 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다. **이 금지는 임베딩 대시보드를 보는 guest 역할에만 적용된다**(2026-10-11 3라운드, 사용자 확정). 포털 작성자 역할은 내장 `Gamma`를 직접 부여하지 않고 `Gamma`를 복사한 커스텀 역할과 schema 단위 보조 역할로 만든다(기본 `Public`은 `…/api/v1/me/roles/`가 403이라 실패하고 `Gamma`는 대조 실험에서만 성공했다).
 - **로고 이중 접두, 404 페이지 일러스트 접두 누락:** 알려진 문제로 두고 수정하지 않는다(Superset 내부 코드 수정 금지). 수정이 포함된 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다(6.1.0 고정의 변경은 그때 사용자 승인).
 - **Scarf:** `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 `scarf.sh` 호스트를 제거한다. 효과 없는 `SCARF_ANALYTICS` 변수는 삭제했다. Google Fonts는 막지 않는다.
 - **라이선스 원칙:** 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다. 보고된 "주의" 항목은 모두 허용하며 목록은 `deploy-coordination.md`의 "배포 전 회사 오픈소스 정책 확인"에 둔다.
 - **포털 favicon:** `frontend/index.html`에 `data:,` 아이콘을 두어 `/favicon.ico` 404를 없앤다.
+
+## 5-1. 3라운드 결정 반영 (2026-10-11, 사용자)
+상세는 `03b-gate3-round-decisions.md` 3절. 이 문서와 관련된 것만 요약한다.
+- **앱 계정:** `bi_owner`(마이그레이션·정적 표 소유)와 `bi_app`(런타임) 2개로 분리하며 Gate ④ 진입 전 구현한다(4절 조건의 이행 방식). `POSTGRES_USER`는 이미지 슈퍼유저 전용으로 좁아진다 → 운영 가이드 기준선과의 **의도적 차이**(`deploy-coordination.md` 29번). 새 환경변수 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`.
+- **Superset 서비스 계정:** 새 환경변수 `SUPERSET_SERVICE_USER`, `SUPERSET_SERVICE_PASSWORD`, 새 운영 런타임 의존성 `httpx`.
+- **DB 시간대:** `TZ=Asia/Seoul` 유지(회사 시간대 확인됨).
+- **`/health` 응답:** 기본 경로(`/health`, `/health/db`)는 그대로, 응답 필드만 추가(`views`, `views_failed_count`, `public_create`, `db_timezone`).
+
+## 5-2. 4라운드 결정 반영 (2026-10-11, 사용자)
+상세는 `03b-gate3-round-decisions.md` 4절. 이 문서와 관련된 것만 요약한다.
+- **새 환경변수(승인):** `APP_UPLOAD_MAX_MB`(업로드 상한 10MB, 서버·프록시·화면 공유), 발급 전용 Superset 계정 변수 2개, 조건부 `GUEST_TOKEN_JWT_AUDIENCE`(X-28에서 필요할 때만).
+- **기준선과 다른 설정(승인):** `GUEST_ROLE_NAME=bi_guest`, `GUEST_TOKEN_VALIDATOR_HOOK`, 로컬 nginx `client_max_body_size`. 구현은 Gate ④ 진입 전 env 작업.
+- **compose:** `tmpfs`/`mem_limit` 변경이 필요해지면 내용과 이유를 보고하고 적용한다. 가져오기 한도·메모리 설계 기준은 backend `mem_limit` 1g.
+- **포털·Superset origin:** 포털 안 iframe은 도입하지 않지만(Z13 새 창 유지), Embedded 대시보드는 같은 origin 가정(`deploy-coordination.md` 9번)이 필요하다(03c X-18: 다른 호스트면 `/embedded/`까지 차단).
 
 ## 6. 열린 사항
 

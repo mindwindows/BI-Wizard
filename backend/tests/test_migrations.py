@@ -1,4 +1,8 @@
-"""마이그레이션 규칙(D2, D3, D5) 정적 점검과 오프라인 SQL 생성 점검. DB 없이 실행한다."""
+"""마이그레이션 규칙(D2, D3, D5) 정적 점검과 오프라인 SQL 생성 점검. DB 없이 실행한다.
+
+DB가 필요한 점검(`alembic check`, 왕복 스냅샷 비교, 권한 상태)은 compose profile `test`의
+테스트 DB에서 `python -m migrations.roundtrip`으로 실행한다(skills/local-environment/SKILL.md).
+"""
 
 import ast
 import re
@@ -14,7 +18,10 @@ VERSIONS = BACKEND / "migrations" / "versions"
 EXECUTORS = {"execute", "exec_driver_sql"}
 TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 
-# D2 안전장치: DROP이 들어 있는 revision은 사용자 확인 기록이 있어야 한다.
+# D2 안전장치(AP-11, "정적 표 대상"): `public` 정적 표 마이그레이션의 DROP(op.drop_*, SQL의 DROP)은
+# 사용자 확인 기록이 있어야 한다. `downgrade()`의 op.drop_table도 DROP이다.
+# 동적 객체(`bi_data` schema의 ds_*, dv_*, de_*)는 마이그레이션 대상이 아니므로
+# test_migrations_do_not_manage_bi_data_objects가 막는다.
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
 # 여기에 기록한다.
 DROP_APPROVED: dict[str, str] = {}
@@ -116,9 +123,18 @@ def _drop_findings(tree: ast.Module) -> list[str]:
     return findings
 
 
-def test_single_head_and_baseline():
+def test_single_head():
+    """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
+    heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
+    assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
+    assert heads == ["0002"]
+
+
+def test_revision_chain_starts_at_baseline_then_privileges():
     script = ScriptDirectory.from_config(_alembic_config())
-    assert script.get_heads() == ["0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0002", "0001"]
+    assert script.get_revision("0001").down_revision is None
+    assert script.get_revision("0002").down_revision == "0001"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -171,6 +187,95 @@ def test_drop_detector_flags_drop_calls_and_sql():
     assert len(_drop_findings(tree)) == 2
 
 
+def _bi_data_findings(tree: ast.Module) -> list[str]:
+    """`bi_data` 객체를 만들고 바꾸고 지우는 문장(허용: GRANT, REVOKE, ALTER DEFAULT PRIVILEGES)."""
+    findings = []
+    docstrings = _docstring_nodes(tree)
+    allowed = re.compile(r"^\s*(GRANT|REVOKE|ALTER\s+DEFAULT\s+PRIVILEGES)\b", re.IGNORECASE)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and "bi_data" in node.value
+            and not allowed.match(node.value)
+        ):
+            findings.append(f"bi_data를 다루는 SQL이 권한 부여가 아님, 줄 {node.lineno}")
+        if isinstance(node, ast.keyword) and node.arg in {
+            "schema",
+            "referent_schema",
+            "source_schema",
+        }:
+            if isinstance(node.value, ast.Constant) and node.value.value == "bi_data":
+                findings.append(f"schema='bi_data' 인자, 줄 {node.value.lineno}")
+    return findings
+
+
+def test_migrations_do_not_manage_bi_data_objects():
+    """D2: 동적 객체의 schema(`bi_data`)에는 권한만 부여한다. 표·뷰를 만들거나 지우지 않는다."""
+    for path in _revision_files():
+        findings = _bi_data_findings(_parse(path))
+        assert not findings, f"{path.name}: {'; '.join(findings)}"
+
+
+def test_bi_data_detector():
+    def findings(src):
+        return _bi_data_findings(ast.parse(src))
+
+    assert findings('op.execute("GRANT USAGE ON SCHEMA bi_data TO bi_app")') == []
+    adp = "ALTER DEFAULT PRIVILEGES FOR ROLE x IN SCHEMA bi_data GRANT SELECT ON TABLES TO y"
+    assert findings(f'op.execute("{adp}")') == []
+    assert findings('op.execute("CREATE TABLE bi_data.ds_1 (id int)")')
+    assert findings('op.execute("DROP TABLE bi_data.ds_1")')
+    assert findings('op.create_table("t", schema="bi_data")')
+
+
+def test_static_metadata_has_no_dynamic_or_bi_data_tables():
+    from app.db_metadata import is_dynamic_name, metadata
+
+    for table in metadata.tables.values():
+        assert table.schema is None, f"{table.name}: 정적 표는 public(schema 없음)에 둔다"
+        assert not is_dynamic_name(table.name), f"{table.name}: 동적 객체 이름 규칙과 겹친다"
+
+
+@pytest.mark.parametrize(
+    ("name", "type_", "parents", "expected"),
+    [
+        ("bi_data", "schema", {}, False),
+        ("public", "schema", {}, True),
+        (None, "schema", {}, True),
+        ("ds_1", "table", {"schema_name": "bi_data"}, False),
+        ("anything", "table", {"schema_name": "bi_data"}, False),
+        ("ds_12", "table", {"schema_name": None}, False),
+        ("dv_3", "table", {"schema_name": None}, False),
+        ("de_3", "table", {"schema_name": None}, False),
+        ("datasets", "table", {"schema_name": None}, True),
+        ("ds_x", "table", {"schema_name": None}, True),
+        ("users", "table", {"schema_name": "public"}, True),
+        ("ix_users_login_id", "index", {"schema_name": None, "table_name": "users"}, True),
+    ],
+)
+def test_include_name_hook_excludes_dynamic_objects(name, type_, parents, expected):
+    from app.db_metadata import include_name
+
+    assert include_name(name, type_, parents) is expected
+
+
+def test_include_object_hook_excludes_dynamic_objects():
+    from sqlalchemy import Column, Integer, MetaData, Table
+
+    from app.db_metadata import include_object
+
+    meta = MetaData()
+    dynamic = Table("anything", meta, Column("id", Integer), schema="bi_data")
+    numbered = Table("ds_7", meta, Column("id", Integer))
+    static = Table("datasets", meta, Column("id", Integer))
+    assert include_object(dynamic, "anything", "table", True, None) is False
+    assert include_object(numbered, "ds_7", "table", True, None) is False
+    assert include_object(static, "datasets", "table", True, None) is True
+    assert include_object(static.c.id, "id", "column", True, None) is True
+
+
 def test_empty_revisions_are_rejected_unless_intentional_baseline():
     """D5: pass/NotImplementedError만 있는 revision은 미구현이다. 의도적 baseline만 예외다."""
     for path in _revision_files():
@@ -198,8 +303,41 @@ def test_trivial_body_detector():
 
 
 def test_offline_upgrade_and_downgrade_generate_sql(capsys):
+    """오프라인 SQL 생성은 DB 접속 정보와 비밀번호 없이 된다(env.py 오프라인 경로)."""
     config = _alembic_config()
     command.upgrade(config, "head", sql=True)
-    assert "alembic_version" in capsys.readouterr().out
+    upgrade_sql = capsys.readouterr().out
+    assert "alembic_version" in upgrade_sql
+    assert "GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app" in upgrade_sql
+    assert "GRANT USAGE ON SCHEMA bi_data TO bi_readonly" in upgrade_sql
+    assert (
+        "ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data "
+        "GRANT SELECT ON TABLES TO bi_readonly"
+    ) in upgrade_sql
     command.downgrade(config, "head:base", sql=True)
-    assert "alembic_version" in capsys.readouterr().out
+    downgrade_sql = capsys.readouterr().out
+    assert "alembic_version" in downgrade_sql
+    assert "REVOKE USAGE, CREATE ON SCHEMA bi_data FROM bi_app" in downgrade_sql
+    assert "REVOKE USAGE ON SCHEMA bi_data FROM bi_readonly" in downgrade_sql
+    assert "REVOKE SELECT ON TABLES FROM bi_readonly" in downgrade_sql
+
+
+def test_privilege_revision_downgrade_mirrors_upgrade():
+    """0002: downgrade가 upgrade의 권한을 하나씩 회수한다(실질 구현, 빈 함수 아님)."""
+    path = next(p for p in _revision_files() if "_0002_" in p.name)
+    tree = _parse(path)
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    grants = [
+        n.args[0].value
+        for n in ast.walk(_function(tree, "upgrade"))
+        if isinstance(n, ast.Call) and _call_name(n) == "execute"
+    ]
+    revokes = [
+        n.args[0].value
+        for n in ast.walk(_function(tree, "downgrade"))
+        if isinstance(n, ast.Call) and _call_name(n) == "execute"
+    ]
+    assert len(grants) == len(revokes) == 3
+    assert all("GRANT" in g for g in grants)
+    assert all("REVOKE" in r for r in revokes)

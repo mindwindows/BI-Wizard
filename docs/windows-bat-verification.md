@@ -2,7 +2,7 @@
 
 > **상태: 보류(사내 환경에서 검증, 2026-10-11).** 개인 PC 검증은 하지 않는다. 사내 환경은 Docker Desktop을 쓸 수 없으므로 사내 컨테이너 실행 방식(`docs/deploy-coordination.md` 26번)을 확인한 뒤, 사내 워크스테이션 또는 팀 웹서버 배포 준비 때 이 요청서로 검증한다. 아래 "Docker Desktop" 전제 문구는 그 방식에 맞게 바꿔 읽는다.
 
-- 작성: qa-engineer, 2026-10-11 (커밋 `4fbf7ad` 기준)
+- 작성: qa-engineer, 2026-10-11 (커밋 `4fbf7ad` 기준, EW-1 이전). EW-1(DB 계정 분리, 2026-10-11) 이후 바뀐 점: `.env` Secret 8개와 `AUTH_STUB_ENABLED` 추가, `scripts\validate-env.bat`·나머지 BAT는 파일 변경 없음(`.env.example`을 읽어 검사). BAT 기대 결과 중 EW-1 이후 기준으로 다시 확인하지 않은 항목은 이 요청서로 사내 환경에서 확인할 때 함께 본다
 - **BAT 6종은 Linux 클라우드 세션에서 실행하지 않았다.** 같은 동작의 `docker compose` 명령은 Linux에서 모두 검증했다. 아래는 사용자가 Windows PC에서 직접 확인할 항목이다.
 - `scripts\*.bat`은 모두 ASCII 영문 메시지, CRLF, BOM 없음이다(`chcp` 미사용). 한글 깨짐과 레이블 인식 문제 우려는 이 구성으로 해소했다. 실제 동작은 이 요청서로 확인한다.
 - 기대 결과 중 BAT 메시지는 BAT 최신 내용을 읽고 적은 것이고, 컨테이너 상태와 화면은 Linux에서 같은 동작을 검증한 값이다.
@@ -13,11 +13,11 @@
 | 0-1 | `docker version`, `docker compose version` | Docker Desktop(권장) 또는 Podman이 응답한다. Compose는 v2 이상 | 두 명령 출력, 사용 도구와 버전, Windows 버전 |
 | 0-2 | `docker info`의 `Total Memory` 확인 | 8GiB 이상 권장. 부족하면 Docker Desktop Settings → Resources에서 늘린다(WSL2는 기본이 호스트 RAM의 약 50%) | `Total Memory`, PC RAM |
 | 0-3 | `curl.exe --version` | 버전이 출력된다(`health-check.bat`이 사용) | 출력 |
-| 0-4 | 저장소를 `git clone`으로 받는다(ZIP 아님). 이어서 `dir scripts` | `scripts`에 BAT 6개와 `ci-validate-env.sh`가 있다 | `git config core.autocrlf` 값, 저장소 경로(공백·한글 포함 여부) |
+| 0-4 | 저장소를 `git clone`으로 받는다(ZIP 아님). 이어서 `dir scripts` | `scripts`에 BAT 6개와 `ci-validate-env.sh`, `test-ci-validate-env.sh`가 있다 | `git config core.autocrlf` 값, 저장소 경로(공백·한글 포함 여부) |
 
 ## `.env` 만들기 (비밀 값은 사용자가 직접 채우고 채팅이나 AI에 보내지 않는다)
 1. 저장소 루트에서 `copy .env.example .env`.
-2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 6개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
+2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 8개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
 3. 값 생성 예(호출마다 새 값): `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Python이 없으면 `powershell -NoProfile -Command "-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })"`.
 4. **주의 문자:** 값은 영문, 숫자, `-`, `_`만 쓴다. `$`, `%`, `#`, 작은따옴표, 큰따옴표, 공백, `=`, 한글을 쓰지 않는다. 값 끝에 공백이 남지 않게 한다. 인코딩은 BOM 없는 UTF-8이나 ANSI로 저장한다(메모장의 "UTF-8(BOM 포함)"은 피한다).
 5. **접속 주소 기본값:** `FRONTEND_HOST=127.0.0.1`이 기본이라 이 PC의 브라우저에서만 접속된다. 같은 LAN의 다른 PC에서 접속하려면 `FRONTEND_HOST=0.0.0.0`으로 바꾸고 `scripts\restart-local.bat`을 실행한다. 단 그러면 Superset 관리자 로그인 화면도 LAN에 노출되고 Windows 방화벽 허용 창이 뜰 수 있다. 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꾼다.

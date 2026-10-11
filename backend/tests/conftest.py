@@ -8,8 +8,6 @@ _BASE_ENV = {
     "POSTGRES_HOST": "db.test",
     "POSTGRES_PORT": "5432",
     "POSTGRES_DB": "testdb",
-    "POSTGRES_USER": "tester",
-    "POSTGRES_PASSWORD": "test-password",
 }
 
 
@@ -25,6 +23,12 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "BACKEND_HOST",
         "BACKEND_PORT",
         "LOG_LEVEL",
+        "AUTH_STUB_ENABLED",
+        # 슈퍼유저 변수는 backend가 읽지 않는다. 있어도 접속에 쓰이지 않음을 시험이 확인한다.
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_APP_PASSWORD",
+        "POSTGRES_OWNER_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
     for name, value in _BASE_ENV.items():
