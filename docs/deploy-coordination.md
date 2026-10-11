@@ -10,7 +10,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 2 | **메인 플랫폼 프록시의 접두 처리 방식** | 포털(frontend·backend)은 접두를 **떼고 넘기는 방식과 그대로 넘기는 방식을 설정값 `APP_PROXY_STRIP_PREFIX`만으로 전환**할 수 있게 구성한다. 어느 쪽이든 대응 가능하다. **권장: 가능하면 `/bi-wizard/` 전체를 접두를 유지한 채 전달**해 달라(`APP_PROXY_STRIP_PREFIX=false`, 기본값). 운영자 사정상 접두를 떼야 하면 이 변수를 `true`로 바꾼다. 실제 방식을 정해 달라 | 협의 필요 | - |
 | 3 | **Superset 경로는 접두를 떼지 않고 그대로 전달** | **필수 요구.** Superset 6.1.0은 요청 경로가 `SUPERSET_APP_ROOT`로 시작하지 않으면 404를 반환한다(`AppRootMiddleware`). 프록시가 접두를 제거하면 동작하지 않는다 | 협의 필요 | - |
 | 4 | **사용자 브라우저의 Superset 경로 직접 접근** | 사용자 브라우저가 `${SUPERSET_APP_ROOT}/…`(Embedded iframe의 `/embedded/<id>`, 정적 파일, Superset이 호출하는 API)에 **직접 접근할 수 있어야** 한다. 포털 백엔드만 통하는 구조로는 Embedded가 동작하지 않는다 | 협의 필요 | - |
-| 5 | **메모리 8GB 실측 결과와 증설 필요 여부** | 프로젝트 전체 합계 8GB로 시작한다. Gate ② 검증 때 `docker stats`로 컨테이너별 사용량을 실측하고, 5MB급 엑셀 샘플의 backend 사용량도 측정해 이 표에 기록한다. 부족하면 증설을 요청한다 | 실측 대기 | - |
+| 5 | **메모리 8GB 실측 결과와 증설 필요 여부** | 프로젝트 전체 합계 8GB로 시작한다. 부족하면 증설을 요청한다 | 실측 완료(Gate ② 검증) | 2026-10-11 실측(Linux, 빈 볼륨, 커밋 `4fbf7ad`): 상시 4개 서비스 유휴 315MiB, 로그인 후 439MiB, 5세션 순회 + 20만 행 쿼리 6개 병렬 부하 최대 약 1,056MiB(superset 753MiB, 한도 2GiB의 37%). 일회성 최대 superset-init 193MiB(이전 측정). 5MB 엑셀 대리 측정(5.04MiB, 6만 행): openpyxl read-only 45MB, 일반 모드 265MB, pandas 128MB(10MB 파일은 일반 모드 491MB로 선형 증가). **8GB로 충분하며 증설은 현재 불필요.** 단 대시보드·차트가 비어 있었고 실제 가져오기 파이프라인 값이 아니므로 Gate ④ 이후 재측정한다. 한도 합계는 상시 4.75GiB, 테스트 DB 포함 6.875GiB |
 | 6 | **Jenkins 실행 환경의 Docker 사용 가능 여부** | 마이그레이션 왕복 테스트(D6, tmpfs 테스트 DB)를 Jenkins에 넣는 방식을 정하기 위한 선행 확인. 에이전트에서 Docker를 쓸 수 있는지, 권한은 어떤지 | 협의 필요 | - |
 
 ## 배포 전에 함께 확인할 항목 (작성자 추가)
@@ -33,6 +33,9 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 15 | **세션 쿠키 충돌 가능성** | Superset 세션 쿠키 이름은 `session`, `Path=/bi-wizard/superset`이다. 포털이 같은 이름의 쿠키를 쓰면 충돌할 수 있다(경로가 달라 지금은 구분됨) | 확인 필요 | - |
 | 16 | **정상 경로 `…/superset/superset/…` 오인** | Superset의 정상 라우트 `/superset/welcome/`이 `SUPERSET_APP_ROOT=/bi-wizard/superset` 아래에서는 `/bi-wizard/superset/superset/welcome/`이 된다. 버그가 아니다. 모니터링·접근 규칙에서 중복 접두로 오인해 차단하지 않도록 알린다 | 협의 필요 | - |
 | 17 | **`/nginx-health`** | frontend 컨테이너 내부 전용 경로다. 메인 플랫폼이 전달할 필요가 없다 | 확인됨 | - |
+
+| 18 | **외부 요청(사내망 차단 시 영향)** | Superset 6.1.0 화면은 `apachesuperset.gateway.scarf.sh`(텔레메트리 픽셀)와 `fonts.googleapis.com`, `fonts.gstatic.com`에 요청한다. `SCARF_ANALYTICS=false`는 6.1.0에서 효과가 없음을 확인했다(소스와 번들에 읽는 코드가 없음). 사내망에서 막히면 콘솔 오류와 지연이 생길 수 있고, 허용하면 사용 통계가 외부로 나간다. 설정 파일의 CSP(`TALISMAN_CONFIG`)에서 scarf 호스트를 빼는 방안은 사용자 결정 대기 | 사용자 결정 대기 | - |
+| 19 | **Superset 기본 rate limit** | 6.1.0 기본 `RATELIMIT_APPLICATION="50 per second"`(인메모리)이고 클라이언트 IP별이다. 앞단 프록시가 `X-Forwarded-For`를 보내지 않으면 모든 사용자가 한 IP로 집계된다. 연속 호출 테스트에서 429가 837건 났다(5xx는 0건). (8번과 연결) | 협의 필요 | - |
 
 ## 이미 확인된 사항
 

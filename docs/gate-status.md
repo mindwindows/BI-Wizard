@@ -3,7 +3,7 @@
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
-| ② ENVIRONMENT BOOTSTRAP | 진행 중 | - | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안 승인 완료. 환경 구축(env-engineer ⇄ qa-engineer) 진행 중 | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
+| ② ENVIRONMENT BOOTSTRAP | 승인 대기 | - | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안 승인 완료. 환경 구축·검증(env-engineer ⇄ qa-engineer, reviewer) 완료. Embedded iframe 미통과 등 사용자 결정 대기(아래 "Gate ② 결과") | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | 대기 | - | - | - |
 | ④ 기능 개발 | 대기 | - | - | - |
 
@@ -39,6 +39,29 @@
 - **QA 환경 파일 규칙 승인:** QA는 `.env`를 만들거나 수정하지 않고 `_workspace/qa/`의 비밀이 아닌 더미 값 임시 env 파일을 `--env-file`로 지정한다.
 - **현재 단계:** env-engineer ⇄ qa-engineer 구축·검증 단계 진행 중. 완료 후 Environment Ready 결과, `docker stats` 실측, 하위 경로 + Embedded 검증, BAT 검증 요청서를 보고한다.
 
+## Gate ② 결과 (2026-10-11, 커밋 `4fbf7ad` 기준 qa-engineer 독립 재검증, reviewer 리뷰)
+| Environment Ready 항목 | 결과 | 근거 |
+| --- | --- | --- |
+| `.env.example` canonical, 중복 없음 | 통과 | 23개, Azure/Redis/Valkey/Celery 없음, `ci-validate-env.sh` 네거티브 18종 |
+| `.env` Secret 보호 | 통과 | 추적 파일에 Secret 없음, `.env`/`.env.*` 무시(`!.env.example`) |
+| backend·frontend·superset Dockerfile 빌드 | 통과 | test/build 타깃 포함 |
+| compose 구성(healthcheck, volume, `mem_limit`, 순서) | 통과 | 8개 서비스, 합계 상시 4.75GiB/테스트 포함 6.875GiB, 태그 고정 |
+| 시작·종료 | 통과 | `up`/`down`(-v 없음) 반복, 데이터와 계정 유지 |
+| `migrate` 성공 후에만 `backend` 시작 | 통과 | 순서 시각 확인, `migrate` 강제 실패 시 backend 미시작 |
+| Frontend ↔ FastAPI, Backend → PostgreSQL | 통과 | 포털 화면 API/DB 정상(HTTP 200) |
+| Azure OpenAI 검증 경로 | 해당 없음 | 변수·`/health/azure-openai`(404) 없음 |
+| db-bootstrap(멱등, 볼륨 유지, 비밀번호 변경, 빈 값 실패, 읽기 전용) | 통과 | 로그에 비밀번호 0건 |
+| Superset 메타 DB 분리, 읽기 전용 연결 | 통과 | `superset` DB 소유 `superset_meta`, 등록 연결 `bi_readonly`, `allow_dml=false`, 명령줄·로그에 비밀번호 없음 |
+| 마이그레이션 왕복(tmpfs, profile `test`) | 통과(제한) | upgrade→downgrade→upgrade 성공. baseline이 빈 revision이라 검증 범위는 `alembic_version` 기록뿐 |
+| **하위 경로**(`APP_PROXY_STRIP_PREFIX` false/true 각각) | 통과 | 포털, API, Superset 로그인·화면 이동, 접두 밖 404, 재빌드 없는 전환 |
+| **Embedded iframe** | **미통과(결정 대기)** | 기본 guest 역할 `Public`에 권한이 없어 `…/api/v1/me/roles/` 403. 하위 경로가 원인이 아님(루트+Public도 실패, 하위 경로+Gamma는 성공) |
+| 메모리(`mem_limit`, 실측, 5MB 샘플) | 통과 | `docs/deploy-coordination.md` 5번 |
+| BAT 6종 | 부분(보류) | 작성과 정적 검증 완료. 실행은 사용자 Windows PC(`docs/windows-bat-verification.md`) |
+| Jenkinsfile CI | 부분 | 6단계 정적 확인, 각 단계 명령은 로컬에서 통과. Jenkins 실행은 미실행 |
+| `skills/local-environment`, README, AGENTS.md | 통과 | 실행한 명령과 대조 |
+
+**사용자 결정 대기 항목(Gate ② 승인 전):** Embedded guest 역할 설계, Superset 로고 이중 접두(6.1.0 하위 경로 BETA) 처리 방식, Scarf 텔레메트리(CSP 설정 변경 여부), 라이선스 "주의" 항목 허용 여부(`psycopg2-binary` LGPL은 Superset 이미지 한정, 테스트 전용 `certifi` MPL-2.0, dev 도구 `lightningcss` MPL-2.0 등), 승인 목록 밖 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`) 사후 확인, postgres·backend를 `127.0.0.1`에만 게시하는 차이 기록, Windows PC BAT 검증 결과.
+
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.
 - **붙여넣기 파서의 따옴표 안 탭 처리:** react-datasheet-grid의 `parseTextPlainData`는 따옴표 안의 줄바꿈만 셀 내용으로 유지하고 **탭은 따옴표 안에서도 셀을 나눈다.** 한 줄짜리 따옴표 셀은 따옴표가 그대로 남는다. 그대로 이식하지 말고 탭·따옴표·`\r` 케이스를 요구사항과 테스트 기준으로 설계한다.
@@ -49,6 +72,11 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - 수식 범위(2번)가 정해져야 `references/baserow/`에서 참고할 모듈 범위(lookup·집계 포함 여부)를 확정할 수 있다.
 - **앱 계정 분리 (조건부 승인, 2026-10-11):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·migrate 계정으로 쓴다. 조건: (1) 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계한다. (2) **Gate ④ 진입 전 분리 완료가 필수 조건**이다. (3) Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. (4) 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다(생략하면 마이그레이션 실행 역할과 런타임 DDL 실행 역할이 같아야 하므로, 분리 시 어느 역할이 동적 객체를 만들고 `bi_readonly`에 어떻게 `SELECT`를 주는지 새로 설계).
 - **D2 (동적 객체 분리 방식) 결정:** 데이터 모델과 함께 옵션(S 별도 schema, N 이름 규칙, R 등록 테이블 기반, D 별도 DB)을 비교해 사용자가 결정한다. 읽기 전용 계정(D7)의 동적 객체 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식도 함께 정한다. 결정 전까지 자동 생성 초안의 `DROP`은 사용자 확인 없이 적용하지 않는다.
+- **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
+- **왕복 테스트의 실질 범위:** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
+- **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
+- **Embedded guest 역할 설계:** `GUEST_ROLE_NAME`(기본 `Public`)에 줄 최소 권한을 데이터셋·대시보드 권한 모델과 함께 설계한다(옵션: 최소 권한 커스텀 역할 권장 / `Gamma` / `PUBLIC_ROLE_LIKE` 비권장).
+- **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
 - **Alembic `target_metadata` 연결:** 현재 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않는다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). Gate ③에서 정적 모델 `MetaData`와 `include_object` 필터를 D2 설계와 함께 연결한다.
 - **업로드 크기 상한:** 이 서비스가 다룰 데이터는 대용량이 아니고 현재 엑셀 파일은 5MB 이하다. Gate ② 검증에서 5MB급 샘플로 backend 사용량을 실측한 결과를 근거로 Gate ③에서 상한을 정한다. 프록시의 요청 본문 상한(`docs/deploy-coordination.md` 7번)과 맞춘다.
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).
