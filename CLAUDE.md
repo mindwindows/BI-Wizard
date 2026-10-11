@@ -23,3 +23,4 @@
 | --- | --- | --- | --- |
 | 2026-10-11 | Harness v2로 최초 구성 | 전체 | 개발 에이전트 팀 구축 |
 | 2026-10-11 | Azure OpenAI 처리 방침 변경: 변수 유지·N/A 금지 → 제외(변수·`/health/azure-openai` 미생성, 체크리스트 "해당 없음"). bi-review는 미결정/결정 항목 검사 문구 갱신 | `.claude/agents/env-engineer.md`, `backend-dev.md`, `.claude/skills/env-bootstrap`, `bi-wizard-dev`, `bi-review` | 브리프 5절 1번 "제외" 결정(사용자, 2026-10-11) 반영 |
+| 2026-10-11 | 마이그레이션 결정(D1~D7, `docs/decisions/03-migration-tool.md`) 반영: Alembic, 일회성 `migrate` 서비스, tmpfs 테스트 DB(profile), Superset 별도 DB·읽기 전용 계정, 마이그레이션 안 고정 SQL만 허용(보간 금지), `downgrade` 필수와 왕복 테스트, `DROP` 사용자 확인(D2 연기). bi-review에 마이그레이션 점검 항목(7-1) 추가 | `.claude/agents/env-engineer.md`, `qa-engineer.md`, `architect.md`, `backend-dev.md`, `.claude/skills/env-bootstrap`, `qa-verification`, `backend-fastapi`, `bi-review`, `feature-unit`, `modularize`, `bi-wizard-dev` | 마이그레이션 도구·실행 방식 사용자 결정(2026-10-11) 반영 |

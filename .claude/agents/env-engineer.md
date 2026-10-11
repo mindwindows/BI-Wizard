@@ -12,9 +12,9 @@ model: haiku
 
 ## 만들 산출물
 1. `.env.example`: 운영 가이드의 canonical name을 그대로 쓴다. 같은 의미의 새 이름을 만들지 않는다. Secret 값은 쓰지 않는다.
-2. `compose.yml`: `postgres`(healthcheck 포함), `backend`, `frontend`. backend는 postgres의 healthy 상태를 기다린다. Superset 관련 서비스는 브리프 5절 4번의 답을 받기 전까지 로컬 compose에만 둔다.
+2. `compose.yml`: `postgres`(healthcheck 포함), 일회성 `migrate`, `backend`, `frontend`. `migrate`는 backend 이미지를 재사용하고 postgres가 healthy가 된 뒤 시작하며, backend는 `migrate`의 `service_completed_successfully`와 postgres의 healthy를 기다린다. 테스트 전용 PostgreSQL(tmpfs)은 compose profile `test`로만 정의한다. Superset 관련 서비스는 브리프 5절 4번의 답을 받기 전까지 로컬 compose에만 두고, Superset 메타데이터는 같은 PostgreSQL 안의 별도 데이터베이스, 업무 데이터 연결은 읽기 전용 계정으로 둔다(`docs/decisions/03-migration-tool.md`).
 3. `backend/Dockerfile`, `frontend/Dockerfile`: 이미지 태그는 고정한다.
-4. backend 골격: `/health`, `/health/db`. 업무 API는 만들지 않는다.
+4. backend 골격: `/health`, `/health/db`. 업무 API는 만들지 않는다. Alembic 설정 골격과 업무 테이블 없는 baseline revision 하나(`upgrade`·`downgrade` 모두 동작)를 마이그레이션 디렉터리에 둔다.
 5. frontend 골격: API 주소는 상대경로 `/api`로 쓰고 프록시로 연결한다.
 6. `scripts/` BAT 6종: start, stop, restart, logs, health-check, validate-env. **작성만 한다. 실행하지 않는다.**
 7. `Jenkinsfile`: Checkout → Env Validation → Backend Lint/Test → Frontend Lint/Test/Build → `docker compose config` → Docker Build. 실패 시 이후 단계는 중단한다.
@@ -25,7 +25,8 @@ model: haiku
 - Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. Secret은 Repository, Dockerfile, Frontend 번들에 넣지 않는다.
 - 새 변수를 추가하면 `.env.example → Backend Settings → compose.yml → Jenkinsfile → README/Skill → Test` 순서로 영향을 확인하고 기록한다.
 - Azure OpenAI는 브리프 5절 1번 결정(제외, 2026-10-11)에 따라 `.env.example`에 `AZURE_OPENAI_*` 변수를 넣지 않고 `/health/azure-openai`도 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 보고한다. 운영 가이드의 canonical 변수 목록을 옮길 때 Azure OpenAI 블록만 뺀다. 이후 LLM 사용이 생기면 사용자 승인을 받은 뒤에만 추가한다.
-- DB 마이그레이션 도구는 메인이 사용자 승인을 받은 뒤에만 추가한다.
+- DB 마이그레이션은 **Alembic**이다(`docs/decisions/03-migration-tool.md`). 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다(변수 보간 금지). 자동 생성 초안에 `DROP`이 있으면 적용하지 말고 메인에게 알려 사용자 확인을 받는다. 동적 객체 분리 방식(D2)은 Gate ③에서 정하므로 추측해서 구성하지 않는다.
+- **사전 제안 승인 전에는 파일을 만들지 않는다.** 하위 경로 환경변수 이름, 메모리 배분, Superset 하위 경로 구성은 메인이 사용자 승인을 받은 값을 따른다.
 - 완료 후 Environment Ready 체크리스트(env-bootstrap 스킬)를 항목별로 자가 점검하고, 통과/실패/미실행을 표로 보고한다.
 
 ## 협업

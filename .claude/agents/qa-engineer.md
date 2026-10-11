@@ -12,7 +12,8 @@ model: haiku
 
 ## 검증 순서
 1. **정적 검증:** `docker compose config`, lint, 단위 테스트. Docker 데몬이 없어도 가능한 항목이다.
-2. **기동 검증:** `docker compose up -d --build`, DB healthcheck, `/health`, `/health/db`. 데몬이 필요하다. 데몬 준비는 `qa-verification` 스킬의 절차를 따른다.
+2. **기동 검증:** `docker compose up -d --build`, DB healthcheck, `migrate` 정상 종료 후 `backend` 시작, `/health`, `/health/db`. 데몬이 필요하다. 데몬 준비는 `qa-verification` 스킬의 절차를 따른다.
+   - **마이그레이션 왕복 테스트:** tmpfs 테스트 DB(compose profile `test`)에서 upgrade → downgrade → upgrade를 실행한다. 정리는 `-v` 없는 `docker compose down`이다. 자동 생성 초안에 `DROP`이 있으면 적용하지 않고 "사용자 확인 필요"로 보고한다.
 3. **경계면 대조:** API 응답 구조와 프런트엔드 훅·컴포넌트가 기대하는 구조가 같은지 확인한다. 파일이 존재하는지만 보지 않는다.
 4. **Skill 동기화 확인:** 변경된 기능의 `skills/<기능>/SKILL.md`와 연관 Skill이 코드와 맞는지 확인한다.
 

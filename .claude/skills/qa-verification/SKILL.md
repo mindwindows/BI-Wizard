@@ -56,8 +56,23 @@ docker compose ps
 ```
 - postgres의 healthcheck가 healthy인지 확인한다.
 - `curl`로 `/health`, `/health/db`를 확인한다. 프론트엔드 접속과 `/api` 프록시도 확인한다.
+- `docker compose ps -a`로 `migrate`가 종료 코드 0으로 끝났는지 확인하고, `backend`가 그 뒤에 시작됐는지(시작 시각 또는 `depends_on` 조건) 확인한다. `migrate`가 실패하면 `backend`가 시작되지 않아야 한다. 이 실패 경로는 테스트 환경에서 의도적으로 실패하는 마이그레이션이 필요하면 사용자 승인 후에 확인한다.
 - 종료 확인: `docker compose down`. **`-v` 옵션은 쓰지 않는다.**
 - 검증 후 컨테이너가 남아 있으면 종료 여부를 보고에 적는다.
+
+### 3-A-2. 마이그레이션 왕복 테스트 (D5, D6)
+`docs/decisions/03-migration-tool.md` 기준이다. 빈 DB는 tmpfs 테스트 전용 PostgreSQL 서비스(compose profile `test`)로 만든다.
+
+```bash
+docker compose --profile test up -d postgres-test      # 서비스 이름은 compose.yml을 따른다
+# backend 이미지로 테스트 DB에 대해 순서대로 실행 (명령은 README와 compose.yml을 따른다)
+#   alembic upgrade head → alembic downgrade base → alembic upgrade head
+docker compose --profile test down                     # -v 없음
+```
+- 세 단계가 모두 성공해야 통과다. 실패한 단계와 출력의 핵심 줄을 그대로 인용한다.
+- 자동 생성 초안에 `DROP`이 있으면 qa-engineer가 직접 적용하지 않고 "사용자 확인 필요"로 보고한다.
+- tmpfs는 메모리를 쓴다. 테스트 DB는 평소 기동 대상이 아니다.
+- Jenkins에서의 적용은 Jenkins 실행 환경(Docker 사용 가능 여부) 확인 후 별도 결정이다. 그 전에는 Jenkinsfile에 넣지 않는다.
 
 ## 3-B단계: 데몬을 띄울 수 없을 때 (사용자 PC 검증으로 넘김)
 1. 1단계 정적 검증까지만 수행하고 결과를 기록한다.
@@ -68,7 +83,7 @@ docker compose ps
 | 순서 | 실행할 명령 (또는 BAT) | 기대 결과 | 실패 시 보낼 정보 |
 | --- | --- | --- | --- |
 | 1 | `scripts\validate-env.bat` | 오류 없이 종료 | 콘솔 출력 |
-| 2 | `scripts\start-local.bat` | 세 컨테이너 기동 | `scripts\logs-local.bat` 출력 |
+| 2 | `scripts\start-local.bat` | `postgres`, `backend`, `frontend` 기동. `migrate`는 정상 종료(종료 코드 0) 후 `backend` 시작 | `scripts\logs-local.bat` 출력 |
 | 3 | `scripts\health-check.bat` | `/health`, `/health/db` 정상 | 응답 내용 |
 | 4 | `scripts\stop-local.bat` | 정상 종료 | 콘솔 출력 |
 

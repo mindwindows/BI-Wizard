@@ -8,7 +8,7 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 ## 고정 기술
 - FastAPI, SQLAlchemy, PostgreSQL. 다른 프레임워크나 ORM으로 바꾸지 않는다.
 - REST를 기본으로 한다. 실시간 기능이 꼭 필요할 때만 WebSocket이나 SSE를 검토한다.
-- 기존 ORM·Migration 구성이 생기면 그대로 따른다. 마이그레이션 도구는 사용자 승인 후 추가한다.
+- DB 마이그레이션 도구는 **Alembic**이다(`docs/decisions/03-migration-tool.md`). 다른 도구로 바꾸거나 앱 시작 시 `create_all`로 스키마를 만들지 않는다.
 
 ## 필수 규칙
 - **Health 우선:** `/health`, `/health/db`를 업무 API보다 먼저 만든다.
@@ -17,6 +17,15 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 - **Secret:** DB 비밀번호, 키는 환경변수에서만 읽는다. 로그와 응답에 넣지 않는다.
 - **환경변수:** `.env.example`의 canonical name만 쓴다.
 - **라이선스:** 허용형 패키지만 추가한다. 추가 전 `bi-review`의 라이선스 항목을 확인한다.
+
+## DB 마이그레이션 (Alembic, `docs/decisions/03-migration-tool.md`)
+- 마이그레이션 파일은 마이그레이션 디렉터리(제안: `backend/migrations/`) 안에만 둔다. 스키마 변경은 항상 revision으로 만든다.
+- **허용(D3):** `op.*`, SQLAlchemy 표현식, **보간이 전혀 없는 고정 SQL 문자열**(`op.execute("...")`). 뷰·확장은 autogenerate가 다루지 않으므로 이 방식으로 수동 작성한다.
+- **금지(D3):** SQL에 변수를 넣는 f-string, `%`, `.format()`, `+` 연결. 사용자 입력과 환경변수를 SQL 문자열에 넣지 않는다. 마이그레이션 디렉터리 밖의 코드는 위 "SQL 문자열 금지" 규칙을 그대로 따른다.
+- **`downgrade()` 필수(D5):** 모든 revision에 실제 동작하는 `downgrade()`를 작성하고, 빈 DB에서 upgrade → downgrade → upgrade 왕복 테스트를 통과시킨다. 운영 중 문제는 되돌리기가 아니라 **수정 마이그레이션을 추가**해서 대응한다.
+- **`DROP` 확인(D2 안전장치):** autogenerate 초안에 `DROP`(테이블, 열, 인덱스, 제약)이 있으면 적용하기 전에 메인을 통해 사용자 확인을 받는다. 확인 결과를 변경 요약(커밋 메시지)에 적는다. 확인 전에는 적용하지 않는다. 사용자가 런타임에 만드는 데이터셋 테이블·수식 뷰가 삭제 후보에 섞이는지 특히 살핀다. 동적 객체 분리 방식(D2)은 Gate ③에서 정한다.
+- 실행은 compose의 일회성 `migrate` 서비스(backend 이미지 재사용)가 한다. 앱 코드가 시작 시 마이그레이션을 실행하지 않는다.
+- DB 계정: 마이그레이션과 앱 쓰기는 앱 계정, Superset 데이터 연결은 읽기 전용 계정이다. Superset 메타데이터는 별도 데이터베이스(D7)이므로 우리 Alembic이 건드리지 않는다.
 
 ## 수식 엔진 (lark 기반)
 - 파서는 lark(MIT)로 직접 작성한다. 엑셀 수식 전용 라이브러리 중 EUPL 등 비허용 라이선스는 쓰지 않는다.
@@ -44,7 +53,7 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 ## 테스트
 - pytest를 쓴다.
 - 수식 엔진은 변환 결과와 계산 결과를 모두 테스트한다.
-- DB를 쓰는 테스트는 실제 PostgreSQL 컨테이너 또는 테스트 전용 DB를 쓴다. 운영 DB를 쓰지 않는다.
+- DB를 쓰는 테스트는 실제 PostgreSQL 컨테이너 또는 테스트 전용 DB를 쓴다. 운영 DB를 쓰지 않는다. 마이그레이션 왕복 테스트는 compose의 tmpfs 테스트 전용 PostgreSQL 서비스(profile `test`)를 쓴다(D6).
 
 ## 관련 Skill
 - `feature-unit`: 완료 기준

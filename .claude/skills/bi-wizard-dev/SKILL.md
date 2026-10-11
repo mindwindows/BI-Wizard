@@ -39,7 +39,8 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - 사용자가 디자인과 Reference를 고르면 `docs/decisions/`에 기록하고 Gate ②로 넘어간다.
 
 ### Gate ②: ENVIRONMENT BOOTSTRAP
-- architect가 DB 마이그레이션 도구 후보를 비교한다. 사용자가 고른 도구를 env-engineer가 반영한다.
+- DB 마이그레이션은 **Alembic**으로 결정됐다(D1~D7, `docs/decisions/03-migration-tool.md`). env-engineer가 `migrate` 서비스, tmpfs 테스트 DB(profile), Superset 별도 DB와 읽기 전용 계정을 반영한다. D2는 Gate ③, D6의 Jenkins 적용은 Jenkins 실행 환경 확인 후 정한다.
+- env-engineer는 **파일을 만들기 전에** 사전 제안(하위 경로 환경변수 이름, 메모리 배분, 하위 경로 구성 확인 결과 등)을 메인에게 올리고, 메인이 사용자 승인을 받은 뒤에 만든다.
 - env-engineer가 환경을 만들고, qa-engineer가 `qa-verification` 스킬에 따라 검증한다. 둘은 SendMessage로 문제를 주고받는다.
 - Environment Ready 체크리스트(`env-bootstrap` 스킬)가 모두 통과하거나, 실패 항목에 사용자 승인이 난 뒤에만 Gate ③으로 넘어간다.
 - 이 Gate에서 사용자에게 **미결정 4번(팀 웹서버의 Superset 운영 조건)** 을 질문한다. 운영자 확인이 필요한 항목이므로, 답을 모르면 "웹서버 운영자 확인 필요"라고 전달한다. 확인 중이면 Superset은 로컬 `compose.yml`에만 포함한다.
@@ -48,7 +49,8 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 
 ### Gate ③: MODULARIZE
 - architect가 산출물을 만들고 reviewer가 리뷰한다.
-- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)** 과 **미결정 3번(새 데이터셋 생성 권한)** 을 질문한다. 옵션과 영향을 함께 준다.
+- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)**, **미결정 3번(새 데이터셋 생성 권한)**, **미결정 6번(저장 전 수식 평가 경로)**, **미결정 7번(Explore 제공 방식)**, 그리고 **마이그레이션 D2(동적 객체 분리 방식)** 를 질문한다. 옵션과 영향을 함께 준다.
+- Gate ① 원본 대조 인계 사항과 `CREATE VIEW` 렌더링 근거(PostgreSQL·SQLAlchemy 공식 문서 확인)는 `docs/gate-status.md`의 "Gate ③ 인계 사항"을 따른다.
 - API 계약과 모듈 경계는 승인 후에만 `docs/decisions/`에 확정한다. 이후 계약 변경은 사용자 승인이 필요하다.
 
 ### Gate ④: 기능 개발

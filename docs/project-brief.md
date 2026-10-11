@@ -158,7 +158,7 @@ Environment Ready 체크리스트(전부 통과 시 기능 개발 시작):
 주의:
 - **Redis**는 7.4부터 라이선스가 바뀌었다. 회사 정책상 문제가 되면 **Valkey**(BSD-3, Redis 호환)로 대체한다.
 - **Docker Desktop**은 일정 규모 이상 기업에서 유료. 서버의 Docker Engine은 무관하며, 개발 PC는 Podman 등으로 대체 가능.
-- DB 마이그레이션 도구는 운영 가이드("신규 프로젝트에서만 필요한 조합을 제안")에 따라 ENVIRONMENT BOOTSTRAP 단계에서 제안·확정한다.
+- DB 마이그레이션 도구는 운영 가이드("신규 프로젝트에서만 필요한 조합을 제안")에 따라 ENVIRONMENT BOOTSTRAP 단계에서 제안·확정한다. → **결정됨 (2026-10-11): Alembic.** 실행 방식과 규칙은 `docs/decisions/03-migration-tool.md` 참고.
 
 ### 4.8 제외한 도구
 - Power BI(라이선스 없음), Metabase(AGPL, SSO·임베딩 유료), NocoDB(Sustainable Use License), Mathesar(GPLv3)

@@ -11,7 +11,7 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 ## 실행 계약 (운영 가이드 2절, 브리프 3.4절)
 - 시작: `docker compose up -d --build`
 - 종료: `docker compose down` (볼륨 삭제 옵션 금지)
-- 서비스: `postgres`, `backend`, `frontend`, 그리고 확인 후 추가되는 Superset 관련 서비스
+- 서비스: `postgres`, `migrate`(일회성), `backend`, `frontend`, 그리고 확인 후 추가되는 Superset 관련 서비스. 테스트 전용 PostgreSQL 서비스는 compose profile `test`에만 있다.
 - Health: `/health`, `/health/db`를 업무 API보다 먼저 만든다. `/health/azure-openai`는 만들지 않는다(브리프 5절 1번 결정: 제외).
 - Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API는 상대경로 `/api`와 프록시로 연결한다.
 - BAT 6종: `start-local.bat`, `stop-local.bat`, `restart-local.bat`, `logs-local.bat`, `health-check.bat`, `validate-env.bat`. Linux 세션에서는 작성만 한다.
@@ -31,6 +31,13 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - **Azure OpenAI (브리프 5절 1번, 결정됨: 제외):** `.env.example`에서 `AZURE_OPENAI_*` 변수를 뺀다. `/health/azure-openai`는 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 표시한다. 이후 LLM 사용이 생기면 사용자 승인 후에 다시 논의한다.
 - **Superset과 캐시 서비스 (브리프 5절 4번):** 로컬 `compose.yml`에만 넣는다. 팀 웹서버 구성은 운영자 확인 전까지 확정하지 않는다. Redis 대체로 Valkey를 쓸 수 있으나 라이선스 확인은 사용자 승인 후에 한다.
 
+## 마이그레이션 구성 (`docs/decisions/03-migration-tool.md`)
+- **도구:** Alembic(D1). backend 이미지에 패키지를 추가하고 마이그레이션 디렉터리(제안: `backend/migrations/`)와 설정 골격을 둔다. 업무 테이블 revision은 만들지 않는다. 왕복 테스트를 돌릴 수 있도록 업무 테이블이 없는 기준(baseline) revision 하나(`upgrade`와 `downgrade` 모두 동작)만 둔다.
+- **`migrate` 서비스(D4):** backend 이미지를 재사용해 `alembic upgrade head`를 실행하고 종료한다(`restart` 없음). `postgres`의 `service_healthy` 이후에 시작한다. `backend`는 `migrate`의 `service_completed_successfully`와 `postgres`의 `service_healthy`에 의존한다. 앱 코드가 시작 시 마이그레이션을 실행하지 않는다.
+- **테스트 DB(D6):** `profiles: ["test"]`인 테스트 전용 PostgreSQL 서비스를 정의한다. 데이터는 `tmpfs`에 두고 크기를 제한한다. 정리는 `docker compose --profile test down`이며 `-v`는 쓰지 않는다. Jenkins 적용은 Jenkins 실행 환경 확인 후 별도 결정이므로 Jenkinsfile 초기 Stage에는 넣지 않는다.
+- **Superset(D7):** 메타데이터는 같은 PostgreSQL 컨테이너 안의 **별도 데이터베이스**다. 업무 데이터 연결은 **읽기 전용 계정**을 쓴다. 계정 생성은 환경변수를 SQL에 보간하지 않는 방식으로 한다(PostgreSQL 초기화 스크립트 쪽 등, 방식은 사전 제안으로 사용자 승인을 받는다). 마이그레이션 안의 SQL은 고정 문자열만 허용한다(D3).
+- 동적 객체(사용자 데이터셋 테이블, 수식 뷰)의 분리 방식(D2)은 Gate ③에서 정한다. 그 전에는 `DROP`이 포함된 자동 생성 초안을 적용하지 않는다.
+
 ## Environment Ready 체크리스트
 모두 통과해야 Gate ③으로 넘어간다.
 
@@ -39,6 +46,9 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - [ ] Backend, Frontend Dockerfile이 각각 빌드된다.
 - [ ] `compose.yml`: postgres, backend, frontend가 정의되어 있고, DB healthcheck와 volume이 있다.
 - [ ] Compose 시작과 종료가 실제로 성공한다. (Docker 데몬이 필요하다. 불가하면 `qa-verification` 절차를 따른다.)
+- [ ] `migrate` 서비스가 성공 완료된 뒤에만 `backend`가 시작된다(`depends_on` 조건). `migrate`를 실패시켰을 때 `backend`가 시작되지 않는지도 확인한다.
+- [ ] 마이그레이션 왕복 테스트: tmpfs 테스트 DB(profile `test`)에서 upgrade → downgrade → upgrade가 성공한다. 정리는 `-v` 없는 `docker compose down`이다.
+- [ ] Superset 메타데이터 DB가 별도 데이터베이스이고, Superset의 업무 데이터 연결이 읽기 전용 계정이다. (Superset 서비스는 로컬 compose에만 있다. 미결정 4번 확인 전.)
 - [ ] Frontend에서 FastAPI로 최소 통신이 된다.
 - [ ] Backend에서 PostgreSQL 연결 상태를 실제로 확인한다.
 - [ ] Azure OpenAI 검증 경로: **해당 없음** (브리프 5절 1번 결정: 제외. 변수와 Health 경로를 만들지 않았는지만 확인한다.)

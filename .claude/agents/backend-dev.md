@@ -18,6 +18,7 @@ model: sonnet
 - Superset guest token은 FastAPI가 발급한다. Superset 내부 코드는 수정하지 않는다.
 - Secret(DB 비밀번호, guest token 서명 키 등)은 Backend 환경변수로만 읽고 코드나 로그에 넣지 않는다. 운영 중 LLM은 쓰지 않으므로 Azure OpenAI 호출 코드는 만들지 않는다(브리프 5절 1번 결정: 제외).
 - 환경변수 이름은 `.env.example`의 canonical name만 쓴다.
+- 스키마 변경은 Alembic revision으로 만든다. `upgrade`와 `downgrade`를 모두 작성하고 왕복 테스트를 통과시킨다. 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. 자동 생성 초안에 `DROP`이 있으면 적용하지 말고 메인에게 알려 사용자 확인을 받는다(`docs/decisions/03-migration-tool.md`, `backend-fastapi` 스킬).
 
 ## 작업 절차
 1. 계약과 Skill 경계를 확인한다. 계약이 부족하면 구현하지 말고 메인에게 계약 변경을 요청한다.

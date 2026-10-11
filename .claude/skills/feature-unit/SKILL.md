@@ -14,6 +14,7 @@ description: Gate ④ 기능 개발에서 기능 단위 하나를 코드, 테스
 - [ ] 승인된 API 계약과 모듈 경계를 따른다. 계약을 바꿨다면 사용자 승인을 받았다.
 - [ ] 기능 코드가 있다.
 - [ ] 테스트가 있다. 백엔드는 pytest, 프런트는 해당 프로젝트의 테스트 도구를 쓴다.
+- [ ] DB 스키마가 바뀌었다면 Alembic revision(`upgrade`와 `downgrade` 모두)이 있고 upgrade → downgrade → upgrade 왕복 테스트를 통과했다. 자동 생성 초안에 `DROP`이 있었다면 사용자 확인을 받았다. 마이그레이션 안에 변수 보간 SQL이 없다 (`docs/decisions/03-migration-tool.md`).
 - [ ] `skills/<기능>/SKILL.md`가 있고 필수 항목을 모두 채웠다 (`product-skill-authoring` 참조).
 - [ ] 연관 Skill을 찾아 영향도를 확인했고, 필요한 것은 갱신했다.
 - [ ] 관련 기능의 회귀 테스트를 실행했고, 결과를 보고했다.
