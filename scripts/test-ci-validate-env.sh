@@ -109,6 +109,16 @@ expect_fail "roles.sql bi_data 소유자" "필수 문장이 없습니다: CREATE
 expect_fail "roles.sql 추가 \\getenv" "\\getenv 는 비밀번호 변수 4개뿐" append_roles '\getenv extra SOME_OTHER_VARIABLE'
 expect_fail "roles.sql \\getenv 누락" "필수 문장이 없습니다: \\getenv app_pw POSTGRES_APP_PASSWORD" sed_roles '/^\\getenv app_pw/d'
 
+# 문자열 리터럴 안의 '--' 로 식별자 보간을 주석처럼 숨기는 우회, ':foo' 앞 따옴표 우회, psql 메타 명령
+expect_fail "roles.sql 문자열 안의 -- 로 보간 숨기기" "작은따옴표가 있는 코드 줄에 '--'" append_roles "SELECT '--', :\"x\";"
+expect_fail "roles.sql 코드 뒤 주석에 따옴표" "작은따옴표가 있는 코드 줄에 '--'" append_roles "SELECT 'a'; -- note"
+expect_fail "roles.sql 따옴표 뒤 :foo 우회" "구문 보간" append_roles "SELECT 'a':foo;"
+expect_fail "roles.sql \\i 메타 명령" "허용되지 않은 psql 메타 명령" append_roles '\i /tmp/other.sql'
+expect_fail "roles.sql \\ir 메타 명령" "허용되지 않은 psql 메타 명령" append_roles '\ir other.sql'
+expect_fail "roles.sql \\! 셸 실행" "허용되지 않은 psql 메타 명령" append_roles '\! id'
+expect_fail "roles.sql 다른 \\set" "\\set 은" append_roles '\set other 1'
+expect_fail "roles.sql \\copy 메타 명령" "허용되지 않은 psql 메타 명령" append_roles '\copy t from stdin'
+
 # --- compose.yml ---
 expect_fail "backend에 POSTGRES_USER" "backend 서비스에 POSTGRES_USER" add_after_service backend '      POSTGRES_USER: ${POSTGRES_USER}'
 expect_fail "backend에 POSTGRES_PASSWORD" "backend 서비스에 POSTGRES_PASSWORD" add_after_service backend '      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}'
@@ -121,6 +131,16 @@ expect_fail "migrate에서 POSTGRES_OWNER_PASSWORD 빠짐" "migrate 서비스에
 expect_fail "backend에서 AUTH_STUB_ENABLED 빠짐" "backend 서비스에 AUTH_STUB_ENABLED 가 없습니다" delete_in_service backend "AUTH_STUB_ENABLED:"
 expect_fail "frontend에 DB 비밀번호" "frontend 서비스에 DB/Secret/스텁 변수" add_after_service frontend '      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}'
 expect_fail "frontend에 스텁 변수" "frontend 서비스에 DB/Secret/스텁 변수" add_after_service frontend '      AUTH_STUB_ENABLED: ${AUTH_STUB_ENABLED}'
+expect_fail "backend env_file" "backend 서비스에 env_file" add_after_service backend '    env_file: .env'
+expect_fail "migrate env_file" "migrate 서비스에 env_file" add_after_service migrate '    env_file: [.env]'
+expect_fail "frontend env_file" "frontend 서비스에 DB/Secret/스텁 변수(또는 env_file)" add_after_service frontend '    env_file: .env'
+expect_fail "backend 리스트 문법 POSTGRES_USER" "backend 서비스에 리스트 문법으로 POSTGRES_USER" add_after_service backend '      - POSTGRES_USER=bi_wizard'
+expect_fail "backend 리스트 문법(값 없는 전달) POSTGRES_PASSWORD" "backend 서비스에 리스트 문법으로 POSTGRES_PASSWORD" add_after_service backend '      - "POSTGRES_PASSWORD"'
+expect_fail "backend 리스트 문법 POSTGRES_OWNER_PASSWORD" "backend 서비스에 리스트 문법으로 POSTGRES_OWNER_PASSWORD" add_after_service backend '      - POSTGRES_OWNER_PASSWORD=x'
+expect_fail "migrate 리스트 문법 POSTGRES_APP_PASSWORD" "migrate 서비스에 리스트 문법으로 POSTGRES_APP_PASSWORD" add_after_service migrate '      - POSTGRES_APP_PASSWORD=x'
+expect_fail "backend가 다른 키에서 \${POSTGRES_USER} 참조" "backend 서비스가 \${POSTGRES_USER} 을(를) 참조" add_after_service backend '      LOG_LEVEL: ${POSTGRES_USER}'
+expect_fail "backend가 \${POSTGRES_PASSWORD:-x} 참조" "backend 서비스가 \${POSTGRES_PASSWORD} 을(를) 참조" add_after_service backend '      LOG_LEVEL: ${POSTGRES_PASSWORD:-x}'
+expect_fail "migrate가 \$POSTGRES_PASSWORD 참조" "migrate 서비스가 \${POSTGRES_PASSWORD} 을(를) 참조" add_after_service migrate '      TZ: $POSTGRES_PASSWORD'
 expect_fail "compose가 .env.example에 없는 변수 사용" "에 없는 변수" add_after_service backend '      NEW_THING: ${NEW_THING}'
 expect_fail "compose에 latest 태그" ":latest 태그" sh -c "printf '    image: foo:latest\n' >> '$WORK/compose.yml'"
 

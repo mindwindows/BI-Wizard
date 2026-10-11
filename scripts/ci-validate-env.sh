@@ -119,18 +119,33 @@ service_block() {
   ' "$COMPOSE"
 }
 
+# 주석 줄을 뗀 서비스 블록(주석에 변수 이름이 나와도 위반으로 보지 않는다).
+service_code() { service_block "$1" | grep -Ev '^[[:space:]]*#' || true; }
+
 # 계정 분리(03b 3-2): 이미지 슈퍼유저 변수는 postgres/db-bootstrap/postgres-test만 쓴다. backend와 migrate는
 # 자기 비밀번호만 받는다(컨테이너마다 필요한 변수만 전달). frontend에는 DB 변수를 넘기지 않는다.
-for forbidden in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_OWNER_PASSWORD; do
-  if service_block backend | grep -Eq "^[[:space:]]+$forbidden:"; then
-    fail "backend 서비스에 $forbidden 을(를) 넘기면 안 됩니다(bi_app 전용)."
+# 금지: env_file(전체 .env 전달), `NAME:` 맵 문법, `- NAME=값`/`- NAME` 리스트 문법, ${NAME} 참조.
+check_forbidden_vars() { # 서비스 이름, 금지 변수 이름들, 설명
+  svc="$1"; shift
+  note="$1"; shift
+  code="$(service_code "$svc")"
+  if printf '%s\n' "$code" | grep -Eq '^[[:space:]]+env_file[[:space:]]*:'; then
+    fail "$svc 서비스에 env_file 을(를) 쓰면 안 됩니다(전체 .env 전달 금지, 필요한 변수만 environment 로 전달)."
   fi
-done
-for forbidden in POSTGRES_USER POSTGRES_PASSWORD POSTGRES_APP_PASSWORD; do
-  if service_block migrate | grep -Eq "^[[:space:]]+$forbidden:"; then
-    fail "migrate 서비스에 $forbidden 을(를) 넘기면 안 됩니다(bi_owner 전용)."
-  fi
-done
+  for forbidden in "$@"; do
+    if printf '%s\n' "$code" | grep -Eq "^[[:space:]]+$forbidden[[:space:]]*:"; then
+      fail "$svc 서비스에 $forbidden 을(를) 넘기면 안 됩니다($note)."
+    fi
+    if printf '%s\n' "$code" | grep -Eq "^[[:space:]]+-[[:space:]]*[\"']?$forbidden([=\"'[:space:]]|\$)"; then
+      fail "$svc 서비스에 리스트 문법으로 $forbidden 을(를) 넘기면 안 됩니다($note)."
+    fi
+    if printf '%s\n' "$code" | grep -Eq "\\$\\{?$forbidden([^A-Za-z0-9_]|\$)"; then
+      fail "$svc 서비스가 \${$forbidden} 을(를) 참조하면 안 됩니다($note)."
+    fi
+  done
+}
+check_forbidden_vars backend "bi_app 전용" POSTGRES_USER POSTGRES_PASSWORD POSTGRES_OWNER_PASSWORD
+check_forbidden_vars migrate "bi_owner 전용" POSTGRES_USER POSTGRES_PASSWORD POSTGRES_APP_PASSWORD
 if ! service_block backend | grep -Eq '^[[:space:]]+POSTGRES_APP_PASSWORD:'; then
   fail "backend 서비스에 POSTGRES_APP_PASSWORD 가 없습니다."
 fi
@@ -140,8 +155,8 @@ fi
 if ! service_block backend | grep -Eq '^[[:space:]]+AUTH_STUB_ENABLED:'; then
   fail "backend 서비스에 AUTH_STUB_ENABLED 가 없습니다."
 fi
-if service_block frontend | grep -Eq '^[[:space:]]+[A-Z_]*(POSTGRES|PASSWORD|SECRET|AUTH_STUB)[A-Z_]*:'; then
-  fail "frontend 서비스에 DB/Secret/스텁 변수를 넘기면 안 됩니다."
+if service_code frontend | grep -Eq '^[[:space:]]+(-[[:space:]]*)?[A-Z_]*(POSTGRES|PASSWORD|SECRET|AUTH_STUB)[A-Z_]*[:=]|^[[:space:]]+env_file[[:space:]]*:'; then
+  fail "frontend 서비스에 DB/Secret/스텁 변수(또는 env_file)를 넘기면 안 됩니다."
 fi
 
 # compose.yml 에 latest 태그가 없다.
@@ -159,8 +174,12 @@ done
 if [ ! -f "$ROLES" ]; then
   fail "$ROLES 가 없습니다."
 else
-  # 주석(-- ...)을 뗀 본문만 검사한다.
-  body="$(sed 's/--.*$//' "$ROLES")"
+  # 주석(-- ...)을 뗀 본문만 검사한다. 줄 전체가 주석인 줄은 지운다. 코드 뒤에 붙은 주석은 문자열 리터럴 안의
+  # '--'(예: SELECT '--', :"x";)와 구별할 수 없으므로, 작은따옴표가 있는 코드 줄에 '--'가 있으면 실패시킨다.
+  if grep -Ev '^[[:space:]]*--' "$ROLES" | grep "'" | grep -q -- '--'; then
+    fail "$ROLES 의 작은따옴표가 있는 코드 줄에 '--'가 있습니다(주석은 별도 줄에 쓰세요)."
+  fi
+  body="$(grep -Ev '^[[:space:]]*--' "$ROLES" | sed 's/--.*$//')"
   # :'변수' 인용은 비밀번호 리터럴 4곳(ro_pw, meta_pw, app_pw, owner_pw)에만, 각각 정확히 한 번 쓴다.
   quoted="$(printf '%s\n' "$body" | grep -o ":'[A-Za-z_][A-Za-z0-9_]*'" || true)"
   for q in $quoted; do
@@ -176,9 +195,17 @@ else
   [ "$(printf '%s\n' "$body" | grep -Eoc "PASSWORD :'[A-Za-z_][A-Za-z0-9_]*'" || true)" = "4" ] || fail "$ROLES 의 psql 인용 보간은 ALTER ROLE ... PASSWORD :'var' 4곳뿐이어야 합니다."
   # \getenv 는 비밀번호 변수 4개뿐이다.
   [ "$(printf '%s\n' "$body" | grep -c '^[[:space:]]*\\getenv')" = "4" ] || fail "$ROLES 의 \\getenv 는 비밀번호 변수 4개뿐이어야 합니다."
+  # psql 메타 명령은 \set ON_ERROR_STOP on, \getenv, \echo, \gexec(조건부 실행)만 허용한다(\i, \ir, \!, 다른 \set 등 금지).
+  for meta in $(printf '%s\n' "$body" | grep -o '\\[A-Za-z0-9_!\\]*' || true); do
+    case "$meta" in
+      '\set' | '\getenv' | '\echo' | '\gexec') ;;
+      *) fail "$ROLES 에 허용되지 않은 psql 메타 명령 $meta (허용: \set ON_ERROR_STOP, \getenv, \echo, \gexec)" ;;
+    esac
+  done
+  [ "$(printf '%s\n' "$body" | grep -c '\\set')" = "1" ] || fail "$ROLES 의 \\set 은 \\set ON_ERROR_STOP on 한 줄뿐이어야 합니다."
   # 식별자 보간(:"var"), 구문 보간(:var), format(), %I 금지. ('::' 형변환은 제외한다)
   if printf '%s\n' "$body" | grep -Eq ':"[A-Za-z_]'; then fail "$ROLES 에 식별자 보간 :\"var\" 이 있습니다."; fi
-  if printf '%s\n' "$body" | grep -Eq "(^|[^:']):[A-Za-z_]"; then fail "$ROLES 에 구문 보간 :var 이 있습니다."; fi
+  if printf '%s\n' "$body" | grep -Eq '(^|[^:]):[A-Za-z_]'; then fail "$ROLES 에 구문 보간 :var 이 있습니다."; fi
   if printf '%s\n' "$body" | grep -Eiq 'format[[:space:]]*\(|%I'; then fail "$ROLES 에 format( 또는 %I 가 있습니다."; fi
   # 역할/DB/schema 이름은 상수 리터럴이고, 비밀번호는 \getenv 로 읽는다.
   for needle in \

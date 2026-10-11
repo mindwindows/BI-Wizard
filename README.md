@@ -51,7 +51,7 @@ BAT의 출력은 ASCII 영어로 `[OK]`, `[FAIL]`, `[MISSING]`, `[EMPTY]`처럼 
 ## 자주 바꾸는 값
 - `.env`의 `APP_BASE_PATH`, `SUPERSET_APP_ROOT`: 하위 경로. 앞 `/` 필수, 뒤 `/`와 `.`/`..` 세그먼트 금지. **빈 값(루트 배포)은 `APP_BASE_PATH`만 허용**하고 `SUPERSET_APP_ROOT`는 비울 수 없습니다. 바꾼 뒤 `scripts\restart-local.bat`.
 - `APP_PROXY_STRIP_PREFIX`: 프록시가 접두를 떼고 전달하면 `true`, 유지하면 `false`(기본). 바꾼 뒤 다시 시작하면 됩니다(이미지 재빌드 불필요). backend는 `${APP_BASE_PATH}/api/…`와 접두 없는 `/api/…`를 모두 받으며, 이 값은 프록시(nginx)가 보내는 경로를 바꿉니다.
-- `AUTH_STUB_ENABLED`: 인증 스텁(시험용 사용자로 접속자를 흉내 내는 임시 기능) 스위치. 기본 `false`. `true`는 개발·시험 전용이라서 `APP_ENV`가 `.env`에 **명시적으로** `local` 또는 `test`일 때만 backend가 시작하고, 그 밖의 값(`production`, `staging`, 빈 값, 설정 없음)에서는 시작을 거부합니다. 스텁 로그인 화면·API는 아직 없습니다(FU-1a).
+- `AUTH_STUB_ENABLED`: 인증 스텁(시험용 사용자로 접속자를 흉내 내는 임시 기능) 스위치. 기본 `false`. 값은 `true`/`false`로 씁니다(그 밖의 값은 CI의 `scripts/ci-validate-env.sh`가 `.env.example`에서 거부합니다). `true`는 개발·시험 전용이라서 `APP_ENV`가 `.env`에 **명시적으로** `local` 또는 `test`일 때만 backend가 시작하고, 그 밖의 값(`production`, `staging`, 빈 값, 설정 없음)에서는 시작을 거부합니다. 스텁 로그인 화면·API는 아직 없습니다(FU-1a).
 - `FRONTEND_HOST`: 기본 `127.0.0.1`(이 PC에서만 접속). 같은 LAN에 열려면 `0.0.0.0`이지만 그러면 Superset 관리자 로그인 화면도 LAN에 노출됩니다.
 - 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꿉니다.
 

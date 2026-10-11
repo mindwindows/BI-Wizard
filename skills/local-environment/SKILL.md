@@ -22,7 +22,7 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 | 변수 | 의미 | 비고 |
 | --- | --- | --- |
 | `APP_NAME`, `APP_ENV`, `APP_DEBUG` | 앱 이름, 환경, 디버그 | `APP_DEBUG=true`면 `/api/docs`가 열린다 |
-| `AUTH_STUB_ENABLED` | 인증 스텁 스위치 | `true`/`false`만. 기본 `false`. `true`는 개발·시험 전용: `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 backend가 시작한다(그 밖에는 시작 거부). 스텁 로그인 기능 자체는 FU-1a |
+| `AUTH_STUB_ENABLED` | 인증 스텁 스위치 | 값은 `true`/`false`로 쓴다(그 밖의 값은 CI `scripts/ci-validate-env.sh`가 `.env.example`에서 거부한다). 기본 `false`. `true`는 개발·시험 전용: `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 backend가 시작한다(그 밖에는 시작 거부). 스텁 로그인 기능 자체는 FU-1a |
 | `APP_BASE_PATH` | 포털 하위 경로 | 예 `/bi-wizard`. 빈 값=루트 배포(빈 값을 허용하는 변수는 이것뿐). 앞 `/` 필수, 뒤 `/`·`//`·`.`/`..` 세그먼트 금지. 운영자 확인 필요 |
 | `APP_PROXY_STRIP_PREFIX` | 프록시가 접두를 떼고 전달하는가 | `false`(기본)=유지, `true`=제거 |
 | `SUPERSET_APP_ROOT` | Superset 하위 경로 | 예 `/bi-wizard/superset`. 형식은 같지만 빈 값 불가(로컬 프록시 재현에서 포털과 경로가 겹침). `APP_BASE_PATH`와 독립 값. 운영자 확인 필요 |

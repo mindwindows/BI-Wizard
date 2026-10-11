@@ -35,6 +35,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url="postgresql+pg8000://",
         target_metadata=target_metadata,
+        # 오프라인 SQL 출력 전용이다(사용자 입력 없음, bi-review 7-4의 런타임 동적 DDL 대상 아님).
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
