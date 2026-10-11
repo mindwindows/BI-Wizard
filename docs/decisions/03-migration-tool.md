@@ -83,3 +83,6 @@
 ## 하네스 반영
 
 이 결정에 맞춰 다음 파일을 수정했다(CLAUDE.md 변경 이력 참고): `.claude/agents/env-engineer.md`, `qa-engineer.md`, `architect.md`, `.claude/skills/env-bootstrap`, `qa-verification`, `backend-fastapi`, `bi-review`, `feature-unit`, `modularize`, `bi-wizard-dev`.
+
+## D2 결정 (Gate ③ 2라운드, 2026-10-11, 사용자 결정)
+D2는 **전용 schema 하나(S-1)** 로 결정됐다: 사용자 데이터셋 원본 표와 수식 뷰는 전용 schema(예: `bi_data`, 이름은 상수)에, 포털 정적 표(팀·사용자·멤버십·데이터셋 등록·열 정의·수식 메타데이터·기준값 표 등)는 `public`에 둔다. 읽기 전용 계정(D7)에는 schema 단위 기본 권한을 부여하고(고정 SQL, 마이그레이션 안), 수식 규칙 변경 시 뷰 재생성은 서버 시작 시 정의 해시 비교로 한다(실패는 헬스 체크에 표시). `DROP` 사용자 확인 안전장치는 그대로 유지한다. `target_metadata`·`include_object` 연결과 앱 계정 분리는 3라운드 F와 06에서 정한다. 상세와 근거는 `docs/decisions/03b-gate3-round-decisions.md` 2절.
