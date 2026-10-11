@@ -18,6 +18,12 @@
 ## 주의
 - **master 소스와 배포본(npm 0.4.0, Superset PyPI 6.1.0)이 다를 수 있다.** 구현 시 사용할 버전을 고정하고 해당 태그의 소스를 다시 읽는다.
 - RLS `clause`는 SQL 조건 문자열이다. 사용자 입력이나 문자열 값을 그대로 넣지 않는다. 설계는 Gate ③에서 PostgreSQL·SQLAlchemy 공식 문서로 근거를 확인한 뒤 정한다.
+- **원본 대조로 확인된 사항:**
+  - RLS 제약의 근거 파일은 `api.py`다(`dataset`은 선택·양의 정수, `clause`는 필수 문자열, 모르는 키는 400). `guest_token.py`의 `GuestTokenRlsRule`은 `dataset: Optional[str]`이다.
+  - 서버는 `clause`를 검증하지 않는다(`api.py`에 "check rls rules for validity?" TODO뿐). 감사 로그에도 `clause` 본문을 남기지 않는다. `GUEST_TOKEN_VALIDATOR_HOOK`으로 검증을 추가할 수 있다.
+  - SDK README의 경로 표기는 `/security/guest_token`이고 서버 라우트는 `/guest_token/`(리소스명 `security`)이다.
+  - `getGuestTokenRefreshTiming`의 정의는 `./guestTokenRefresh`에 있어 **받지 않았다.** 토큰 만료 전 갱신 시점 계산 방식은 이 폴더로 확인할 수 없다.
+  - iframe sandbox 기본값(`allow-same-origin`, `allow-scripts`, `allow-popups` 등)과 `fetchGuestToken` 기본 제한 시간 30초가 `index.ts`에 있다.
 - Superset 서비스 구성의 팀 웹서버 허용 여부는 브리프 5절 4번, Explore 화면 제공 방식은 5절 7번(미결정)이다.
 - `GUEST_TOKEN_JWT_SECRET`은 Secret이므로 `.env`에만 둔다.
 - Superset 내부 코드는 수정하지 않는다(브리프 4.6절).

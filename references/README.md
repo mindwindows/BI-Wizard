@@ -4,7 +4,7 @@
 
 | 폴더 | 영역 | 라이선스 | 참고 우선순위 |
 | --- | --- | --- | --- |
-| `baserow/` | 수식 → DB 식 변환 | MIT Expat (premium/, enterprise/, docs/ 제외) | 1 |
+| `baserow/` | 수식 → DB 식 변환 | MIT Expat (premium/, enterprise/, docs/ 제외). `circular_reference_checker.py`는 Apache 2.0 파생 헤더 | 1 |
 | `lark/` | 수식 파서 | MIT | 2 |
 | `superset/` | Embedded SDK, guest token | Apache 2.0 | 3 |
 | `grist-core/` | 엑셀 가져오기 | Apache 2.0 (ext/ 제외) | 4 |

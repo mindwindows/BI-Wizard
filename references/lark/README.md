@@ -19,6 +19,8 @@
 ## 받지 않은 것 / 주의
 - `lark.tools.standalone`(독립 실행 파서 생성기)은 README상 MPL 2.0 별도 표기가 있어 쓰지 않으며 받지 않았다.
 - 엑셀 수식 전체를 다룬 허용형 완성 문법은 이 후보에 없다. 문법은 직접 작성한다(브리프 4.5절).
+- `examples/advanced/error_reporting_lalr.py`와 `error_handling.py`는 `_json_parser`(`examples/advanced/_json_parser.py`)의 문법을 import한다. **이 파일은 지목 목록에 없어 받지 않았으므로 두 예제는 받은 파일만으로 실행되지 않는다.** 문법 부분을 읽어야 하면 별도 확보가 필요하다(사용자 승인 후).
+- `lalr_interactive_parser.py`는 파일 안에 `###{standalone` 표식 구간이 있다(standalone 생성기 출력에 포함되는 부분). 이 파일을 참고만 하며 `lark.tools.standalone`은 쓰지 않는다.
 - 순환 참조 검출은 lark 범위 밖이다(`references/baserow/`의 `circular_reference_checker.py` 참고).
 
 ## 사용 규칙
