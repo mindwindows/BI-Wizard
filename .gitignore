@@ -21,3 +21,6 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# Jenkins가 .env.example에서 만든 더미 값 env 파일(Secret 아님, 커밋하지 않음)
+.env.ci

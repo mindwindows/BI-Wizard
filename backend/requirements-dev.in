@@ -1,0 +1,5 @@
+# 직접 의존성(개발·테스트). requirements.in을 포함한다.
+-r requirements.in
+pytest==9.1.1
+httpx==0.28.1
+ruff==0.17.0

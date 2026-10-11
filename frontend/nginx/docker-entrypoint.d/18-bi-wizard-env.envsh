@@ -1,0 +1,71 @@
+#!/bin/sh
+# nginx 공식 이미지의 entrypoint가 source로 읽는 파일이다(실행 권한 필요).
+# 공개 설정(APP_BASE_PATH, SUPERSET_APP_ROOT, APP_PROXY_STRIP_PREFIX, BACKEND_PORT)을 검사하고
+# nginx 템플릿(default.conf.template)에서 쓰는 NGX_* 변수를 만든다.
+# 템플릿에는 NGX_* 변수만 치환된다(NGINX_ENVSUBST_FILTER). Secret은 이 컨테이너에 전달되지 않는다.
+
+_bw_fail() {
+  echo "[frontend] 설정 오류: $*" >&2
+  exit 1
+}
+
+_bw_check_path() {
+  # 빈 값(루트 배포)이거나 '/경로' 형식(앞 '/' 필수, 뒤 '/' 금지)이어야 한다.
+  if [ -n "$2" ] && ! printf '%s' "$2" | grep -Eq '^(/[A-Za-z0-9._~-]+)+$'; then
+    _bw_fail "$1 값의 형식이 올바르지 않습니다(빈 값이거나 '/경로', 뒤 '/' 금지)."
+  fi
+}
+
+_bw_base="${APP_BASE_PATH:-}"
+_bw_superset="${SUPERSET_APP_ROOT:-}"
+_bw_strip="${APP_PROXY_STRIP_PREFIX:-false}"
+_bw_backend_port="${BACKEND_PORT:-8000}"
+
+_bw_check_path APP_BASE_PATH "$_bw_base"
+_bw_check_path SUPERSET_APP_ROOT "$_bw_superset"
+
+case "$_bw_strip" in
+  true | false) ;;
+  *) _bw_fail "APP_PROXY_STRIP_PREFIX는 true 또는 false여야 합니다." ;;
+esac
+
+case "$_bw_backend_port" in
+  '' | *[!0-9]*) _bw_fail "BACKEND_PORT는 숫자여야 합니다." ;;
+esac
+
+if [ -z "$_bw_superset" ]; then
+  _bw_fail "로컬 nginx 프록시 재현에서는 SUPERSET_APP_ROOT가 비어 있을 수 없습니다(포털과 경로가 겹칩니다)."
+fi
+
+# 정규식용: '.'만 이스케이프한다(허용 문자는 영문, 숫자, . _ ~ - 와 '/').
+_bw_base_re="$(printf '%s' "$_bw_base" | sed 's/\./\\./g')"
+
+NGX_BASE="$_bw_base"
+NGX_BASE_RE="$_bw_base_re"
+NGX_SUPERSET_ROOT="$_bw_superset"
+NGX_BACKEND_PORT="$_bw_backend_port"
+
+if [ -n "$_bw_base" ]; then
+  # 하위 경로 자체(끝 '/' 없음)로 들어오면 '/'가 붙은 주소로 보낸다.
+  NGX_BASE_REDIRECT="location = ${_bw_base} { return 301 ${_bw_base}/; }"
+else
+  NGX_BASE_REDIRECT=""
+fi
+
+if [ "$_bw_strip" = "true" ] && [ -n "$_bw_base" ]; then
+  # APP_PROXY_STRIP_PREFIX=true: backend로 보내기 전에 접두를 뗀다.
+  NGX_API_REWRITE="rewrite ^(?:${_bw_base_re})(/.*)\$ \$1 break;"
+else
+  # false(기본): 받은 경로를 그대로 backend에 넘긴다.
+  NGX_API_REWRITE=""
+fi
+
+if [ -n "${NGINX_LOCAL_RESOLVERS:-}" ]; then
+  NGX_RESOLVER="resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;"
+else
+  _bw_fail "DNS resolver를 찾지 못했습니다(NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 필요)."
+fi
+
+export NGX_BASE NGX_BASE_RE NGX_SUPERSET_ROOT NGX_BACKEND_PORT NGX_BASE_REDIRECT NGX_API_REWRITE NGX_RESOLVER
+
+echo "[frontend] 하위 경로='${NGX_BASE}', Superset 경로='${NGX_SUPERSET_ROOT}', 접두 제거 전달=${_bw_strip}"

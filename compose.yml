@@ -1,0 +1,233 @@
+# BI-Wizard 로컬 실행 기준(Single Entry). 시작: docker compose up -d --build / 종료: docker compose down (볼륨 삭제 옵션 금지)
+#
+# 서비스 순서:  postgres(healthy) -> db-bootstrap(성공 완료) -> migrate(성공 완료) -> backend -> frontend
+#               db-bootstrap -> superset-init(성공 완료) -> superset
+# 브라우저는 frontend nginx(FRONTEND_PORT)만 접속한다. 이 nginx가 로컬에서 메인 플랫폼 프록시 역할을 재현한다:
+#   ${APP_BASE_PATH}/ -> 포털 정적 파일, ${APP_BASE_PATH}/api/ -> backend, ${SUPERSET_APP_ROOT}/ -> superset
+# 모든 서비스에 mem_limit을 고정한다(docs/decisions/03a-deploy-environment.md, 합계 8GB 안, 숫자는 추정이며 docker stats로 실측한다).
+# Redis/Valkey/Celery는 두지 않는다. 컨테이너에는 필요한 변수만 environment로 전달한다(전체 .env를 넘기지 않는다).
+
+name: bi-wizard
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-backend-build: &backend-build
+  context: ./backend
+
+services:
+  postgres:
+    image: postgres:16.10-bookworm
+    restart: unless-stopped
+    mem_limit: 1536m
+    command: ["postgres", "-c", "shared_buffers=256MB"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB를 .env에 설정하세요}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER를 .env에 설정하세요}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 .env에 설정하세요}
+      PGPORT: ${POSTGRES_PORT:?POSTGRES_PORT를 .env에 설정하세요}
+      TZ: ${TZ:?TZ를 .env에 설정하세요}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:${POSTGRES_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
+
+  # 읽기 전용 계정(bi_readonly)과 Superset 메타 DB를 매 기동 멱등으로 만든다(initdb.d 미사용).
+  db-bootstrap:
+    image: postgres:16.10-bookworm
+    restart: "no"
+    mem_limit: 128m
+    user: postgres
+    entrypoint: ["bash", "/bootstrap/run.sh"]
+    environment:
+      PGHOST: ${POSTGRES_HOST:?POSTGRES_HOST를 .env에 설정하세요}
+      PGPORT: ${POSTGRES_PORT}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD를 .env에 설정하세요}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:?SUPERSET_DB_PASSWORD를 .env에 설정하세요}
+    volumes:
+      - ./backend/bootstrap:/bootstrap:ro
+    # postgres 이미지는 데이터 디렉터리를 VOLUME으로 선언한다. 클라이언트로만 쓰므로 익명 볼륨이 쌓이지 않게 비운 tmpfs로 덮는다.
+    tmpfs:
+      - /var/lib/postgresql/data:size=1m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  # backend 이미지를 재사용하는 일회성 마이그레이션(Alembic). 앱 코드는 시작 때 마이그레이션을 실행하지 않는다.
+  migrate:
+    build: *backend-build
+    image: bi-wizard-backend:local
+    restart: "no"
+    mem_limit: 512m
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    logging: *default-logging
+
+  backend:
+    build: *backend-build
+    image: bi-wizard-backend:local
+    restart: unless-stopped
+    mem_limit: 1g
+    environment:
+      APP_NAME: ${APP_NAME:?APP_NAME을 .env에 설정하세요}
+      APP_ENV: ${APP_ENV:?APP_ENV를 .env에 설정하세요}
+      APP_DEBUG: ${APP_DEBUG:?APP_DEBUG를 .env에 설정하세요}
+      APP_BASE_PATH: ${APP_BASE_PATH?APP_BASE_PATH를 .env에 설정하세요(루트 배포는 빈 값)}
+      APP_PROXY_STRIP_PREFIX: ${APP_PROXY_STRIP_PREFIX:?APP_PROXY_STRIP_PREFIX를 .env에 설정하세요}
+      BACKEND_HOST: ${BACKEND_HOST:?BACKEND_HOST를 .env에 설정하세요}
+      BACKEND_PORT: ${BACKEND_PORT:?BACKEND_PORT를 .env에 설정하세요}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL을 .env에 설정하세요}
+      TZ: ${TZ}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT}:${BACKEND_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    logging: *default-logging
+
+  # 정적 빌드를 nginx로 서빙하고, 로컬에서 메인 플랫폼 프록시 역할(포털 API, Superset)을 한다.
+  # 전체 .env를 넘기지 않는다: 공개 설정과 backend 포트만 전달한다.
+  frontend:
+    build:
+      context: ./frontend
+    image: bi-wizard-frontend:local
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      APP_BASE_PATH: ${APP_BASE_PATH}
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT?SUPERSET_APP_ROOT를 .env에 설정하세요}
+      APP_PROXY_STRIP_PREFIX: ${APP_PROXY_STRIP_PREFIX}
+      BACKEND_PORT: ${BACKEND_PORT}
+    ports:
+      - "${FRONTEND_HOST:?FRONTEND_HOST를 .env에 설정하세요}:${FRONTEND_PORT:?FRONTEND_PORT를 .env에 설정하세요}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    logging: *default-logging
+
+  # Superset 초기화(일회성, 멱등): db upgrade -> 관리자 -> init -> 업무 데이터 연결(bi_readonly) 등록
+  superset-init:
+    build:
+      context: ./superset
+    image: bi-wizard-superset:6.1.0
+    restart: "no"
+    mem_limit: 1g
+    entrypoint: ["bash", "/app/bi-wizard/init.sh"]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?SUPERSET_SECRET_KEY를 .env에 설정하세요}
+      GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET:?GUEST_TOKEN_JWT_SECRET를 .env에 설정하세요}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT}
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:?SUPERSET_ADMIN_USER를 .env에 설정하세요}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?SUPERSET_ADMIN_PASSWORD를 .env에 설정하세요}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD}
+      TZ: ${TZ}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    logging: *default-logging
+
+  superset:
+    build:
+      context: ./superset
+    image: bi-wizard-superset:6.1.0
+    restart: unless-stopped
+    mem_limit: 2g
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      TZ: ${TZ}
+      # gunicorn: 워커 1개를 주기적으로 재시작해 메모리 증가를 억제한다(고정값).
+      SERVER_WORKER_AMOUNT: "1"
+      WORKER_MAX_REQUESTS: "1000"
+      WORKER_MAX_REQUESTS_JITTER: "100"
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", 'curl -fsS "http://127.0.0.1:8088$${SUPERSET_APP_ROOT}/health" > /dev/null']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    logging: *default-logging
+
+  # 마이그레이션 왕복 테스트용 빈 DB(profile test). 데이터는 tmpfs(256MB 제한)라 컨테이너를 지우면 사라진다.
+  # 호스트에 포트를 게시하지 않는다. 사용법은 skills/local-environment/SKILL.md.
+  postgres-test:
+    profiles: ["test"]
+    image: postgres:16.10-bookworm
+    restart: "no"
+    mem_limit: 512m
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "fsync=off"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPORT: ${POSTGRES_PORT}
+      TZ: ${TZ}
+    tmpfs:
+      - /var/lib/postgresql/data:size=256m
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    logging: *default-logging
+
+volumes:
+  postgres_data:

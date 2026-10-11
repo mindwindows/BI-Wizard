@@ -1,0 +1,8 @@
+# 직접 의존성(런타임). 버전은 고정한다. 전이 의존성까지 고정한 목록은 requirements.txt다.
+# 모두 허용형 라이선스(MIT/BSD/Apache/PSF)다. psycopg2/psycopg(LGPL)는 backend에 쓰지 않는다.
+fastapi==0.143.0
+uvicorn==0.54.0
+sqlalchemy==2.1.4
+alembic==1.20.0
+pg8000==1.31.5
+pydantic-settings==2.15.0
