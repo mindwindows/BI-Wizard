@@ -325,3 +325,17 @@
 
 ## 합성 샘플 작성 (U-1·U-2 대체, 4라운드 범위 변경)
 `docs/samples/`에 합성 샘플을 만들었다(총 약 70KB): `README.md`(목적·한계·생성 방법), `clipboard-cases.json`(붙여넣기 사례 42건: 쉼표·큰따옴표·칸 안 줄바꿈·탭·빈 칸·날짜 4형식·소수/지수/퍼센트/통화·한글·미종결 따옴표·빈 입력 등, 요구사항 7개를 옮긴 일회용 참조 구현으로 교차 확인해 42건 모두 일치, 골든 표에 없는 파생 사례 3건은 `notes`에 표시), `generate_samples.py`(`pip install openpyxl==3.1.5` 후 `python docs/samples/generate_samples.py --verify`, 두 번 생성해 sha256 동일, `--verify` 24개 항목 통과), `synthetic-team-monthly.xlsx`, `synthetic-messy-merged.xlsx`, `synthetic-multi-sheet.xlsx`, `synthetic-mixed-types.xlsx`. **한계: 합성 샘플이며 실제 회사 자료·실제 Excel/Teams 클립보드로 검증하지 않았다. `raw` 값은 Excel 직렬화에 대한 가정이다. U-1·U-2는 합성으로 대체됐을 뿐 실제 자료로 해소되지 않았다.**
+
+## A-27. 서비스 계정의 Superset 열 표시 이름 갱신 (FU-1 설계 전 확인, 2026-10-11, 실험 담당 에이전트 수행)
+- 환경: Superset 6.1.0, compose 프로젝트 `g3x`(더미 값), 서비스 계정은 X-22의 최소 권한 4개만. 원문 결과·스크립트·스크린샷 56개: `_workspace/gate3/experiments/superset-a27-results.md`, `r5/`(Git 제외). 정리: 컨테이너 7개, 네트워크 `g3x_default`, 볼륨 `g3x_postgres_data`를 이름을 지정해 삭제(남은 볼륨 `bi-wizard_postgres_data` 하나, 일괄 삭제 명령 없음). 실험 담당이 `service docker start` 실패(`ulimit` 오류) 후 `dockerd`를 직접 실행해 두었다.
+| 시험 | 결과 |
+| --- | --- |
+| 서비스 계정이 가상 데이터셋 등록 후 `PUT /dataset/{id}`의 `columns`로 `verbose_name` 설정 | **가능**(200). `type`, `is_dttm`, `main_dttm_col`, 지표 보존. 같은 호출로 `table_name`도 변경 가능. 설정·변경·해제 모두 가능 |
+| **`columns`의 의미** | **병합이 아니라 교체**(소스 근거와 실측 일치). **일부 열만 보내면 나머지 열이 삭제**되고 `[]`면 전부 삭제(refresh로 복구해도 새 id에 표시 이름 없음). `id`가 없는 항목은 새 열로 처리되어 422, `column_name` 필수 |
+| `refresh` 후 | 기존 열 표시 이름 **유지**. 뷰에 추가한 열은 표시 이름 없이 생김. 제거 후 다시 추가한 열은 이전 이름이 복원되지 않음 |
+| 표시 이름만 바꿈 | 저장된 차트·필터는 **깨지지 않음**(`chart/data` 4건 200, 필터 target은 `column_name` 기준). 표 머리글만 바뀜 |
+| 권한 경계 | 관리자 소유 데이터셋 PUT/refresh는 403(X-22와 일치). 4개 권한 외 추가 권한 불필요 |
+- 결론: **조건부 가능**. 서비스 계정은 **전체 열(id, column_name, verbose_name)을 매번 보내는 방식**으로만 안전하게 표시 이름을 갱신할 수 있다. 요청 순서: 로그인·CSRF → `POST /dataset/`(응답에서 열 id) → `PUT /dataset/{id}`(전체 열) → 뷰 변경 후에는 `refresh` → `GET` → 포털이 보관한 표시 이름과 병합해 전체 열 재PUT. 데이터셋 단위 직렬화, 422 "columns do not exist"는 재조회 후 재시도.
+- **번호 이름(`c_N`)이 보이는 곳(작성자 눈높이):** 대시보드 네이티브 필터 설정의 Column 선택과 드롭다운(새 필터 이름 칸은 비어 있음), Explore의 Filters 칩(`c_1 > 120`, 기본 시간 필터 `period (No filter)`), Ordering 목록, Customize 탭, Results 창, "View query" SQL, 대시보드 "View as table", 열 툴팁("Column name: c_1 / Label: 매출"). **표시 이름이 보이는 곳:** 데이터셋 패널, 열 선택 드롭다운, 표 머리글, Drill by, CSV 내보내기 헤더(API로만 확인), 필터 바 라벨(작성자가 직접 입력), 사전 필터의 열 선택. `description`은 열 툴팁에만.
+- 부수 관찰: UI에서 만든 지표는 저장 시점의 표시 이름을 라벨에 굳혀 둔다(`SUM(총매출)`)—이후 표시 이름을 바꿔도 라벨은 그대로(깨지지 않고 이름만 어긋남). 작성자 역할에서 Explore "Samples"는 `Access is Denied`.
+- 한계: Embedded guest 화면, 관리자 화면, 열 수백 개 규모, refresh와 PUT의 동시 호출은 미확인. 화면 확인은 작성자 역할(Gamma 복사본 + schema 보조 역할) 기준. 6번 대안(뷰 별칭, 계산 열)은 성공했으므로 시험하지 않았다.
