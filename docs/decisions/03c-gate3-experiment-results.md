@@ -101,3 +101,79 @@
 - **스키마 단위 기본 권한(W2 (a)):** `GRANT USAGE ON SCHEMA bi_data` + `ALTER DEFAULT PRIVILEGES IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`(`FOR ROLE` 생략)를 DDL 실행 역할로 실행한 뒤 같은 역할이 만든 표·뷰를 `bi_readonly`가 읽었고, `public` 표(`alembic_version`)는 읽지 못했다.
 - **Gamma 기반 작성자 역할(D의 입력):** 권한 없는 Gamma 사용자는 데이터셋·차트·대시보드·DB 목록이 모두 비어 있었다. Gamma 권한 + `schema access on [DB].[catalog].[schema]`만 가진 역할(`g3x_author`)은 그 schema의 **물리 데이터셋과 가상 데이터셋을 모두** 보고 `chart/data`로 조회할 수 있었다(200). 같은 사용자의 데이터셋 생성은 물리·가상 모두 403이고 관리자 소유 대시보드는 목록에 없었다(404).
 - **관찰(후속 확인 필요):** 데이터셋 접근 권한이 전혀 없는 Gamma 사용자가 `POST /api/v1/chart/`로 그 데이터셋에 대한 차트를 만드는 것이 201로 성공했다(데이터 조회는 403). 6.1.0 차트 생성 명령이 데이터셋 접근 권한을 검사하지 않는 것으로 보이며, 데이터 노출은 아니지만 차트 메타데이터가 생긴다.
+
+---
+
+# 3라운드 실험 결과 (승인: 2026-10-11 사용자, `03b-gate3-round-decisions.md` 3-6)
+
+- 승인 범위: X-14, X-15, X-17, X-18, X-20, X-21, X-22, X-23, X-24 (X-16 불필요, X-19는 8번 인증 결정 후). 클라우드 세션 안에서만 실행.
+- DB 실험(X-14, X-15, X-17, X-24) 환경: PostgreSQL **16.10**(`postgres:16.10-bookworm`, 컨테이너 `g3x14-pg`, tmpfs 데이터, 볼륨 없음). 역할은 설계대로 `bi_owner`(schema `bi_data` 소유, 정적 표 소유), `bi_app`(런타임), `bi_readonly`를 만들어 각 역할로 접속(`psql -U`). 스크립트·원출력: `_workspace/gate3/experiments/x14.sql/.out`, `x15.sql/.out`, `x17.sh/.out`, `x24.sh/.out`, `x24b.sh/.out`(Git 제외).
+- **정리:** `g3x14-pg`는 이름을 지정해 삭제했다(tmpfs라 볼륨 없음).
+- **한계:** 이 결과는 PostgreSQL 16.10과 psql 세션 기준이다(앱의 pg8000 드라이버 경유 동작은 확인하지 않았다). 데이터는 모의 데이터이며 동시성 시험은 사람이 만든 타이밍(`pg_sleep`)이다.
+
+## X-14. `ALTER DEFAULT PRIVILEGES`와 `FOR ROLE`, 역할 멤버십 (Y1 ㄴ의 입력)
+| 시험 | 결과 |
+| --- | --- |
+| A1: `bi_app`이 `ALTER DEFAULT PRIVILEGES IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`(`FOR ROLE` 생략) 실행 후 `bi_app`이 표·뷰 생성 | `bi_readonly`가 **표와 뷰 모두 읽음**(`has_table_privilege` t). 같은 schema에서 `bi_owner`가 만든 표는 읽지 못함(f). `pg_default_acl`: `defaclrole=bi_app`, `{bi_readonly=r/bi_app}` |
+| A2: `bi_owner`(멤버십 없음)가 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app …` | **거부**: `permission denied to change default privileges` |
+| A2: 슈퍼유저가 `GRANT bi_app TO bi_owner`(기본 옵션: `INHERIT` t, `SET` t, `ADMIN` f) 후 `FOR ROLE bi_app` | **성공** |
+| A2 멤버십 옵션별 | `INHERIT TRUE, SET TRUE`: 성공. **`INHERIT FALSE, SET TRUE`: 거부.** **`INHERIT TRUE, SET FALSE`: 성공.** `INHERIT FALSE, SET FALSE, ADMIN TRUE`: 거부 |
+| A3: 슈퍼유저(db-bootstrap 후보)가 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data …` 후 `bi_app`이 표·뷰 생성 | `bi_readonly`가 표·뷰 모두 읽음 |
+| `bi_owner`(스키마 소유자)가 `bi_app` 소유 객체에 대해 (`INHERIT TRUE` 멤버) | `CREATE OR REPLACE VIEW`, `ALTER TABLE ADD COLUMN`, `DROP VIEW`, `DROP TABLE … CASCADE`(의존 뷰 포함) **모두 성공** |
+| 같은 작업, 멤버십 `INHERIT FALSE, SET TRUE` | `CREATE OR REPLACE VIEW`는 **`must be owner of view` 거부**. `SET ROLE bi_app` 후에는 성공 |
+| 같은 작업, **멤버십 없음** | `ALTER TABLE`은 거부(`must be owner`), 그러나 **`DROP TABLE`/`DROP VIEW`(`CASCADE` 포함)는 `bi_owner`가 schema 소유자라서 성공** |
+- 결론:
+  - `FOR ROLE`로 다른 역할이 만들 객체의 기본 권한을 정하려면 그 역할의 **상속(`INHERIT`) 멤버**여야 한다(PostgreSQL 문서 본문 "member"와 16.0 릴리스 노트 "inherited roles"가 달랐던 점은 **상속이 필요한 쪽(릴리스 노트)** 으로 확인됨, `SET` 옵션은 필요 없음). 최소 권한 형태는 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`.
+  - `bi_app`이 직접 `ALTER DEFAULT PRIVILEGES`(A1)를 실행하는 방식과 슈퍼유저가 실행하는 방식(A3)도 동작한다. 세 방식 모두 가능하므로 **어느 계정이 실행할지는 보안·운영 선택**(Y1 ㄴ 재질문).
+  - schema 소유자 `bi_owner`는 멤버십이 없어도 schema 안 객체를 `DROP`(CASCADE 포함)할 수 있다(소유자가 아닌 `ALTER`/`REPLACE`는 상속 멤버십이 필요).
+  - `bi_owner`가 `bi_app`의 상속 멤버이면 `bi_owner`는 `bi_app`의 권한(정적 표 DML 등)을 상속한다(`bi_owner`는 어차피 정적 표 소유자라 실질 증가는 `bi_app`이 가진 `bi_data` 권한 정도).
+
+## X-15. 계정별 권한 매트릭스 (Y1·Y2의 입력)
+설계: 슈퍼유저가 `bi_data`를 `AUTHORIZATION bi_owner`로 만들고 `public`에 `CREATE`를 `bi_owner`에게 부여, `bi_owner`가 `bi_data`에 `USAGE, CREATE`를 `bi_app`에, `USAGE`를 `bi_readonly`에 부여, 정적 표는 `bi_owner` 소유 + `bi_app`에 DML 명시 부여.
+| 주체 | 시험 | 결과 |
+| --- | --- | --- |
+| `bi_app` | 정적 표 `INSERT`/`UPDATE`/`DELETE`(부여됨) | 성공(`DELETE`도 가능 → 행 삭제는 앱 수준 소프트 삭제·감사 기록으로 관리해야 함) |
+| `bi_app` | 부여되지 않은 표 `SELECT`, `alembic_version` `SELECT` | 거부 |
+| `bi_app` | `TRUNCATE`, `DROP TABLE`, `ALTER TABLE`, `CREATE INDEX`(정적 표) | **모두 거부**(`must be owner` / `permission denied`) |
+| `bi_app` | `public`에 `CREATE TABLE` | 거부(`permission denied for schema public`) |
+| `bi_app` | `CREATE SCHEMA`, `CREATE ROLE`, `SET ROLE bi_owner`, `DROP SCHEMA bi_data`, `ALTER SCHEMA bi_data OWNER` | **모두 거부** |
+| `bi_app` | 자기 점검: `rolsuper`/`rolcreaterole`/`rolcreatedb`, `has_schema_privilege('public','public','CREATE')`, DB `CREATE` | 모두 f (BY3 시작 자가 점검 쿼리가 동작함) |
+| `bi_app` | `identity` 열 표에 `INSERT`(시퀀스 권한 없이) | **성공**. `serial` 열 표는 **`permission denied for sequence`** → `GRANT USAGE ON SEQUENCE` 필요 (정적 표의 id는 `identity`가 권한 관리에 유리) |
+| `bi_app` | 한 트랜잭션: 정적 표 `INSERT` + `bi_data`에 `CREATE TABLE`/`CREATE VIEW`/`ALTER TABLE`/`CREATE OR REPLACE VIEW` | 커밋 시 모두 반영. 중간 오류(중복 `CREATE TABLE`) 시 **등록 `INSERT`까지 모두 롤백**(B10 변경의 근거) |
+| `bi_app` | `bi_data`에 함수·시퀀스·타입 생성, `GRANT SELECT … TO PUBLIC` | **성공**(schema `CREATE` 권한은 객체 종류를 가리지 않음, 자기 객체 권한을 임의로 부여 가능) → 런타임 코드가 만드는 DDL 종류를 제한하고 점검 필요 |
+| `bi_readonly` | `bi_data` 표·뷰 `SELECT`(기본 권한으로) | 성공. `public` 정적 표 `SELECT`는 거부 |
+| `bi_readonly` | `bi_data`·`public`에 `CREATE TABLE` | 거부 |
+| `bi_readonly` | **`CREATE TEMP TABLE`** | **성공**(`PUBLIC`의 TEMP 권한, DB 이름이 변수라 `REVOKE`를 고정 SQL로 못 씀) → 알려진 성질로 기록 |
+| `bi_readonly` | `SET default_transaction_read_only = off` 후 `INSERT`/`UPDATE` | **권한 거부**(실제 방어선은 권한, X-2와 일치) |
+| `bi_readonly` | `bi_app`이 만든 함수 실행 | 성공(함수 `EXECUTE`는 기본 `PUBLIC`) → `bi_app`이 `SECURITY DEFINER` 함수를 만들면 권한 상승 경로가 될 수 있으므로 런타임 DDL 종류 제한이 필요 |
+| `bi_owner` | 정적 표 `ALTER`, `alembic_version` 읽기 | 성공 |
+- 결론: 설계한 2계정 구성에서 `bi_app`은 정적 표 구조·`TRUNCATE`·schema 생성·역할 생성이 모두 막히고, 동적 객체 DDL은 `bi_data` 안에서만 가능하다. 등록 + 물리 객체를 한 트랜잭션으로 처리하는 B10 변경은 `bi_app` 단일 로그인에서 동작한다. 남는 위험은 (1) 정적 표 `DELETE` 가능, (2) `bi_app`이 `bi_data`에 만들 수 있는 객체 종류(함수 등)와 임의 `GRANT`, (3) `bi_readonly`의 TEMP 권한이다. `pg_dump` 소유자 복원은 시험하지 않았다.
+
+## X-17. `lock_timeout`과 뷰 재생성 (BY2, F-7의 입력)
+| 시험 | 결과 |
+| --- | --- |
+| 유휴 상태에서 뷰 50개 `CREATE OR REPLACE` | 한 세션·한 트랜잭션이면 **0.16초**(별도 `psql` 호출 50번이면 6.19초는 접속 오버헤드) |
+| 긴 읽기(6초 트랜잭션) 중 `lock_timeout=500ms`로 교체 | 약 0.5초 뒤 **`55P03 canceling statement due to lock timeout`**로 실패, 이후 새 읽기는 지연 없음(0.15초) |
+| 같은 시험, `lock_timeout=2s`, 교체 대기 중(1.5초 시점)에 새 읽기 도착 | 교체는 약 2.1초 뒤 같은 오류로 실패. **새 읽기는 교체가 포기될 때까지 막혀 1.62초 지연**(X-7 재확인: 대기 중인 DDL 뒤에 새 읽기가 줄을 섬) |
+| 짧은 읽기(수십~백 ms) 반복 중 교체(`lock_timeout=2s`) | 0.14초에 성공 |
+| 정의가 **같은** `CREATE OR REPLACE VIEW`를 긴 읽기 중 실행 | **똑같이 대기하다 실패**(락을 먼저 잡음) → 정의 해시가 같으면 DDL 자체를 건너뛰어야 한다 |
+| 긴 읽기 중 `GRANT SELECT` | 0.13초, **막히지 않음** |
+| 오류 코드 | `55P03`(`lock_not_available`) |
+- 결론: 뷰 단위 짧은 트랜잭션 + `SET LOCAL lock_timeout` + 재시도는 동작한다. 지연 영향은 **대기 중 새 읽기에 `lock_timeout` 만큼**이다(500ms ~ 2s 범위에서 선택). 해시가 같으면 건너뛰는 최적화가 필수다. 값 자체는 운영 부하에서 정해야 한다(5팀 × 10개 규모에서 읽기는 수십 ms였다, X-9).
+
+## X-24. 동시 편집의 DB 동작 (Y8·Y9의 입력, READ COMMITTED)
+| 시험 | 결과 |
+| --- | --- |
+| 같은 칸: A가 `a`를 10→11(미커밋), B가 `UPDATE … SET a=12 WHERE id=1 AND a IS NOT DISTINCT FROM 10` | B는 A가 커밋할 때까지 **기다린 뒤 `UPDATE 0`(0행)**. 최종 `a=11` (B의 값이 조용히 덮이지 않음) |
+| 다른 칸: A가 `a`, B가 `b`(각자 자기 칸의 이전 값으로 가드) | B도 **`UPDATE 1`**, 최종 `a=11, b=21` (둘 다 반영) |
+| B가 한 번에 두 칸(`a`, `b`)을 바꾸고 둘 다 가드 | A가 `a`를 바꿨으므로 B는 **0행**(바꾸는 칸 전체를 가드로 쓰므로 한 칸 충돌이 전체 취소) |
+| 가드 없음 | **마지막 저장이 이김**(B의 12가 A의 11을 덮음) |
+| 같은 칸을 A와 B가 **같은 값**으로 바꿈 | B는 0행(값이 같아도 가드는 "이전 값 10"이라 충돌로 보임) → 앱에서 "이미 같은 값이면 성공 처리" 규칙 필요 |
+| A가 행을 숨김(보관) 처리하는 동안 B가 편집 | B는 0행(`hidden=false` 조건) → 0행의 원인(칸 충돌 vs 행 보관/삭제)을 앱이 다시 읽어 구분해야 함 |
+| 여러 행 붙여넣기(한 트랜잭션): 2행이 A에 의해 바뀜 | B는 2행에서 기다린 뒤 0행 → 앱이 트랜잭션 전체를 롤백하면 모든 행 미반영(1·3행도) |
+| 두 붙여넣기가 서로 반대 순서로 행을 갱신 | **`deadlock detected`**로 한쪽 실패. **행을 id 순으로 정렬해 갱신하면 교착 없음**(같은 순서로 대기) |
+| `REPEATABLE READ` | 0행이 아니라 **`could not serialize access due to concurrent update`** 오류 |
+| `SELECT … FOR UPDATE NOWAIT` | 즉시 `could not obtain lock on row` 오류; `SKIP LOCKED`는 잠긴 행을 건너뜀(편집 중 잠금 표시용 대안, 비추천 사유 유지) |
+| 정의 버전 확인: 두 편집자가 version=1을 읽고 `UPDATE … SET def_version=def_version+1 WHERE def_version=1` | 먼저 커밋한 쪽만 성공, 나중은 0행 |
+| `pg_advisory_xact_lock(1)` | 두 번째 세션은 첫 번째 트랜잭션이 끝날 때까지 대기(2.14초에 획득) |
+- 결론: "칸 단위 값 비교 갱신"(Y8 (a)), "충돌 시 전부 취소"(Y8 (b)), "데이터셋 단위 직렬화 + 정의 버전 확인"(Y8 정의 편집)이 모두 PostgreSQL 16.10 `READ COMMITTED`에서 의도대로 동작함을 확인했다. 구현 시 지켜야 할 점: (1) 가드는 **바꾸는 칸의 이전 값**만 비교(`IS NOT DISTINCT FROM`으로 빈 칸 처리), (2) 0행의 원인 구분, (3) 붙여넣기 행은 **id 순서로 갱신**, (4) 같은 값으로 바꾸는 경우 성공 처리, (5) 대기 시간 상한(`lock_timeout`/`statement_timeout`)을 둔다. 앱 드라이버(pg8000) 경유 동작과 `rowcount` 노출은 확인하지 않았다.
