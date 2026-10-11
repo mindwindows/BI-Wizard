@@ -1,0 +1,540 @@
+{
+  "_readme": "Excel 클립보드 text/plain(탭 구분) 형식을 가정한 합성 사례. 실제 Excel·Teams 클립보드로 검증하지 않음. docs/samples/README.md 참고.",
+  "format": {
+    "raw": "클립보드 text/plain 원문(JSON 문자열, \\t \\n \\r\\n 포함)",
+    "expected": "파서가 돌려줄 행×열 문자열 2차원 배열. 거부 사례는 null + expected_error",
+    "expected_error": "거부 사례의 메시지(문구는 예시)",
+    "reference_parser_diff": "참고 코드(react-datasheet-grid)와 다른 점"
+  },
+  "cases": [
+    {
+      "name": "basic_table_crlf",
+      "description": "일반 표 2x2. Excel은 행마다 CRLF를 붙이고 마지막 행 뒤에도 CRLF를 붙인다(가정).",
+      "raw": "a\tb\r\nc\td\r\n",
+      "expected": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ],
+      "notes": "끝의 빈 행이 생기지 않아야 한다(골든)."
+    },
+    {
+      "name": "basic_table_lf_no_trailing",
+      "description": "LF만 쓰고 마지막 개행이 없는 형식(웹 앱·Teams 등에서 올 수 있는 형태, 가정).",
+      "raw": "a\tb\nc\td",
+      "expected": [
+        [
+          "a",
+          "b"
+        ],
+        [
+          "c",
+          "d"
+        ]
+      ],
+      "notes": "행 끝의 개행 유무와 관계없이 같은 결과(골든 1)."
+    },
+    {
+      "name": "typical_korean_header_table",
+      "description": "한글 열 이름과 숫자가 있는 전형적인 월별 표(표시된 값 그대로 복사됨, 가정).",
+      "raw": "월\t매출\t비용\r\n2026-01-01\t1000\t800\r\n2026-02-01\t1200\t900\r\n",
+      "expected": [
+        [
+          "월",
+          "매출",
+          "비용"
+        ],
+        [
+          "2026-01-01",
+          "1000",
+          "800"
+        ],
+        [
+          "2026-02-01",
+          "1200",
+          "900"
+        ]
+      ],
+      "notes": "파서는 문자열만 돌려준다. 숫자·날짜 해석은 열 타입 쪽(요구 6)."
+    },
+    {
+      "name": "comma_in_cell",
+      "description": "쉼표가 있는 셀. 탭 구분 텍스트에서는 쉼표 때문에 따옴표로 감싸지 않는다(가정).",
+      "raw": "서울, 강남\t1,234\r\n",
+      "expected": [
+        [
+          "서울, 강남",
+          "1,234"
+        ]
+      ],
+      "notes": "쉼표는 구분자가 아니다. CSV 파서를 재사용하면 안 되는 이유."
+    },
+    {
+      "name": "quote_in_cell",
+      "description": "셀 값 He said \"hi\". Excel은 따옴표를 포함한 셀을 감싸고 \" 를 \"\" 로 바꾼다(가정).",
+      "raw": "\"He said \"\"hi\"\"\"\tx\r\n",
+      "expected": [
+        [
+          "He said \"hi\"",
+          "x"
+        ]
+      ],
+      "notes": "골든 5. 한 줄짜리 따옴표 셀도 따옴표를 벗긴다(참고 코드는 남김)."
+    },
+    {
+      "name": "quote_wrapped_value",
+      "description": "셀 값이 \"abc\"(따옴표 포함). Excel 직렬화는 \"\"\"abc\"\"\".",
+      "raw": "\"\"\"abc\"\"\"",
+      "expected": [
+        [
+          "\"abc\""
+        ]
+      ],
+      "notes": "골든 `\"\"\"abc\"\"\"`: 바깥 따옴표 제거 + \"\"→\"."
+    },
+    {
+      "name": "newline_in_cell_altenter",
+      "description": "셀 안 줄바꿈(Alt+Enter). 셀 안에는 LF, 행 끝은 CRLF. 따옴표로 감싸진다(가정).",
+      "raw": "\"line1\nline2\"\tx\r\n",
+      "expected": [
+        [
+          "line1\nline2",
+          "x"
+        ]
+      ],
+      "notes": "골든 `\"l1\\nl2\"\\tx`. 한 행, 첫 셀에 \\n."
+    },
+    {
+      "name": "newline_crlf_inside_quotes",
+      "description": "따옴표 안 CRLF는 LF로 정규화(요구 2).",
+      "raw": "\"l1\r\nl2\"",
+      "expected": [
+        [
+          "l1\nl2"
+        ]
+      ],
+      "notes": "골든 `\"l1\\r\\nl2\"`."
+    },
+    {
+      "name": "lone_cr_inside_quotes",
+      "description": "따옴표 안 단독 CR은 보존(요구 2).",
+      "raw": "\"a\rb\"",
+      "expected": [
+        [
+          "a\rb"
+        ]
+      ],
+      "notes": "속성 시험에서 단독 CR은 허용, CRLF 쌍은 값 범위에서 제외(5-(a) 속성 시험)."
+    },
+    {
+      "name": "tab_in_cell",
+      "description": "셀 안에 탭이 있는 경우. Excel은 감싸는 것으로 가정하며 요구사항은 따옴표 안 탭을 셀 내용으로 본다.",
+      "raw": "\"a\tb\"\tc\r\n",
+      "expected": [
+        [
+          "a\tb",
+          "c"
+        ]
+      ],
+      "notes": "골든 6. 참고 코드(react-datasheet-grid copyPasting.ts)는 따옴표 안 탭에서도 나눠 3칸이 되므로 요구사항과 다르다.",
+      "reference_parser_diff": "참고 코드: [[\"a\",\"b\",\"c\"]]처럼 3칸으로 쪼갠다(5-(a) 서술)"
+    },
+    {
+      "name": "empty_cells_consecutive_tabs",
+      "description": "빈 칸(연속 탭).",
+      "raw": "a\t\tc\r\n",
+      "expected": [
+        [
+          "a",
+          "",
+          "c"
+        ]
+      ],
+      "notes": "골든 3."
+    },
+    {
+      "name": "empty_first_and_last",
+      "description": "첫 칸과 끝 칸이 빈 행.",
+      "raw": "\tb\t\r\n",
+      "expected": [
+        [
+          "",
+          "b",
+          ""
+        ]
+      ],
+      "notes": "탭으로 끝나면 빈 셀 하나(골든 `a\\t`)."
+    },
+    {
+      "name": "row_ending_with_empty_cell",
+      "description": "끝 빈 칸으로 끝나는 행.",
+      "raw": "a\t\r\n",
+      "expected": [
+        [
+          "a",
+          ""
+        ]
+      ],
+      "notes": "골든 `a\\t` → [a, \"\"]."
+    },
+    {
+      "name": "row_ending_with_empty_cell_no_newline",
+      "description": "탭으로 끝나는 입력(개행 없음).",
+      "raw": "a\t",
+      "expected": [
+        [
+          "a",
+          ""
+        ]
+      ],
+      "notes": "골든 `a\\t`."
+    },
+    {
+      "name": "no_trailing_newline",
+      "description": "마지막 행에 개행이 없다.",
+      "raw": "a\tb",
+      "expected": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "notes": "행 끝 개행 유무 무관."
+    },
+    {
+      "name": "trailing_crlf",
+      "description": "마지막 행 뒤 CRLF 하나.",
+      "raw": "a\tb\r\n",
+      "expected": [
+        [
+          "a",
+          "b"
+        ]
+      ],
+      "notes": "마지막 구분자 하나는 무시(요구 1)."
+    },
+    {
+      "name": "crlf_lf_cr_mixed",
+      "description": "행 구분 CRLF, LF, 단독 CR이 섞인 입력(따옴표 밖).",
+      "raw": "a\r\nb\nc\rd",
+      "expected": [
+        [
+          "a"
+        ],
+        [
+          "b"
+        ],
+        [
+          "c"
+        ],
+        [
+          "d"
+        ]
+      ],
+      "notes": "골든 `a\\rb` → [[a],[b]]. 참고 코드는 CR을 모두 지워 합친다.",
+      "reference_parser_diff": "참고 코드: `a\\rb` → [[\"ab\"]]"
+    },
+    {
+      "name": "blank_middle_row",
+      "description": "중간 빈 행은 보존.",
+      "raw": "a\r\n\r\nb\r\n",
+      "expected": [
+        [
+          "a"
+        ],
+        [
+          ""
+        ],
+        [
+          "b"
+        ]
+      ],
+      "notes": "골든 `a\\n\\nb`."
+    },
+    {
+      "name": "two_trailing_newlines",
+      "description": "끝에 개행 두 개: 하나는 마지막 구분자로 무시, 나머지는 빈 행.",
+      "raw": "a\r\n\r\n",
+      "expected": [
+        [
+          "a"
+        ],
+        [
+          ""
+        ]
+      ],
+      "notes": "요구 1을 직접 적용한 파생 사례(골든 표에는 없음, 직접 적용 결과)."
+    },
+    {
+      "name": "only_newline",
+      "description": "개행 한 글자만.",
+      "raw": "\n",
+      "expected": [
+        [
+          ""
+        ]
+      ],
+      "notes": "요구 1의 직접 적용 파생 사례: 빈 셀 하나인 행 한 개. 빈 입력과 구분된다(5-(a) 속성 시험의 ③ 참고)."
+    },
+    {
+      "name": "date_formats_displayed",
+      "description": "표시 형식 그대로 복사되는 날짜(가정: Excel은 표시된 텍스트를 text/plain에 넣는다).",
+      "raw": "2026-10-11\t2026/10/11\t10/11/2026\t2026년 10월 11일\r\n",
+      "expected": [
+        [
+          "2026-10-11",
+          "2026/10/11",
+          "10/11/2026",
+          "2026년 10월 11일"
+        ]
+      ],
+      "notes": "파서는 변환하지 않는다. 10/11/2026은 월/일 순서가 모호 → 열 타입 쪽에서 오류 표시(요구 6)."
+    },
+    {
+      "name": "numbers_displayed",
+      "description": "표시된 숫자 형식: 천 단위 쉼표 소수, 소수, 음수, 지수 표기.",
+      "raw": "1,234.50\t0.5\t-3\t1.2E+05\t1.23456789012345E+15\r\n",
+      "expected": [
+        [
+          "1,234.50",
+          "0.5",
+          "-3",
+          "1.2E+05",
+          "1.23456789012345E+15"
+        ]
+      ],
+      "notes": "표시 형식에 따라 정밀도가 이미 잘렸을 수 있다(예: 1.23456789012345E+15). 숫자 해석은 파서의 책임이 아니다."
+    },
+    {
+      "name": "percent_currency",
+      "description": "퍼센트와 통화(원화) 표시.",
+      "raw": "12.5%\t₩1,000\t(1,000)\t-₩500\r\n",
+      "expected": [
+        [
+          "12.5%",
+          "₩1,000",
+          "(1,000)",
+          "-₩500"
+        ]
+      ],
+      "notes": "통화 기호·괄호 음수도 문자열 그대로. 열 타입 쪽에서 규칙화."
+    },
+    {
+      "name": "korean_and_emoji",
+      "description": "한글과 이모지, 한글 공백 포함.",
+      "raw": "한글 셀\t가나다라\t😀 이모지\r\n",
+      "expected": [
+        [
+          "한글 셀",
+          "가나다라",
+          "😀 이모지"
+        ]
+      ],
+      "notes": "그대로 보존."
+    },
+    {
+      "name": "leading_trailing_spaces",
+      "description": "앞뒤 공백은 자르지 않는다(요구 5).",
+      "raw": " a \t b\r\n",
+      "expected": [
+        [
+          " a ",
+          " b"
+        ]
+      ],
+      "notes": "공백 보존. 자르기는 열 타입 쪽 선택."
+    },
+    {
+      "name": "quote_not_at_cell_start",
+      "description": "따옴표가 셀 중간에 있으면 글자 그대로(요구 3).",
+      "raw": "ab\"c\td",
+      "expected": [
+        [
+          "ab\"c",
+          "d"
+        ]
+      ],
+      "notes": "골든 `ab\"c\\td`."
+    },
+    {
+      "name": "space_before_quote",
+      "description": "공백 뒤의 따옴표는 따옴표 셀이 아니다(셀이 `\"`로 시작하지 않음).",
+      "raw": " \"abc\"\tx",
+      "expected": [
+        [
+          " \"abc\"",
+          "x"
+        ]
+      ],
+      "notes": "요구 2: 셀이 `\"`로 시작해야 따옴표 셀."
+    },
+    {
+      "name": "quote_followed_by_char_backtrack",
+      "description": "따옴표 셀처럼 보이나 닫는 따옴표 뒤에 글자가 오는 경우 → 되돌려 읽기(요구 3).",
+      "raw": "\"ab\"c\td",
+      "expected": [
+        [
+          "\"ab\"c",
+          "d"
+        ]
+      ],
+      "notes": "골든 `\"ab\"c\\td`."
+    },
+    {
+      "name": "quote_followed_by_space_backtrack",
+      "description": "닫는 따옴표 뒤 공백도 되돌려 읽기.",
+      "raw": "\"abc\" \tx",
+      "expected": [
+        [
+          "\"abc\" ",
+          "x"
+        ]
+      ],
+      "notes": "골든 `\"abc\" \\tx`."
+    },
+    {
+      "name": "quoted_cell_then_next_row",
+      "description": "따옴표 셀 안 LF 뒤에 다음 행.",
+      "raw": "\"a\nb\"\r\nc\r\n",
+      "expected": [
+        [
+          "a\nb"
+        ],
+        [
+          "c"
+        ]
+      ],
+      "notes": "따옴표 닫힌 뒤의 CRLF는 행 구분."
+    },
+    {
+      "name": "quoted_doubled_inside",
+      "description": "따옴표 셀 안의 \"\" → \".",
+      "raw": "\"a\"\"b\"",
+      "expected": [
+        [
+          "a\"b"
+        ]
+      ],
+      "notes": "요구 2."
+    },
+    {
+      "name": "empty_quoted_cell",
+      "description": "빈 따옴표 셀 \"\" = 빈 문자열.",
+      "raw": "\"\"",
+      "expected": [
+        [
+          ""
+        ]
+      ],
+      "notes": "골든 `\"\"` → [[\"\"]]."
+    },
+    {
+      "name": "empty_quoted_cell_then_cell",
+      "description": "빈 따옴표 셀 뒤에 다른 셀.",
+      "raw": "\"\"\tx",
+      "expected": [
+        [
+          "",
+          "x"
+        ]
+      ],
+      "notes": "빈 문자열 셀 + x."
+    },
+    {
+      "name": "quoted_newline_only",
+      "description": "따옴표 셀 안에 줄바꿈만.",
+      "raw": "\"\n\"",
+      "expected": [
+        [
+          "\n"
+        ]
+      ],
+      "notes": "골든 `\"\\n\"`."
+    },
+    {
+      "name": "quoted_abc_eof",
+      "description": "따옴표 셀이 입력 끝에서 닫힘.",
+      "raw": "\"abc\"",
+      "expected": [
+        [
+          "abc"
+        ]
+      ],
+      "notes": "닫는 따옴표 뒤가 입력 끝이면 닫는 따옴표(요구 2)."
+    },
+    {
+      "name": "ragged_rows",
+      "description": "행마다 셀 수가 다르다.",
+      "raw": "a\tb\tc\r\nd\r\n",
+      "expected": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        [
+          "d"
+        ]
+      ],
+      "notes": "들쭉날쭉 허용, 호출 쪽이 맞춤(요구 5)."
+    },
+    {
+      "name": "single_cell",
+      "description": "한 칸만 복사(개행 없음).",
+      "raw": "a",
+      "expected": [
+        [
+          "a"
+        ]
+      ],
+      "notes": "Excel은 한 칸 복사에도 CRLF를 붙이는 것으로 알려져 있으나(가정) 결과는 같다."
+    },
+    {
+      "name": "single_cell_with_crlf",
+      "description": "한 칸만 복사(CRLF 있음).",
+      "raw": "a\r\n",
+      "expected": [
+        [
+          "a"
+        ]
+      ],
+      "notes": "끝 구분자 하나 무시."
+    },
+    {
+      "name": "empty_input",
+      "description": "빈 입력.",
+      "raw": "",
+      "expected": [],
+      "notes": "붙여넣기 없음(빈 배열, 오류 아님)."
+    },
+    {
+      "name": "unclosed_quote",
+      "description": "따옴표로 시작하지만 닫히지 않는다. 되돌려 읽기도 일어나지 않음 → 거부.",
+      "raw": "\"abc\tdef",
+      "expected": null,
+      "notes": "골든 `\"abc\\tdef`(끝) → 거부 + \"따옴표가 닫히지 않았습니다\". BZ12에서 이의를 받을 수 있는 선택.",
+      "expected_error": "따옴표가 닫히지 않았습니다"
+    },
+    {
+      "name": "backtrack_then_unclosed",
+      "description": "첫 따옴표 셀은 되돌려 읽기로 풀리지만 다음 셀이 닫히지 않은 따옴표로 끝난다.",
+      "raw": "\"abc\t\"def",
+      "expected": null,
+      "notes": "요구 3·4를 문장 그대로 적용한 파생 사례(골든 표에는 없음): 첫 셀 `\"abc`, 둘째 셀이 닫히지 않음 → 거부. 구현 합의가 필요한 모서리.",
+      "expected_error": "따옴표가 닫히지 않았습니다"
+    },
+    {
+      "name": "nul_character",
+      "description": "NUL 문자가 있는 입력 거부(요구 5).",
+      "raw": "a\u0000b",
+      "expected": null,
+      "notes": "골든 NUL 포함 → 거부.",
+      "expected_error": "NUL 문자가 포함되어 있습니다"
+    }
+  ]
+}
