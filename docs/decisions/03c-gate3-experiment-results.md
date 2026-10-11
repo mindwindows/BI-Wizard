@@ -177,3 +177,63 @@
 | 정의 버전 확인: 두 편집자가 version=1을 읽고 `UPDATE … SET def_version=def_version+1 WHERE def_version=1` | 먼저 커밋한 쪽만 성공, 나중은 0행 |
 | `pg_advisory_xact_lock(1)` | 두 번째 세션은 첫 번째 트랜잭션이 끝날 때까지 대기(2.14초에 획득) |
 - 결론: "칸 단위 값 비교 갱신"(Y8 (a)), "충돌 시 전부 취소"(Y8 (b)), "데이터셋 단위 직렬화 + 정의 버전 확인"(Y8 정의 편집)이 모두 PostgreSQL 16.10 `READ COMMITTED`에서 의도대로 동작함을 확인했다. 구현 시 지켜야 할 점: (1) 가드는 **바꾸는 칸의 이전 값**만 비교(`IS NOT DISTINCT FROM`으로 빈 칸 처리), (2) 0행의 원인 구분, (3) 붙여넣기 행은 **id 순서로 갱신**, (4) 같은 값으로 바꾸는 경우 성공 처리, (5) 대기 시간 상한(`lock_timeout`/`statement_timeout`)을 둔다. 앱 드라이버(pg8000) 경유 동작과 `rowcount` 노출은 확인하지 않았다.
+
+## Superset 실험 (X-18, X-20, X-21, X-22, X-23)
+- 환경: Apache Superset **6.1.0**(`bi-wizard-superset:6.1.0`), compose 프로젝트 `g3x`(시험용 더미 값 `_workspace/qa/g3x.env`), 하위 경로 `/bi-wizard/superset`, 포털 프런트 `http://127.0.0.1:25173`. 수행: 실험 담당 에이전트가 수행하고 메인이 결과를 확인했다. 전체 표·원출력·스크린샷: `_workspace/gate3/experiments/superset-r3-results.md`, `r3/`(Git 제외).
+- **정리:** 컨테이너 7개(`g3x-*`), 네트워크 `g3x_default`, 볼륨 `g3x_postgres_data`를 이름을 지정해 삭제했다. 남은 볼륨은 `bi-wizard_postgres_data` 하나(건드리지 않음). 이미지 유지. 일괄 삭제 명령(`down -v`, `volume prune`, `system prune`, `rm -rf`)은 쓰지 않았다. Superset 안의 시험 객체(대시보드·차트·데이터셋·시험 사용자/역할)는 API로 삭제했고 Gamma 권한은 95개로 복구했다(`x22_dsuser` 사용자는 삭제가 막혀 비활성화, 볼륨과 함께 사라짐).
+- **한계:** Embedded 시험(X-21)은 `GUEST_ROLE_NAME=Gamma` 시험 전용 override 구성이다(운영 설정 아님). 데이터는 모의 데이터이며 Superset 호출은 시험 인스턴스의 더미 비밀로 수행했다.
+
+### X-18. Superset 일반 화면을 포털 iframe 안에 표시할 수 있는가
+| 시험 | 결과 |
+| --- | --- |
+| 응답 헤더 | 전 경로 `X-Frame-Options: SAMEORIGIN`. CSP에 **`frame-ancestors` 없음**. 세션 쿠키 `SameSite=Lax`(`Secure` 없음, HTTP 시험) |
+| **같은 origin**(포털과 Superset이 같은 호스트의 하위 경로) iframe | 로그인(iframe 안에서 입력), welcome, Explore, 대시보드(`chart/data` 200), SQL Lab, 목록이 **모두 표시·동작**. 설정 변경 없음 |
+| **다른 origin**(`localhost` ↔ `127.0.0.1`, 양방향) iframe | `/login/`, `/explore/`, 대시보드, **`/embedded/`까지 전부 차단**(`net::ERR_ABORTED`, 빈 iframe) |
+- 결론: 우리 구성(같은 origin)에서는 **기준선 이탈 없이** 일반 화면을 iframe에 넣을 수 있고 로그인도 iframe 안에서 된다. 메인 플랫폼에서 포털과 Superset이 다른 호스트로 나뉘면 일반 화면과 **Embedded SDK 모두** `TALISMAN_CONFIG`의 `frame_options`/CSP `frame-ancestors` 변경이 필요하다(코드 읽기 근거, 적용하지 않음, 별도 승인 대상; `deploy-coordination.md` 9번의 "같은 origin" 가정이 깨지는 조건). 한계: 차단 메시지 문구와 교차 사이트 쿠키 영향은 확인하지 못했다. 새 창 열기·다운로드·전체 화면·모바일 폭은 시험하지 않았고, 메인 플랫폼 프록시가 보안 헤더를 덧붙이는 경우는 재현할 수 없다.
+
+### X-20. 작성자 역할(Gamma 복사본 + schema 보조 역할)
+| 시험 | 결과 |
+| --- | --- |
+| Gamma 복사본(95개 권한)과 Gamma | **권한 차이 0**. 역할·사용자 생성과 권한 부여는 6.1.0 REST(`/api/v1/security/roles/` 등)로 가능. `POST …/roles/{id}/permissions`는 **권한 목록을 통째로 교체**함 |
+| 사용자 `author1`(복사본 + `bi_data` schema 보조 역할, 내장 Gamma 미부여) | `bi_data`의 물리·가상 데이터셋 조회 가능, `public`·`information_schema`는 불가(404/403). Explore 사용자 정의 SQL의 하위 질의는 6.1.0이 막음 |
+| 차트·대시보드 | 생성·저장 가능, **타인 소유 차트·대시보드 수정은 403**. SQL Lab·데이터셋 생성·DB 변경은 403, SQL Lab 메뉴 안 보임 |
+| 임베드 켜기 | `can_set_embedded` 없이는 켜기·끄기 **403**. 그 권한을 복사본에 추가하면 **소유하지 않은 게시 대시보드도** 켜기·`allowed_domains` 변경·임베드 삭제가 됨(미게시 대시보드는 보이지 않아 불가) |
+| `superset init` | Gamma에만 새 권한을 **더하고**, 복사본은 **자동 갱신하지 않음**(Gamma의 추가 권한을 지우지도 않음) |
+- 결론: Gamma 복사본 + schema 보조 역할 구성은 의도대로 동작한다. 작성자 역할에 `can_set_embedded`를 주면 소유권과 무관하게 게시된 대시보드의 임베드를 바꿀 수 있어 임베드 켜기는 **관리자 수동**(3라운드 Y5)이 안전하다. 새 Superset 권한은 복사본에 수동 반영해야 한다(업그레이드 점검 항목). 부가: 가상 데이터셋 SQL이 읽는 표의 접근 검사는 **등록 시점에만** 하며, 읽는 사용자는 선언 schema의 권한으로 읽는다(관리자가 선언 schema `bi_data`에 `public` 표를 읽는 SQL로 등록하면 `bi_data` 권한만 가진 작성자가 그 표를 읽음) → 가상 데이터셋은 서비스 계정만 등록하고 SQL을 `bi_data` 뷰 조회로 고정하는 규칙이 필요하며, 우리 구성에서는 `bi_readonly`가 `public` 정적 표를 읽을 권한이 없어 이중으로 막힌다(X-15).
+
+### X-21. 대시보드 팀 필터를 URL로 미리 지정할 수 있는가
+| 시험 | 결과 |
+| --- | --- |
+| 일반 대시보드 URL `?native_filters=` (rison) | **적용됨**(차트 요청 본문과 화면 확인). **필터 id를 키로 한 맵 모양만** 동작하고, 단일 마스크(permalink API 문서 예시 모양)·값 배열·JS 객체·따옴표 없는 공백 값·끊긴 rison은 **오류 없이 조용히 무시**됨. `filterState`만 주면 필터 없는 조회가 먼저 나가고 다시 조회됨 |
+| Embedded SDK `urlParams` / iframe 쿼리 | 같은 값이 **적용됨**. Embedded는 다시 마운트하면 URL 값이 다시 적용됨 |
+| 대시보드 permalink(`dataMask`) | 맵 모양으로 만든 링크는 **적용됨** |
+| 우선순위 | **URL 값이 저장된 기본값보다 우선**. 사용자가 바꾼 값은 일반 화면 새로고침 때 유지되지만 일반 주소로 다시 열면 저장 기본값으로 돌아감 |
+| 검증 방법 | `emitDataMasks`와 `getDataMask()`로 적용 상태를 읽어 확인 가능 |
+- 결론: 서버가 사용자의 소속 팀을 URL `native_filters`(또는 permalink)에 실어 팀 필터 기본값으로 지정하는 것은 **가능**하다. 전제: 포털이 대시보드별 네이티브 필터 id를 알고 있어야 하며(등록 표에 저장), 잘못된 모양은 조용히 무시되므로 적용 상태 검증이 필요하다. 한계: Embedded 시험은 `GUEST_ROLE_NAME=Gamma` 시험 구성이었고, 시간 필터와 UI로 만든 필터 id를 읽는 방법은 시험하지 않았다.
+
+### X-22. 서버(서비스 계정)의 Superset 등록·이름 변경·새로고침 흐름
+| 시험 | 결과 |
+| --- | --- |
+| 최소 권한(7개 후보 권한의 **128개 조합 전수**) | 전체 흐름(조회·등록·이름 변경·새로고침·삭제·`related_objects`)의 최소 집합은 **`can_read Dataset` + `can_write Dataset` + `schema_access [DB].[catalog].[bi_data]`(또는 `database_access`) + `can_read SecurityRestApi`(CSRF 토큰)** 4개. `can_read Database`/`Chart`/`Dashboard`는 불필요 |
+| 소유권 | 이름 변경·새로고침·삭제는 **서비스 계정이 소유한 데이터셋만**(관리자 소유 데이터셋은 403) |
+| 서비스 계정의 임베드·guest token | 임베드 켜기 403. guest token 발급은 `can_grant_guest_token`을 추가하면 200(Admin 전용 권한, 소스 확인) |
+| 이름 변경 | 권한 항목(`datasource access`)의 이름만 **제자리에서 바뀜**. 데이터셋 단위 권한을 가진 사용자와 차트는 이름 변경 후에도 접근 유지 |
+| 열 변경 후 `refresh` | 열 추가는 반영. **열 제거·타입 변경은 그 열을 쓰는 저장된 차트가 데이터 오류**가 됨 |
+| 중복·동시 등록 | 중복은 422. 동시 `POST` 3개는 201 하나·422 둘. 멱등 처리는 `GET`(filter) → `PUT`+`refresh` 또는 `POST` |
+| 토큰 | 접근 토큰 15분, 갱신 토큰 30일(갱신 토큰으로 `refresh`는 실제 확인, 만료 응답은 모사) |
+| 새 schema | `schema_access` 권한 항목은 그 schema의 **첫 데이터셋 생성 또는 `POST /database/{id}/sync_permissions/`** 때 생김 → 서비스 역할에 부여하려면 그 전에 먼저 실행해야 함 |
+- 결론: 3라운드 Y5 (나) 구성(서버 서비스 계정이 가상 데이터셋 등록·이름 변경·새로고침)은 위 4개 권한으로 동작한다. 이름을 바꿔도 차트와 데이터셋 단위 권한은 유지된다(Y6 (다) 근거 확인). 열 제거·타입 변경은 차트를 깨뜨리므로 정의 변경 전 영향 안내가 필요하다.
+
+### X-23. Superset에서 데이터셋·차트를 지웠을 때 남는 것
+| 시험 | 결과 |
+| --- | --- |
+| 차트가 있는 데이터셋 삭제 | **막히지 않음(경고 없음)**. 차트의 `datasource_id`가 NULL이 되고 대시보드에는 로딩이 끝나지 않는 차트와 필터 "Network error"가 보임. "Missing dataset" 안내는 Explore에만 있음 |
+| 차트 삭제 후 대시보드 | `position_json`에 차트 노드가 남고 "차트 정의 없음" 자리표시가 보임. 대시보드를 삭제해도 차트는 남음 |
+| `GET /dataset/{id}/related_objects` | 차트 목록은 정확. 그러나 **네이티브 필터 대상으로만 쓰는 대시보드는 누락**, 다른 사용자의 미게시 대시보드는 노출됨. 필요 권한: `can_read Dataset` + 데이터셋 접근 |
+| `bi_data` 뷰를 먼저 `DROP` | `refresh`가 원인 없는 422, 차트는 "relation does not exist". 같은 뷰를 다시 만들고 `refresh`하면 복구 |
+- 결론: 영구 삭제 전 영향 표시(BY7)는 "차트 N개 이상"으로 근사값이다(필터 전용 대시보드 누락). 데이터셋을 지우기 전에 포털이 영향을 안내해야 하며 Superset은 막지 않는다. 뷰를 지우기 전에는 Superset 등록을 먼저 정리하는 순서가 안전하다(3라운드 Y11의 30일 보관 후 `DROP`과 일치).
+
+### 부가 확인
+- 하위 경로에서 Superset 로고 URL의 접두가 이중으로 붙어 404(Gate ② 알려진 문제와 같음).
+- 사용자 삭제는 대시보드를 연 적이 있으면 `key_value` 외래키 때문에 422로 실패한다. **비활성화는 되고 비활성화한 사용자는 로그인 401** → 사용자 삭제 대신 비활성화(3라운드 Y12 (a))와 일치.
+- `PUT /dashboard/{id}`에 `position_json`만 보내면 차트 연결이 갱신되지 않고, UI가 보내는 `json_metadata.positions`가 연결을 갱신한다.

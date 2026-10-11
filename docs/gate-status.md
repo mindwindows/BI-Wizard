@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(3라운드 결정 완료, 승인된 실험 수행·4라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(3라운드 결정·실험 완료, 4라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -210,6 +210,9 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).
 - **라이선스 점검 원칙(결정 6):** 새 의존성을 추가할 때 운영 런타임에 들어가는지, 개발·테스트 전용인지, 업스트림 공식 이미지 내부인지를 구분해 `bi-review`가 판정한다. 약한 카피레프트를 우리 코드의 운영 런타임 의존성에 추가하려면 사용자 확인이 필요하다.
 - **Superset 업그레이드 조건:** 로고·일러스트 접두 수정이 포함된 정식 릴리스가 나오면 버전을 올리고 하위 경로(STRIP true/false)와 Embedded를 다시 검증한다(6.1.0 고정 결정 변경은 사용자 승인).
+
+### Gate ③ 3라운드 실험 결과 (2026-10-11)
+승인된 실험 X-14, X-15, X-17, X-18, X-20, X-21, X-22, X-23, X-24를 수행했고 시험 객체를 이름을 지정해 정리했다(컨테이너 `g3x14-pg`와 `g3x-*` 7개, 네트워크 `g3x_default`, 볼륨 `g3x_postgres_data`. 남은 볼륨은 `bi-wizard_postgres_data` 하나). 상세는 `docs/decisions/03c-gate3-experiment-results.md`. 요약: `FOR ROLE`로 기본 권한을 정하려면 상속(INHERIT) 멤버십이 필요하고 A1·A2·A3 세 방식이 모두 동작(X-14, Y1 ㄴ 재질문 입력), 설계한 2계정 구성의 권한 매트릭스가 의도대로(남는 위험: 정적 표 `DELETE` 가능, `bi_app`의 함수 생성, `bi_readonly`의 TEMP; X-15), 뷰 교체 `lock_timeout`은 대기 중인 DDL 뒤의 새 읽기를 그만큼 지연시키고 정의가 같아도 락 대기하므로 해시 비교로 건너뛰어야 함(X-17), 칸 단위 값 비교·전부 취소·정의 버전 확인이 동작하고 붙여넣기는 id 순서로 갱신해야 교착이 없음(X-24), 같은 origin이면 기준선 이탈 없이 일반 화면 iframe 가능(다른 origin은 Embedded 포함 차단; X-18), Gamma 복사본 작성자 역할 동작과 `can_set_embedded`의 소유권 무시(X-20), `native_filters` URL로 팀 필터 값 지정 가능(필터 id 맵 모양만; X-21), 서비스 계정 최소 권한 4개와 이름 변경 안전(X-22), 데이터셋 삭제는 차트가 있어도 막히지 않음(X-23).
 
 ### Gate ③ 3라운드 준비 (2026-10-11)
 - **사실 확인(DB Q40~44, Superset Q46~51):** researcher 2명이 확인하고 reviewer가 원문과 대조했다(`_workspace/gate3/facts-db-r3.md`, `facts-superset-r3.md`, Git 제외). Q40, Q47, Q49, Q51은 "부분 확인"(미검증 항목 명시). `flask-talisman` 패키지 버전은 확인하지 못했다. 모델 변경 없음.
