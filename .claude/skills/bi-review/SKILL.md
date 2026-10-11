@@ -41,8 +41,9 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 연관 Skill의 영향도를 확인했는지 본다.
 
 ### 7. 미결정 사항 (차단)
-- 브리프 5절 1~5번 항목을 임의로 정한 흔적이 없는지 확인한다.
-- 수식 범위(2번), 생성 권한(3번), Superset 운영 조건(4번), Azure OpenAI 처리(1번)가 코드에 확정되어 있으면 차단 항목이다.
+- 브리프 5절의 미결정 항목을 임의로 정한 흔적이 없는지 확인한다. `docs/gate-status.md`의 미결정 표가 현재 상태의 정본이다.
+- 수식 범위(2번), 생성 권한(3번), Superset 운영 조건(4번), 수식 평가 경로(6번), Explore 제공 방식(7번)이 승인 전에 코드에 확정되어 있으면 차단 항목이다.
+- 결정된 항목을 어기면 차단이다. Azure OpenAI(1번)는 "제외"로 결정됐으므로 `AZURE_OPENAI_*` 변수, `/health/azure-openai`, Azure OpenAI 호출 코드가 사용자 승인 없이 들어 있으면 차단한다. 디자인(5번) 결정은 `docs/decisions/01-design-direction.md`를 따른다.
 
 ### 8. 파괴적 명령 (차단)
 - 스크립트나 문서가 다음을 실행하도록 쓰지 않았는지 확인한다: `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`

@@ -12,7 +12,7 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - 시작: `docker compose up -d --build`
 - 종료: `docker compose down` (볼륨 삭제 옵션 금지)
 - 서비스: `postgres`, `backend`, `frontend`, 그리고 확인 후 추가되는 Superset 관련 서비스
-- Health: `/health`, `/health/db`를 업무 API보다 먼저 만든다. `/health/azure-openai`는 브리프 5절 1번 결과에 따른다.
+- Health: `/health`, `/health/db`를 업무 API보다 먼저 만든다. `/health/azure-openai`는 만들지 않는다(브리프 5절 1번 결정: 제외).
 - Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API는 상대경로 `/api`와 프록시로 연결한다.
 - BAT 6종: `start-local.bat`, `stop-local.bat`, `restart-local.bat`, `logs-local.bat`, `health-check.bat`, `validate-env.bat`. Linux 세션에서는 작성만 한다.
 
@@ -27,8 +27,8 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 2. `.env.example` → Backend Settings → `compose.yml` → `Jenkinsfile` → README와 Skill → Test 순서로 영향을 확인한다.
 3. 결과를 PR 설명이 아니라 커밋 메시지나 변경 요약에 기록한다.
 
-## 미결정 사항 반영 방식
-- **Azure OpenAI (브리프 5절 1번):** 변수 이름은 유지하고 "미결정 1번" 주석을 단다. 답이 나오기 전에는 Health 경로에서 설정 로딩과 Connectivity Test를 구분해 두기만 한다.
+## 미결정·결정 사항 반영 방식
+- **Azure OpenAI (브리프 5절 1번, 결정됨: 제외):** `.env.example`에서 `AZURE_OPENAI_*` 변수를 뺀다. `/health/azure-openai`는 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 표시한다. 이후 LLM 사용이 생기면 사용자 승인 후에 다시 논의한다.
 - **Superset과 캐시 서비스 (브리프 5절 4번):** 로컬 `compose.yml`에만 넣는다. 팀 웹서버 구성은 운영자 확인 전까지 확정하지 않는다. Redis 대체로 Valkey를 쓸 수 있으나 라이선스 확인은 사용자 승인 후에 한다.
 
 ## Environment Ready 체크리스트
@@ -41,7 +41,7 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - [ ] Compose 시작과 종료가 실제로 성공한다. (Docker 데몬이 필요하다. 불가하면 `qa-verification` 절차를 따른다.)
 - [ ] Frontend에서 FastAPI로 최소 통신이 된다.
 - [ ] Backend에서 PostgreSQL 연결 상태를 실제로 확인한다.
-- [ ] Azure OpenAI 검증 경로: 설정 로딩과 Connectivity Test가 구분되어 있다. (미결정 1번 반영 전에는 "보류"로 표시)
+- [ ] Azure OpenAI 검증 경로: **해당 없음** (브리프 5절 1번 결정: 제외. 변수와 Health 경로를 만들지 않았는지만 확인한다.)
 - [ ] BAT 6종이 있다. 실행 검증은 사용자 PC에서 한다.
 - [ ] Jenkinsfile: Validation, Test, Build, Compose, Docker Build 단계가 있다.
 - [ ] `skills/local-environment/SKILL.md`: 실행, 종료, 로그, Health Check, 문제 해결이 있다.
@@ -55,7 +55,7 @@ Checkout → Env Validation → Backend Lint/Test → Frontend Lint/Test/Build �
 ## 금지 사항
 - `docker compose down -v`, `.env` 삭제, `rm -rf`를 쓰지 않는다.
 - BAT 파일을 Linux에서 실행하지 않는다.
-- Azure OpenAI 항목을 임의로 N/A 처리하지 않는다.
+- 사용자 승인 없이 Azure OpenAI 변수나 `/health/azure-openai`를 다시 추가하지 않는다(브리프 5절 1번: 제외로 결정됨).
 
 ## 관련 Skill
 - `local-environment` (저장소의 `skills/local-environment/SKILL.md`): 사용자와 AI가 쓰는 실행 절차

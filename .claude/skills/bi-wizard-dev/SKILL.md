@@ -42,7 +42,8 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - architect가 DB 마이그레이션 도구 후보를 비교한다. 사용자가 고른 도구를 env-engineer가 반영한다.
 - env-engineer가 환경을 만들고, qa-engineer가 `qa-verification` 스킬에 따라 검증한다. 둘은 SendMessage로 문제를 주고받는다.
 - Environment Ready 체크리스트(`env-bootstrap` 스킬)가 모두 통과하거나, 실패 항목에 사용자 승인이 난 뒤에만 Gate ③으로 넘어간다.
-- 이 Gate에서 사용자에게 **미결정 1번(Azure OpenAI 항목 처리)** 과 **미결정 4번(팀 웹서버의 Superset 운영 조건)** 을 질문한다. 운영자 확인이 필요한 항목이므로, 답을 모르면 "웹서버 운영자 확인 필요"라고 전달한다.
+- 이 Gate에서 사용자에게 **미결정 4번(팀 웹서버의 Superset 운영 조건)** 을 질문한다. 운영자 확인이 필요한 항목이므로, 답을 모르면 "웹서버 운영자 확인 필요"라고 전달한다. 확인 중이면 Superset은 로컬 `compose.yml`에만 포함한다.
+- **미결정 1번(Azure OpenAI 항목 처리)은 "제외"로 결정됐다(2026-10-11).** `.env.example`에 Azure OpenAI 변수를 넣지 않고 `/health/azure-openai`를 만들지 않으며, 체크리스트 항목은 "해당 없음"이다.
 - BAT 파일은 작성만 하고, 실행 검증 요청서를 사용자에게 준다.
 
 ### Gate ③: MODULARIZE
@@ -93,6 +94,8 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 | 4 | 팀 웹서버 Superset 운영 조건 | 미결정 | - |
 | 5 | 디자인 방향 | 미결정 | - |
 ```
+위 표는 `docs/gate-status.md`를 **최초 생성할 때의 초기 상태 예시**다. 현재 상태(결정된 항목, 6·7번 추가 등)는 `docs/gate-status.md`가 정본이다.
+
 상태는 `대기`, `진행 중`, `승인 대기`, `승인`, `완료` 중 하나를 쓴다.
 
 ## 미결정 사항 규칙

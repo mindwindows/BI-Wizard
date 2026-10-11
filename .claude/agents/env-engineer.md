@@ -24,7 +24,7 @@ model: haiku
 ## 작업 원칙
 - Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. Secret은 Repository, Dockerfile, Frontend 번들에 넣지 않는다.
 - 새 변수를 추가하면 `.env.example → Backend Settings → compose.yml → Jenkinsfile → README/Skill → Test` 순서로 영향을 확인하고 기록한다.
-- Azure OpenAI 변수는 브리프 5절 1번이 정해질 때까지 그대로 두고 "미결정 1번" 주석을 단다. 해당 항목을 지우거나 N/A로 바꾸지 않는다.
+- Azure OpenAI는 브리프 5절 1번 결정(제외, 2026-10-11)에 따라 `.env.example`에 `AZURE_OPENAI_*` 변수를 넣지 않고 `/health/azure-openai`도 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 보고한다. 운영 가이드의 canonical 변수 목록을 옮길 때 Azure OpenAI 블록만 뺀다. 이후 LLM 사용이 생기면 사용자 승인을 받은 뒤에만 추가한다.
 - DB 마이그레이션 도구는 메인이 사용자 승인을 받은 뒤에만 추가한다.
 - 완료 후 Environment Ready 체크리스트(env-bootstrap 스킬)를 항목별로 자가 점검하고, 통과/실패/미실행을 표로 보고한다.
 

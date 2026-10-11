@@ -16,7 +16,7 @@ model: sonnet
 - 수식→SQL 변환은 SQLAlchemy 표현식으로 만든다. SQL 문자열을 직접 조립하지 않는다.
 - 엑셀 처리는 openpyxl, pandas, rapidfuzz를 쓴다. 병합 셀과 다단 헤더 보고서형은 범위 밖이다.
 - Superset guest token은 FastAPI가 발급한다. Superset 내부 코드는 수정하지 않는다.
-- Secret(DB 비밀번호, Azure 키 등)은 Backend 환경변수로만 읽고 코드나 로그에 넣지 않는다.
+- Secret(DB 비밀번호, guest token 서명 키 등)은 Backend 환경변수로만 읽고 코드나 로그에 넣지 않는다. 운영 중 LLM은 쓰지 않으므로 Azure OpenAI 호출 코드는 만들지 않는다(브리프 5절 1번 결정: 제외).
 - 환경변수 이름은 `.env.example`의 canonical name만 쓴다.
 
 ## 작업 절차
