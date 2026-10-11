@@ -11,7 +11,7 @@
 - 이 환경이 통과한 상태(Environment Ready)가 기능 개발의 전제다.
 - frontend의 nginx 마스터가 root로 실행되는 것은 **의도적 선택**(공식 nginx 이미지 기본)이다. 필요하면 `nginx-unprivileged` 이미지로 전환할 수 있다.
 - `FRONTEND_HOST` 기본값은 `127.0.0.1`이다(Superset 관리자 로그인이 LAN에 노출되지 않게). 컨테이너 내부 바인딩 변수(`BACKEND_HOST` 등)와는 다른 의미다.
-- Superset 텔레메트리 끄기(`SCARF_ANALYTICS=false`)는 `compose.yml`의 고정값이다. gunicorn은 워커 1개이며 주기적 재시작(`WORKER_MAX_REQUESTS`)을 쓰지 않는다.
+- Superset 텔레메트리(Scarf)는 `superset/superset_config.py`가 CSP에서 `scarf.sh` 호스트를 제거해 막는다(`SCARF_ANALYTICS` 환경변수는 6.1.0에서 효과가 없어 쓰지 않는다). gunicorn은 워커 1개이며 주기적 재시작(`WORKER_MAX_REQUESTS`)을 쓰지 않는다.
 
 ## 2. 환경변수
 - `.env.example`이 이름 기준 원본이다. 운영 가이드의 canonical name(`APP_*`, `FRONTEND_*`, `BACKEND_*`, `POSTGRES_*`, `LOG_LEVEL`, `TZ`)을 그대로 쓰고, 같은 의미의 새 이름을 만들지 않는다. 환경별 이름 분리(`LOCAL_DB_HOST` 등) 금지: 이름은 고정하고 값만 바꾼다.

@@ -85,7 +85,7 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
 
 ### Superset 등록 방식과 보안 메모
 - `superset-init`은 업무 데이터 연결(`bi_readonly`)을 `superset set_database_uri` CLI가 아니라 같은 함수를 부르는 `superset/register_database.py`로 등록한다. CLI는 URI(비밀번호 포함)를 명령줄 인수로 받아 컨테이너의 프로세스 목록에 보이기 때문이다. URI는 로그에 출력하지 않는다.
-- Superset 텔레메트리(Scarf): 공식 FAQ대로 `compose.yml`에 `SCARF_ANALYTICS=false`를 고정값으로 넣었지만(`.env` 변수 아님), **6.1.0 이미지에서는 효과가 없음을 확인했다.** 메뉴 컴포넌트가 이 값과 무관하게 `apachesuperset.gateway.scarf.sh` 이미지를 항상 요청하며(빌드된 프런트엔드와 서버 소스에 이 환경변수를 읽는 곳이 없다), 브라우저가 외부로 요청을 보낸다. 사내망에서는 실패해도 기능에 영향이 없다. 막으려면 설정 파일의 CSP(`TALISMAN_CONFIG`)에서 해당 호스트를 빼는 방법이 있으나 아직 적용하지 않았다(결정 대기).
+- Superset 텔레메트리(Scarf): 공식 FAQ의 `SCARF_ANALYTICS=false`는 6.1.0에서 **효과가 없음을 확인해 삭제했다**(서버 소스와 빌드된 프런트엔드에 이 환경변수를 읽는 코드가 없고, 메뉴 컴포넌트가 값과 무관하게 `apachesuperset.gateway.scarf.sh` 이미지를 항상 요청한다). 대신 `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 `scarf.sh` 호스트를 제거해 브라우저가 해당 요청을 보내지 못하게 한다(Superset 내부 코드 수정 아님). 부수 효과로 브라우저 콘솔에 CSP 위반 경고(`img-src`)가 남을 수 있다. Google Fonts(`fonts.googleapis.com`, `fonts.gstatic.com`) 요청은 막지 않았다.
 - gunicorn 워커는 1개이고 주기적 재시작(`WORKER_MAX_REQUESTS`)은 쓰지 않는다. 워커 1개를 재시작하면 그 순간 요청 1건이 502가 되고 다음 요청이 지연된다. 메모리 누수 보호는 `mem_limit`과 `restart: unless-stopped`에 맡긴다. 한계: 한도에 닿으면 컨테이너가 강제 종료(137)된 뒤 재시작되며 그동안 Superset 요청이 실패한다. `docker stats`로 추세를 보고 한도는 `docs/decisions/03a-deploy-environment.md`에 따라 조정한다.
 
 ### db-bootstrap (읽기 전용 계정과 Superset 메타 DB)

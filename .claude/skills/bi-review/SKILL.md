@@ -16,8 +16,10 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 ## 점검 항목
 
 ### 1. 라이선스 (차단)
-- 새로 추가된 패키지의 라이선스를 확인한다. 허용형은 MIT, BSD, Apache 2.0, PSF, PostgreSQL License다.
-- 차단: `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스
+- 새로 추가된 패키지의 라이선스와 **위치**(운영 런타임 / 개발·테스트 전용 / 업스트림 공식 이미지 내부)를 확인한다. 허용형은 MIT, BSD, Apache 2.0, PSF, PostgreSQL License다.
+- **원칙(사용자 결정, 2026-10-11):** 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다.
+- 차단: `ag-grid-enterprise`, AGPL, GPL, EUPL 등 강한 카피레프트, Sustainable Use License 등 비오픈소스, Redis 7.4 이후 라이선스(위치와 관계없이). 우리 코드의 **운영 런타임 의존성**에 LGPL·MPL이 새로 들어오면 차단이다.
+- LGPL·MPL이 개발·테스트 전용이거나 업스트림 공식 이미지 내부라면 허용한다. 단 `docs/deploy-coordination.md`의 "배포 전 회사 오픈소스 정책 확인" 표에 없는 새 항목이면 추가를 요청한다(중요). 해당 패키지를 수정·재배포(포크, 패치, 번들)하는 흔적이 있으면 차단이다.
 - 라이선스가 불분명하면 "불명확 (확인 필요)"로 중요 항목에 올린다.
 
 ### 2. Secret (차단)
@@ -33,6 +35,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 
 ### 4. 환경변수 (중요)
 - `.env.example`의 canonical name과 맞는지 확인한다.
+- 사용자가 승인한 목록 밖의 새 변수가 있으면 승인 기록(`docs/gate-status.md`, `docs/decisions/`)이 있는지 확인한다. 기록이 없으면 중요 항목이다("새 환경변수 추가는 적용 전에 사용자 승인" 규칙).
 - 같은 의미의 새 이름이 생기지 않았는지 확인한다.
 
 ### 5. 경계 (중요)
@@ -62,6 +65,10 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - **접두 처리 변수 (중요):** `APP_PROXY_STRIP_PREFIX`의 기본값이 `false`(접두 유지 전달)인지, `true`/`false` 두 값 모두 로컬에서 검증됐는지 확인한다.
 - 마이그레이션 도구는 Alembic이다. 다른 도구(Flyway, Atlas 등)나 앱 시작 시 `create_all`로 스키마를 만드는 코드가 새로 들어오면 사용자 승인 여부를 확인한다.
 
+### 7-2. Superset Embedded guest 역할 (차단, 2026-10-11 결정)
+- 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 운영 guest 역할은 최소 권한 커스텀 역할이어야 한다(권한 목록은 Gate ③에서 정의). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
+- Scarf 호스트가 CSP에 다시 들어갔는지, 효과 없는 `SCARF_ANALYTICS` 변수가 다시 생겼는지 확인한다(중요).
+
 ### 8. 파괴적 명령 (차단)
 - 스크립트나 문서가 다음을 실행하도록 쓰지 않았는지 확인한다: `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`
 
@@ -71,6 +78,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 
 ### 10. 운영 가이드 준수 (중요)
 - FastAPI, PostgreSQL, React, Docker Compose, Jenkins 기준을 따르는지 확인한다.
+- 운영 가이드 기준선과 다른 설정(예: 포트 게시 범위, 기본값과 다른 보안·네트워크 값)이 사용자 승인 기록 없이 들어갔는지 확인한다. 기록이 없으면 중요 항목이다.
 - Frontend 컨테이너에 전체 `.env`가 전달되지 않는지 확인한다.
 
 ## 심각도

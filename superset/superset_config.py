@@ -6,10 +6,13 @@
   Superset 6.1.0은 접두로 시작하지 않는 요청에 404를 낸다. 프록시는 접두를 떼지 않고 전달해야 한다.
 """
 
+import copy
 import os
 from urllib.parse import quote
 
 from sqlalchemy.engine import URL
+from superset.config import TALISMAN_CONFIG as _DEFAULT_TALISMAN_CONFIG
+from superset.config import TALISMAN_DEV_CONFIG as _DEFAULT_TALISMAN_DEV_CONFIG
 
 
 def _required(name: str) -> str:
@@ -42,3 +45,23 @@ FEATURE_FLAGS = {"EMBEDDED_SUPERSET": True}
 # x_prefix=0: 접두는 SUPERSET_APP_ROOT로 직접 처리하므로 X-Forwarded-Prefix로 다시 붙이지 않는다.
 ENABLE_PROXY_FIX = True
 PROXY_FIX_CONFIG = {"x_for": 1, "x_proto": 1, "x_host": 1, "x_port": 0, "x_prefix": 0}
+
+# Superset 텔레메트리(Scarf) 차단(결정: 2026-10-11).
+# SCARF_ANALYTICS=false는 6.1.0에서 효과가 없다(메뉴 컴포넌트가 값과 무관하게 픽셀 이미지를 요청한다).
+# 대신 기본 CSP의 허용 목록에서 scarf.sh 호스트를 제거해 브라우저가 요청을 보내지 못하게 한다.
+# 기본 CSP를 복사해 해당 항목만 거르므로 나머지 정책은 Superset 기본값 그대로다(내부 코드 수정 아님).
+_BLOCKED_HOSTS = ("scarf.sh",)
+
+
+def _without_blocked_hosts(config: dict) -> dict:
+    cfg = copy.deepcopy(config)
+    csp = cfg.get("content_security_policy")
+    if isinstance(csp, dict):
+        for directive, sources in csp.items():
+            if isinstance(sources, list):
+                csp[directive] = [s for s in sources if not any(h in s for h in _BLOCKED_HOSTS)]
+    return cfg
+
+
+TALISMAN_CONFIG = _without_blocked_hosts(_DEFAULT_TALISMAN_CONFIG)
+TALISMAN_DEV_CONFIG = _without_blocked_hosts(_DEFAULT_TALISMAN_DEV_CONFIG)

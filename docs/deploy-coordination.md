@@ -28,16 +28,31 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 
 | 번호 | 항목 | 내용 | 상태 | 결과 기록 |
 | --- | --- | --- | --- | --- |
-| 13 | **Superset 6.1.0 하위 경로 로고 이중 접두** | 로그인 화면이 로고를 `…/superset/bi-wizard/superset/static/…`로 요청해 404가 난다(서버가 준 경로에는 접두가 한 번만 있고 프런트가 한 번 더 붙이는 것으로 보임). 기능에는 영향이 없다고 보고됐으나 QA 재현 결과를 확인한다. 대안: 그대로 둠 / `superset_config.py` 설정만으로 로고 값 변경(효과 미검증) / 프록시에서 이중 접두를 한 번으로 줄이는 rewrite(실제 메인 플랫폼 프록시에도 같은 설정 필요) / 수정이 반영된 릴리스로 변경(6.1.0 고정 결정 변경). **Superset 내부 코드는 수정하지 않는다** | 사용자 결정 대기 | - |
+| 13 | **Superset 6.1.0 하위 경로 로고 이중 접두** | 로그인 화면이 로고를 `…/superset/bi-wizard/superset/static/…`로 요청해 404가 난다(QA 재현 확인, 기능 영향 없음). 서버가 준 경로에는 접두가 한 번만 있고 프런트가 한 번 더 붙이는 것으로 보인다. **알려진 문제로 두고 그대로 둔다**(사용자 결정, 2026-10-11). Superset 내부 코드는 수정하지 않는다. **수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다**(6.1.0 고정 결정은 그때 사용자 승인으로 변경) | 알려진 문제(결정됨) | 2026-10-11 사용자 결정: 그대로 둠. 업그레이드 시 하위 경로(`APP_PROXY_STRIP_PREFIX` true/false)와 Embedded 검증 재실시 |
 | 14 | **앞단 프록시의 `X-Forwarded-Proto/Host`** | Superset은 `ENABLE_PROXY_FIX`(1홉 신뢰)로 이 헤더를 믿는다. 메인 플랫폼 프록시가 클라이언트가 보낸 값을 신뢰할 수 있는 값으로 **덮어써야** 한다. 로컬 재현 nginx는 앞단이 보낸 값이 있으면 보존한다. (8번과 연결) | 협의 필요 | - |
 | 15 | **세션 쿠키 충돌 가능성** | Superset 세션 쿠키 이름은 `session`, `Path=/bi-wizard/superset`이다. 포털이 같은 이름의 쿠키를 쓰면 충돌할 수 있다(경로가 달라 지금은 구분됨) | 확인 필요 | - |
 | 16 | **정상 경로 `…/superset/superset/…` 오인** | Superset의 정상 라우트 `/superset/welcome/`이 `SUPERSET_APP_ROOT=/bi-wizard/superset` 아래에서는 `/bi-wizard/superset/superset/welcome/`이 된다. 버그가 아니다. 모니터링·접근 규칙에서 중복 접두로 오인해 차단하지 않도록 알린다 | 협의 필요 | - |
 | 17 | **`/nginx-health`** | frontend 컨테이너 내부 전용 경로다. 메인 플랫폼이 전달할 필요가 없다 | 확인됨 | - |
-
-| 18 | **외부 요청(사내망 차단 시 영향)** | Superset 6.1.0 화면은 `apachesuperset.gateway.scarf.sh`(텔레메트리 픽셀)와 `fonts.googleapis.com`, `fonts.gstatic.com`에 요청한다. `SCARF_ANALYTICS=false`는 6.1.0에서 효과가 없음을 확인했다(소스와 번들에 읽는 코드가 없음). 사내망에서 막히면 콘솔 오류와 지연이 생길 수 있고, 허용하면 사용 통계가 외부로 나간다. 설정 파일의 CSP(`TALISMAN_CONFIG`)에서 scarf 호스트를 빼는 방안은 사용자 결정 대기 | 사용자 결정 대기 | - |
+| 18 | **외부 요청(사내망 차단 시 영향)** | Superset 6.1.0 화면은 `apachesuperset.gateway.scarf.sh`(텔레메트리 픽셀)와 `fonts.googleapis.com`, `fonts.gstatic.com`에 요청한다. `SCARF_ANALYTICS=false`는 6.1.0에서 효과가 없어(소스와 번들에 읽는 코드 없음) 변수를 삭제했다. **Scarf는 `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 scarf 호스트를 제거해 브라우저가 요청을 보내지 못하게 한다**(사용자 결정, 2026-10-11). 부수 효과로 콘솔에 CSP 위반 경고가 남는다. **Google Fonts는 막지 않았다.** 사내망에서 Google Fonts가 막히면 콘솔 오류와 폰트 대체가 생길 수 있다 | 확인됨(Scarf 차단) / 협의 필요(Google Fonts) | 2026-10-11 재검증: 브라우저가 보낸 Scarf 요청 13건이 모두 CSP에 막혀 전송 0건, Google Fonts 2건은 전송됨. Gamma 대조 조건에서 Embedded 정상 |
 | 19 | **Superset 기본 rate limit** | 6.1.0 기본 `RATELIMIT_APPLICATION="50 per second"`(인메모리)이고 클라이언트 IP별이다. 앞단 프록시가 `X-Forwarded-For`를 보내지 않으면 모든 사용자가 한 IP로 집계된다. 연속 호출 테스트에서 429가 837건 났다(5xx는 0건). (8번과 연결) | 협의 필요 | - |
+| 20 | **`FRONTEND_HOST` 값은 메인 플랫폼 프록시 위치에 따라 바꿔야 할 수 있다** | `.env`의 `FRONTEND_HOST` 기본값은 `127.0.0.1`이라 이 서버 안(같은 호스트)에서만 접속된다. 메인 플랫폼 프록시가 **같은 호스트**에서 `127.0.0.1:FRONTEND_PORT`로 전달하면 기본값 그대로 쓴다. 프록시가 **다른 서버**이거나 컨테이너 네트워크 밖에서 접근하면 `0.0.0.0` 또는 해당 서버에서 닿는 인터페이스 주소로 바꿔야 하고, 그러면 방화벽으로 접근 대상을 제한해야 한다(Superset 관리자 로그인 화면도 함께 노출되므로). postgres·backend 포트는 계속 `127.0.0.1`에 둔다 | 협의 필요 | - |
+| 21 | **Superset 404 오류 페이지 일러스트의 접두 누락** | Superset 6.1.0의 404 오류 페이지가 일러스트 이미지(`/static/assets/….png`)를 `SUPERSET_APP_ROOT` 접두 없이 요청해 404가 난다(QA 재현 확인). 오류 페이지의 그림만 깨지고 기능에는 영향이 없다. **알려진 문제로 기록하고 그대로 둔다**(사용자 결정, 2026-10-11). 13번과 같이 수정 릴리스가 나오면 업그레이드와 함께 재검증한다. 메인 플랫폼 프록시는 접두 없는 `/static/…`을 이 서비스로 보내지 않아도 된다 | 알려진 문제(결정됨) | 2026-10-11 사용자 결정 |
+
+## 배포 전 회사 오픈소스 정책 확인
+
+라이선스 원칙(사용자 결정, 2026-10-11): **운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다.** 아래 "주의" 항목은 이 원칙에 따라 모두 허용했다. 배포 전에 회사의 오픈소스 정책(사내 고지·승인 절차 포함)이 이 목록을 허용하는지 확인한다.
+
+| 번호 | 허용한 항목 | 라이선스 | 위치 | 허용 조건 |
+| --- | --- | --- | --- | --- |
+| 22 | `psycopg2-binary` | LGPL | `superset/Dockerfile`로 만드는 Superset 이미지 안(Superset의 PostgreSQL 연결용). backend는 사용하지 않는다(pg8000, BSD) | 수정·재배포하지 않는다(PyPI 배포본을 그대로 설치) |
+| 23 | `certifi` | MPL-2.0 | 테스트 단계 이미지 | 개발·테스트 전용, 수정·재배포하지 않는다 |
+| 24 | `lightningcss`와 플랫폼별 패키지 12개 | MPL-2.0 | 프런트 개발 의존성(Vite 빌드·개발 서버). 운영 번들에는 코드가 들어가지 않는다 | 개발 전용, 수정·재배포하지 않는다 |
+| 25 | `BlueOak-1.0.0`, `MIT-0`, `CC0-1.0`(mdn-data), `CC-BY-4.0`(caniuse-lite) 표기 패키지 | 허용형에 준하는 라이선스(비표준 표기) | 프런트 개발 의존성 | 개발 전용 데이터·도구. `CC-BY-4.0`은 데이터 고지 의무만 있다 |
+
+각 항목의 상태는 모두 `협의 필요`다(회사 정책 확인 전). 새 "주의" 항목이 생기면 이 표에 추가한다.
 
 ## 이미 확인된 사항
 
 - 추가 컨테이너 운영은 허용된다. Superset은 `compose.yml`의 정식 서비스다(2026-10-11, 사용자 확인).
 - Redis/Valkey는 쓰지 않는다(2026-10-11 결정).
+- BAT 6종은 ASCII 영문 메시지로, frontend·postgres·backend 포트는 `127.0.0.1`에 게시하는 구성이다(2026-10-11 사후 승인). Superset 컨테이너 필수 변수는 `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD` 4개다(사후 승인).

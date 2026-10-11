@@ -17,7 +17,7 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 - **하위 경로:** FastAPI는 `APP_BASE_PATH`를 `root_path`로 읽는다. 프록시가 접두를 떼고 넘기는 방식과 그대로 넘기는 방식을 설정값만으로 전환할 수 있어야 한다(`docs/decisions/03a-deploy-environment.md`). 경로 접두를 코드에 하드코딩하지 않는다.
 - **Secret:** DB 비밀번호, 키는 환경변수에서만 읽는다. 로그와 응답에 넣지 않는다.
 - **환경변수:** `.env.example`의 canonical name만 쓴다.
-- **라이선스:** 허용형 패키지만 추가한다. 추가 전 `bi-review`의 라이선스 항목을 확인한다.
+- **라이선스:** backend 운영 의존성은 허용형 패키지만 추가한다(LGPL·MPL 금지, 개발·테스트 전용 도구는 `bi-review` 라이선스 원칙에 따름). 추가 전 `bi-review`의 라이선스 항목을 확인한다.
 
 ## DB 마이그레이션 (Alembic, `docs/decisions/03-migration-tool.md`)
 - 마이그레이션 파일은 마이그레이션 디렉터리(제안: `backend/migrations/`) 안에만 둔다. 스키마 변경은 항상 revision으로 만든다.

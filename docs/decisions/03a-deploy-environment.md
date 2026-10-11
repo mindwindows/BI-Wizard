@@ -68,7 +68,18 @@
 ## 4. 앱 계정 조건 (승인, 2026-10-11)
 Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고, Gate ④ 진입 전 분리 완료가 필수이며, Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다.
 
-## 5. 열린 사항
+## 5. Gate ② 결과에 대한 결정 (2026-10-11, 사용자)
+상세 표는 `docs/gate-status.md`의 "Gate ② 결과 결정".
+
+- **사후 승인:** BAT ASCII 영문 변환, frontend·postgres·backend 포트의 `127.0.0.1` 게시, 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`). 웹서버에서는 메인 플랫폼 프록시 위치에 따라 `FRONTEND_HOST` 값을 바꿔야 할 수 있다(`deploy-coordination.md` 20번).
+- **승인 규칙(하네스):** 새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.
+- **Embedded guest 역할:** 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다(기본 `Public`은 `…/api/v1/me/roles/`가 403이라 실패하고 `Gamma`는 대조 실험에서만 성공했다).
+- **로고 이중 접두, 404 페이지 일러스트 접두 누락:** 알려진 문제로 두고 수정하지 않는다(Superset 내부 코드 수정 금지). 수정이 포함된 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다(6.1.0 고정의 변경은 그때 사용자 승인).
+- **Scarf:** `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 `scarf.sh` 호스트를 제거한다. 효과 없는 `SCARF_ANALYTICS` 변수는 삭제했다. Google Fonts는 막지 않는다.
+- **라이선스 원칙:** 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다. 보고된 "주의" 항목은 모두 허용하며 목록은 `deploy-coordination.md`의 "배포 전 회사 오픈소스 정책 확인"에 둔다.
+- **포털 favicon:** `frontend/index.html`에 `data:,` 아이콘을 두어 `/favicon.ico` 404를 없앤다.
+
+## 6. 열린 사항
 
 - 메인 플랫폼 프록시의 실제 동작, 실제 경로 값 등은 `docs/deploy-coordination.md`.
 - 하위 경로 + Embedded의 쿠키·iframe 허용 설정은 같은 origin 가정(`deploy-coordination.md` 9번)이 맞는지에 달려 있다.

@@ -33,7 +33,7 @@ model: haiku
 - 완료 후 Environment Ready 체크리스트(env-bootstrap 스킬)를 항목별로 자가 점검하고, 통과/실패/미실행을 표로 보고한다.
 
 - Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 이 구성은 Gate ④ 진입 전에 최소 권한 앱 계정으로 분리되어야 하므로 README/AGENTS.md에 "Gate ② 한정 구성"이라고 적는다.
-- 파이썬·JS 패키지는 허용형 라이선스(MIT, BSD, Apache 2.0, PSF)만 쓴다. 추가한 패키지의 라이선스를 PyPI/npm 메타데이터로 확인해 보고한다. psycopg2/psycopg(LGPL)는 backend에 쓰지 않는다(예: pg8000 BSD, asyncpg Apache 2.0). Superset 이미지가 포함하는 드라이버의 라이선스는 별도로 보고한다.
+- 우리 코드의 운영 런타임 파이썬·JS 의존성은 허용형 라이선스(MIT, BSD, Apache 2.0, PSF)만 쓴다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소의 LGPL·MPL은 수정·재배포하지 않는 조건으로 허용된다(사용자 결정, 2026-10-11). 추가한 패키지의 라이선스와 위치를 PyPI/npm 메타데이터로 확인해 보고하고, 새 "주의" 항목은 `docs/deploy-coordination.md`의 "배포 전 회사 오픈소스 정책 확인" 표에 추가한다. psycopg2/psycopg(LGPL)는 backend에 쓰지 않는다(예: pg8000 BSD, asyncpg Apache 2.0). Superset 이미지가 포함하는 드라이버의 라이선스는 별도로 보고한다.
 - Dockerfile에서 `apt-get`을 쓰지 않는다(이 세션에서는 컨테이너 안에서 프록시·CA가 없어 실패한다). 이 세션에서만 필요한 빌드 우회는 저장소에 넣지 않고 `_workspace/qa/`의 임시 override 파일로 처리한다.
 
 ## 협업
@@ -46,6 +46,7 @@ model: haiku
 - 첫 보고에서 실제로 사용할 수 있는 도구 목록을 알린다.
 
 ## 공통 금지 사항
+- 새 환경변수 추가, 운영 가이드 기준선과 다른 설정은 적용 전에 메인을 통해 사용자 승인을 받는다. 필요하면 `NEEDS-APPROVAL: <내용과 이유>`로 보고하고 해당 부분만 멈춘다(사후 보고로 대신하지 않는다).
 - `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`를 실행하지 않는다. 필요하면 먼저 사용자에게 묻는다.
 - `main`에 커밋하거나 푸시하지 않는다.
 - BAT 파일은 Linux에서 실행하지 않는다. 실행 검증은 사용자 Windows PC에서 하도록 요청한다.

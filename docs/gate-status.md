@@ -3,7 +3,7 @@
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
-| ② ENVIRONMENT BOOTSTRAP | 승인 대기 | - | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안 승인 완료. 환경 구축·검증(env-engineer ⇄ qa-engineer, reviewer) 완료. Embedded iframe 미통과 등 사용자 결정 대기(아래 "Gate ② 결과") | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
+| ② ENVIRONMENT BOOTSTRAP | 승인 대기 | - | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안 승인 완료. 환경 구축·검증(env-engineer ⇄ qa-engineer, reviewer) 완료. Gate ② 결과에 대한 사용자 결정 8건 반영 완료(2026-10-11, 아래 "Gate ② 결과 결정"). 남은 것은 Windows PC BAT 검증 결과와 Gate ② 승인 | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | 대기 | - | - | - |
 | ④ 기능 개발 | 대기 | - | - | - |
 
@@ -54,13 +54,45 @@
 | Superset 메타 DB 분리, 읽기 전용 연결 | 통과 | `superset` DB 소유 `superset_meta`, 등록 연결 `bi_readonly`, `allow_dml=false`, 명령줄·로그에 비밀번호 없음 |
 | 마이그레이션 왕복(tmpfs, profile `test`) | 통과(제한) | upgrade→downgrade→upgrade 성공. baseline이 빈 revision이라 검증 범위는 `alembic_version` 기록뿐 |
 | **하위 경로**(`APP_PROXY_STRIP_PREFIX` false/true 각각) | 통과 | 포털, API, Superset 로그인·화면 이동, 접두 밖 404, 재빌드 없는 전환 |
-| **Embedded iframe** | **미통과(결정 대기)** | 기본 guest 역할 `Public`에 권한이 없어 `…/api/v1/me/roles/` 403. 하위 경로가 원인이 아님(루트+Public도 실패, 하위 경로+Gamma는 성공) |
+| **Embedded iframe** | **환경 검증 완료(하위 경로 + Gamma 대조 실험), 운영 역할은 Gate ③에서 정의** | 기본 guest 역할 `Public`에는 권한이 없어 `…/api/v1/me/roles/` 403이다. 하위 경로가 원인이 아니다(루트+Public도 실패, 하위 경로+Gamma는 성공). Gamma는 대조 실험에만 썼고 운영 설정에는 쓰지 않는다. 운영 역할은 최소 권한 커스텀 역할로 Gate ③에서 정의 |
 | 메모리(`mem_limit`, 실측, 5MB 샘플) | 통과 | `docs/deploy-coordination.md` 5번 |
 | BAT 6종 | 부분(보류) | 작성과 정적 검증 완료. 실행은 사용자 Windows PC(`docs/windows-bat-verification.md`) |
 | Jenkinsfile CI | 부분 | 6단계 정적 확인, 각 단계 명령은 로컬에서 통과. Jenkins 실행은 미실행 |
 | `skills/local-environment`, README, AGENTS.md | 통과 | 실행한 명령과 대조 |
 
-**사용자 결정 대기 항목(Gate ② 승인 전):** Embedded guest 역할 설계, Superset 로고 이중 접두(6.1.0 하위 경로 BETA) 처리 방식, Scarf 텔레메트리(CSP 설정 변경 여부), 라이선스 "주의" 항목 허용 여부(`psycopg2-binary` LGPL은 Superset 이미지 한정, 테스트 전용 `certifi` MPL-2.0, dev 도구 `lightningcss` MPL-2.0 등), 승인 목록 밖 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`) 사후 확인, postgres·backend를 `127.0.0.1`에만 게시하는 차이 기록, Windows PC BAT 검증 결과.
+## Gate ② 결과 결정 (2026-10-11, 사용자)
+| 번호 | 항목 | 결정 | 반영 위치 |
+| --- | --- | --- | --- |
+| 1 | 사후 승인 | BAT 영문(ASCII) 변환, frontend·postgres·backend 포트의 `127.0.0.1` 게시, 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`) 승인. 웹서버에서는 메인 플랫폼 프록시 위치에 따라 `FRONTEND_HOST`를 바꿔야 할 수 있다는 점을 배포 협의 목록에 추가. **하네스 규칙 신설:** 새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다 | `docs/deploy-coordination.md` 20번, `CLAUDE.md`, `bi-wizard-dev`, 에이전트 정의 |
+| 2 | 에이전트 모델 | 정의 파일은 현재대로 유지(env-engineer, qa-engineer, frontend-dev는 haiku). 호출 시 모델 변경은 사전 승인 없이 하지 않는다. 이번 Gate ② 호출 때 바꾼 에이전트와 사유는 보고했다. **Gate ④ 시작 전에 모델 판단을 다시 한다** | 아래 "모델 변경 기록", `CLAUDE.md` |
+| 3 | Embedded guest 역할 | 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다 | Gate ② 결과 표, Gate ③ 인계, `bi-review` |
+| 4 | 로고 이중 접두 | 그대로 둔다(알려진 문제). 수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다 | `docs/deploy-coordination.md` 13번 |
+| 5 | Scarf | `superset_config.py`의 CSP에서 Scarf 호스트 제거, 효과 없는 `SCARF_ANALYTICS` 변수 삭제. 변경 후 Superset 화면과 임베딩(Gamma 대조 조건) 재확인 | `superset/superset_config.py`, `compose.yml`, `docs/deploy-coordination.md` 18번 |
+| 6 | 라이선스 | "주의" 항목 모두 허용. 원칙: 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다. 허용 목록은 "배포 전 회사 오픈소스 정책 확인"으로 기록 | `docs/project-brief.md` 4.1, `gate-research`, `bi-review`, `docs/deploy-coordination.md` 22~25번 |
+| 7 | favicon | 포털 favicon 404 수정(`frontend/index.html`에 `data:,` 아이콘). Superset 404 오류 페이지 일러스트의 접두 누락은 알려진 문제로 기록 | `frontend/index.html`, `docs/deploy-coordination.md` 21번 |
+| 8 | 볼륨 정리 | 시험용 볼륨을 이름을 지정해 삭제하는 것을 이번 한 번만 허용. `bi-wizard_postgres_data`는 삭제하지 않음. 이름 없는 볼륨은 어떤 컨테이너·메인 볼륨과도 연결되지 않은 것만 삭제. 일괄 삭제 명령 금지, 이미지 유지 | 아래 "볼륨 정리 기록" |
+
+### 재검증 결과 (결정 5·7 반영 후, 프로젝트 `envfix`, STRIP=false)
+- Superset 컨테이너 기동 healthy, `superset_config.py` 로드 오류 없음(CSP `img-src`에 scarf 호스트 없음 확인).
+- 포털: `/favicon.ico` 404 사라짐, 4xx·콘솔 오류 0건.
+- Scarf: 브라우저가 낸 요청 13건이 모두 CSP에 막힘(전송 0건). Google Fonts 2건은 전송됨(막지 않음). 콘솔에 CSP 위반 경고가 남는다(예상된 부수 효과).
+- Superset 화면(로그인, 홈, 대시보드·차트·데이터셋·DB 목록, SQL Lab, 대시보드 상세) 정상. 기존 알려진 404(로고 이중 접두, `service-worker.js`, 404 페이지 일러스트)만 남음.
+- 기본 설정(guest 역할 `Public`)에서 Embedded는 기존과 같이 403으로 실패(예상). **Gamma 대조 실험**(시험 전용 override로 `GUEST_ROLE_NAME="Gamma"`, 커밋하지 않음)에서는 iframe에 대시보드가 표시되고 4xx 0건.
+- `scripts/ci-validate-env.sh` 통과.
+
+### 알려진 문제 (Gate ② 승인 후에도 유지)
+- Superset 6.1.0 하위 경로: 로그인 화면 로고 이중 접두 404, 404 오류 페이지 일러스트 접두 누락, `service-worker.js` 404(이미지에 파일 없음). 기능 영향 없음. 수정 릴리스가 나오면 업그레이드와 하위 경로 재검증(`docs/deploy-coordination.md` 13·21번).
+- Google Fonts 외부 요청은 막지 않았다(`docs/deploy-coordination.md` 18번).
+
+### 모델 변경 기록
+- 정의 파일 모델: env-engineer, qa-engineer, frontend-dev = haiku. 그 밖의 에이전트는 정의 그대로.
+- 이번 Gate ② 구축·검증에서 호출 시 `sonnet`으로 바꾼 에이전트: **env-engineer, qa-engineer** (haiku → sonnet). reviewer는 정의 파일이 이미 sonnet이라 변경이 아니다. 사유: nginx 하위 경로 프록시, Superset 하위 경로, compose 의존 순서(db-bootstrap → migrate → backend) 등 구성이 복잡하고 독립 검증의 신뢰도가 필요했다. **이 변경은 사전 승인 없이 이뤄졌다**(사용자 지적, 2026-10-11). 앞으로는 적용 전에 승인을 받는다. frontend-dev는 아직 호출하지 않았다. 판단은 Gate ④ 시작 전에 다시 한다.
+
+### 볼륨 정리 기록
+이번 한 번에 한해 허용된 정리(2026-10-11). 이름을 지정해 `docker volume rm`만 썼고 일괄 삭제 명령과 이미지 삭제는 쓰지 않았다. 삭제 전 시험 프로젝트 `envfix`를 `-v` 없이 내렸고 컨테이너는 0개였다.
+- **삭제 전:** 이름 있는 볼륨 8개(`bi-wizard_postgres_data`, `qaclean_`, `qafail_`, `qaspecial_`, `qafinal_`, `qaroot_`, `envfix_`, `envroot_` `postgres_data`)와 이름 없는 볼륨 6개(총 14개). 이름 없는 6개는 `docker ps -a --filter volume=<이름>` 결과 연결된 컨테이너 0개, 메인 볼륨과 다른 이름임을 확인했다.
+- **삭제:** 시험용 7개와 이름 없는 6개(13개).
+- **삭제 후 남은 볼륨:** `bi-wizard_postgres_data` 1개. 이미지는 그대로 유지(예: `bi-wizard-*:local`, `apache/superset:6.1.0`, CA 오버레이 태그 `python:3.12.15-slim-bookworm`, `node:22.23.3-alpine`).
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.
@@ -75,8 +107,10 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
 - **왕복 테스트의 실질 범위:** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
 - **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
-- **Embedded guest 역할 설계:** `GUEST_ROLE_NAME`(기본 `Public`)에 줄 최소 권한을 데이터셋·대시보드 권한 모델과 함께 설계한다(옵션: 최소 권한 커스텀 역할 권장 / `Gamma` / `PUBLIC_ROLE_LIKE` 비권장).
+- **Embedded guest 역할 설계(결정됨: 최소 권한 커스텀 역할):** `GUEST_ROLE_NAME`에 지정할 커스텀 역할의 권한 목록을 데이터셋·대시보드 권한 모델과 함께 정한다. 최소한 `…/api/v1/me/roles/` 403을 일으키지 않는 권한이 필요하다(기본 `Public`은 권한이 없어 실패, `Gamma` 대조 실험은 성공). `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다(`bi-review`가 점검). 역할을 만드는 위치와 방식은 Gate ③에서 정한다. 만든 뒤 하위 경로 + Embedded 검증을 다시 한다.
 - **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
 - **Alembic `target_metadata` 연결:** 현재 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않는다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). Gate ③에서 정적 모델 `MetaData`와 `include_object` 필터를 D2 설계와 함께 연결한다.
 - **업로드 크기 상한:** 이 서비스가 다룰 데이터는 대용량이 아니고 현재 엑셀 파일은 5MB 이하다. Gate ② 검증에서 5MB급 샘플로 backend 사용량을 실측한 결과를 근거로 Gate ③에서 상한을 정한다. 프록시의 요청 본문 상한(`docs/deploy-coordination.md` 7번)과 맞춘다.
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).
+- **라이선스 점검 원칙(결정 6):** 새 의존성을 추가할 때 운영 런타임에 들어가는지, 개발·테스트 전용인지, 업스트림 공식 이미지 내부인지를 구분해 `bi-review`가 판정한다. 약한 카피레프트를 우리 코드의 운영 런타임 의존성에 추가하려면 사용자 확인이 필요하다.
+- **Superset 업그레이드 조건:** 로고·일러스트 접두 수정이 포함된 정식 릴리스가 나오면 버전을 올리고 하위 경로(STRIP true/false)와 Embedded를 다시 검증한다(6.1.0 고정 결정 변경은 사용자 승인).
