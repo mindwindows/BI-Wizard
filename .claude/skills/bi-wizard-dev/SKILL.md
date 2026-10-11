@@ -27,7 +27,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 서브에이전트 병렬 2건, 이후 리뷰 | researcher ×2 (디자인, 기술 Reference), reviewer | 디자인 2~3안, Reference 3~5개 비교표 | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md` |
 | ② ENVIRONMENT BOOTSTRAP | 지속형 협업 (생성·검증) | architect(마이그레이션 도구 제안), env-engineer ⇄ qa-engineer, reviewer | Environment Ready 체크리스트 결과, BAT 검증 요청서 | 저장소 파일(compose, Dockerfile, `.env.example`, `AGENTS.md` 등). `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 서브에이전트 생성 후 리뷰 | architect, reviewer | 모듈 경계, 기능↔Skill 대응표, API 계약 초안, 데이터 모델, 기능 단위 순서 | `docs/decisions/04-modules.md`, `docs/decisions/05-api-contract.md` |
+| ③ MODULARIZE | 서브에이전트 생성 후 리뷰 | researcher(공식 문서 사실 확인), architect, reviewer | 사실 확인 결과(`_workspace/gate3/facts.md`), 모듈 경계, 기능↔Skill 대응표, API 계약 초안, 데이터 모델, 수식 엔진, Superset 임베딩, 기능 단위 순서 | `docs/decisions/04-modules.md`, `05-api-contract.md`, `06-data-model.md`, `07-formula-engine.md`, `08-superset-embedding.md` |
 | ④ 기능 개발 | 지속형 협업 + 기능 단위마다 리뷰 | backend-dev, frontend-dev, qa-engineer (상시), reviewer (단위 완료 시) | 기능 단위별 코드·테스트·Skill | 저장소 파일(`backend/`, `frontend/`, `skills/<기능>/`). 완료 후 커밋 |
 
 ### Gate ①: RESEARCH & DECIDE
@@ -49,7 +49,9 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 
 ### Gate ③: MODULARIZE
 - architect가 산출물을 만들고 reviewer가 리뷰한다.
-- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)**, **미결정 3번(새 데이터셋 생성 권한)**, **미결정 6번(저장 전 수식 평가 경로)**, **미결정 7번(Explore 제공 방식)**, 그리고 **마이그레이션 D2(동적 객체 분리 방식)** 를 질문한다. 옵션과 영향을 함께 준다.
+- 이 Gate에서 사용자에게 **미결정 2번(수식 범위 첫 버전)**, **3번(새 데이터셋 생성 권한)**, **6번(저장 전 수식 평가 경로)**, **7번(Explore 제공 방식)**, **8번(포털 사용자 인증과 신원 출처)**, **9번(동시 편집 정책)**, **10번(Superset 데이터셋·대시보드 등록 방식)**, **11번(삭제 정책)**, 그리고 **마이그레이션 D2(동적 객체 분리 방식)**, 앱 계정 분리, guest 역할 권한 목록, RLS `clause` 규칙, `CREATE VIEW` 리터럴 처리, 업로드 상한을 질문한다. 옵션과 영향을 함께 준다.
+- **결정 라운드(0~5)** 순서를 따른다(`modularize` 스킬, `docs/gate-status.md`의 "Gate ③ 진행 계획"). 0라운드는 researcher의 공식 문서 사실 확인이고 reviewer가 출처와 본문을 대조한다. 라운드마다 질문을 올린 뒤 멈추고, 답을 받으면 바로 `gate-status.md`와 해당 decisions 문서에 기록한다. 8번(인증) 답이 늦으면 2번을 먼저 진행하고 8번에 의존하는 3번과 이후 항목은 8번 답을 받은 뒤 진행한다.
+- 사실 확인을 위해 메인이 Superset 6.1.0 소스를 이미지에서 꺼내 `_workspace/gate3/sources/superset-6.1.0/`에 둔다(reviewer와 researcher가 읽을 수 있게).
 - Gate ① 원본 대조 인계 사항과 `CREATE VIEW` 렌더링 근거(PostgreSQL·SQLAlchemy 공식 문서 확인)는 `docs/gate-status.md`의 "Gate ③ 인계 사항"을 따른다.
 - API 계약과 모듈 경계는 승인 후에만 `docs/decisions/`에 확정한다. 이후 계약 변경은 사용자 승인이 필요하다.
 

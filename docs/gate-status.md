@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 대기 | - | - | - |
+| ③ MODULARIZE | 진행 중(계획 승인, 0라운드) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -17,6 +17,10 @@
 | 5 | 디자인 방향 | 결정 | C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형) (2026-10-11, Gate ①) |
 | 6 | 수식 미리보기·자동완성을 위한 저장 전 수식 평가 경로 | 미결정 | - (Gate ③에서 결정) |
 | 7 | Superset 차트 작성 화면(Explore)을 포털에서 어떻게 제공할지 | 미결정 | - (Gate ③에서 결정. Embedded SDK로 가능한 범위를 공식 문서로 확인한 뒤 결정) |
+| 8 | 포털 사용자 인증과 신원 출처 | 미결정 | - (Gate ③ 1라운드. 메인 플랫폼 운영자 확인이 필요할 수 있음) |
+| 9 | 동시 편집 정책 | 미결정 | - (Gate ③ 3라운드) |
+| 10 | Superset 데이터셋·대시보드 등록 방식 | 미결정 | - (Gate ③ 3라운드) |
+| 11 | 삭제 정책 | 미결정 | - (Gate ③ 3라운드) |
 
 ## Gate ② 결정 사항: DB 마이그레이션 (2026-10-11, `docs/decisions/03-migration-tool.md`)
 | 번호 | 항목 | 상태 | 결정 |
@@ -99,6 +103,23 @@
 - **삭제 전:** 이름 있는 볼륨 8개(`bi-wizard_postgres_data`, `qaclean_`, `qafail_`, `qaspecial_`, `qafinal_`, `qaroot_`, `envfix_`, `envroot_` `postgres_data`)와 이름 없는 볼륨 6개(총 14개). 이름 없는 6개는 `docker ps -a --filter volume=<이름>` 결과 연결된 컨테이너 0개, 메인 볼륨과 다른 이름임을 확인했다.
 - **삭제:** 시험용 7개와 이름 없는 6개(13개).
 - **삭제 후 남은 볼륨:** `bi-wizard_postgres_data` 1개. 이미지는 그대로 유지(예: `bi-wizard-*:local`, `apache/superset:6.1.0`, CA 오버레이 태그 `python:3.12.15-slim-bookworm`, `node:22.23.3-alpine`).
+
+## Gate ③ 진행 계획 (승인, 2026-10-11)
+- **사실 확인:** researcher가 공식 문서·소스 원문으로 확인하고(`_workspace/gate3/facts.md`, 발췌는 `_workspace/gate3/sources/`), reviewer가 출처와 본문을 대조한다. researcher 정의는 "사용자 요청 시 어느 Gate에서든 공식 문서 사실 확인 가능"으로 고쳤다. reviewer는 웹을 읽지 못하므로 발췌 파일과 Superset 6.1.0 이미지에서 꺼낸 소스를 대조한다.
+- **산출물:** `docs/decisions/04-modules.md`, `05-api-contract.md`, `06-data-model.md`, `07-formula-engine.md`, `08-superset-embedding.md`. 문서 사이 용어·필드 일관성은 reviewer 점검 기준이다.
+- **미결정 8~11번 추가:** 8 포털 사용자 인증과 신원 출처, 9 동시 편집 정책, 10 Superset 데이터셋·대시보드 등록 방식, 11 삭제 정책.
+- **결정 라운드:**
+
+| 라운드 | 항목 | 비고 |
+| --- | --- | --- |
+| 0 | 공식 문서 사실 확인 | 결정 없음 |
+| 1 | 8번(인증), B(3번 생성 권한), A(2번 수식 범위) | 8번 답이 늦으면 A를 먼저 진행하고, 8번에 의존하는 B와 이후 항목은 8번 답을 받은 뒤 진행 |
+| 2 | C(6번 평가 경로), D2 | 둘 다 A 뒤. D2 하위 결정(뷰 재생성 방식, `bi_readonly` `SELECT` 부여 방식) 포함 |
+| 3 | 앱 계정 분리, D(7번 Explore), 9~11번 | 앱 계정은 D2 뒤 |
+| 4 | Embedded guest 역할 권한 목록, RLS `clause` 규칙, `CREATE VIEW` 리터럴 처리, 업로드 상한 | guest 역할은 7번과 D2 뒤 |
+| 5 | 인계 설계 일괄 확인(`target_metadata`·`include_object`, 붙여넣기 파서 규격, 순환 검사 방식, Baserow 참고 범위)과 문서 초안 승인 | `target_metadata`는 D2와 앱 계정 뒤 |
+
+- Gate ④ 시작 전: 앱 계정 분리 완료, 에이전트 모델 재판단.
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.

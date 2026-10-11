@@ -49,7 +49,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 
 ### 7. 미결정 사항 (차단)
 - 브리프 5절의 미결정 항목을 임의로 정한 흔적이 없는지 확인한다. `docs/gate-status.md`의 미결정 표가 현재 상태의 정본이다.
-- 수식 범위(2번), 생성 권한(3번), 수식 평가 경로(6번), Explore 제공 방식(7번)이 승인 전에 코드에 확정되어 있으면 차단 항목이다.
+- 수식 범위(2번), 생성 권한(3번), 수식 평가 경로(6번), Explore 제공 방식(7번), 포털 사용자 인증과 신원 출처(8번), 동시 편집 정책(9번), Superset 데이터셋·대시보드 등록 방식(10번), 삭제 정책(11번)이 승인 전에 설계 문서나 코드에 확정되어 있으면 차단 항목이다. `docs/gate-status.md`의 미결정 표가 정본이다.
 - 결정된 Superset 운영 조건(4번)을 어기면 차단이다: Redis/Valkey 또는 Celery 서비스를 사용자 승인 없이 추가, Superset 이미지를 `6.1.0`이 아닌 태그로 변경, Superset 내부 코드 수정(브리프 4.6), 서비스에 `mem_limit` 누락 또는 한도 합계가 8GB 초과(`docs/decisions/03a-deploy-environment.md`).
 - 결정된 항목을 어기면 차단이다. Azure OpenAI(1번)는 "제외"로 결정됐으므로 `AZURE_OPENAI_*` 변수, `/health/azure-openai`, Azure OpenAI 호출 코드가 사용자 승인 없이 들어 있으면 차단한다. 디자인(5번) 결정은 `docs/decisions/01-design-direction.md`를 따른다.
 
@@ -68,6 +68,11 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 ### 7-2. Superset Embedded guest 역할 (차단, 2026-10-11 결정)
 - 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 운영 guest 역할은 최소 권한 커스텀 역할이어야 한다(권한 목록은 Gate ③에서 정의). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
 - Scarf 호스트가 CSP에 다시 들어갔는지, 효과 없는 `SCARF_ANALYTICS` 변수가 다시 생겼는지 확인한다(중요).
+
+### 7-3. 사실 확인 교차 검증 (Gate ③, 요청 시)
+- `_workspace/gate3/facts.md`의 `확인됨` 항목은 출처, 문서 버전, 확인일, 원문 인용이 있고 인용이 `_workspace/gate3/sources/` 발췌와 일치해야 한다. 근거가 없거나 인용이 발췌와 다르면 중요 항목이다.
+- 우리 버전(PostgreSQL 16, Superset 6.1.0 등)과 다른 버전의 문서를 근거로 삼았다면 그 사실이 적혀 있는지 본다.
+- 사실 확인에 설계안·추천이 섞여 있으면 지적한다.
 
 ### 8. 파괴적 명령 (차단)
 - 스크립트나 문서가 다음을 실행하도록 쓰지 않았는지 확인한다: `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`
