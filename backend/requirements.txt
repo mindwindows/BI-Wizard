@@ -1,0 +1,27 @@
+# requirements.in에서 생성한 전체 고정 목록(전이 의존성 포함). 직접 수정하지 말고 requirements.in을 고친 뒤 다시 생성한다.
+# 생성: python:3.12.15-slim-bookworm 컨테이너에서 pip install -r requirements.in 후 pip freeze (2026-10-11)
+alembic==1.20.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+asn1crypto==1.5.1
+click==8.5.0
+fastapi==0.143.0
+h11==0.16.0
+idna==3.20
+Mako==1.4.3
+MarkupSafe==3.0.4
+opentelemetry-api==1.45.1
+pg8000==1.31.5
+pydantic==2.14.0
+pydantic-settings==2.15.0
+pydantic_core==2.50.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.4
+scramp==1.4.17
+six==1.17.0
+SQLAlchemy==2.1.4
+starlette==1.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.54.0

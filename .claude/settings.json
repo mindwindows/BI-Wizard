@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -r -f:*)",
+      "Bash(rm -f -r:*)",
+      "Bash(rm .env:*)",
+      "Bash(rm -f .env:*)",
+      "Bash(git clean -fdx:*)",
+      "Bash(git clean -xdf:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(docker compose down -v:*)",
+      "Bash(docker compose down --volumes:*)"
+    ]
+  }
+}

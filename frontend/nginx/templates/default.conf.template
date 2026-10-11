@@ -1,0 +1,89 @@
+# frontend nginx 설정 템플릿. 컨테이너 시작 때 NGX_* 변수가 치환된다(envsubst).
+#
+# 이 nginx는 두 역할을 한다.
+#  1) 포털 정적 파일을 서빙한다.
+#  2) 로컬에서 "메인 플랫폼 프록시" 역할을 재현한다: ${NGX_BASE}/api/ -> backend, ${NGX_SUPERSET_ROOT}/ -> superset.
+#
+# 규칙
+#  - Superset 경로는 항상 접두를 유지한 채 전달한다(Superset 6.1.0은 접두로 시작하지 않는 요청에 404).
+#    proxy_pass에 URI를 붙이지 않고 변수를 써서 원래 요청 경로를 그대로 넘긴다.
+#  - 포털 API는 APP_PROXY_STRIP_PREFIX=false면 받은 경로 그대로, true면 접두를 떼고 backend에 넘긴다.
+#  - 정적 파일은 접두가 있어도(유지 전달) 없어도(떼고 전달) 서빙된다.
+#  - upstream 이름은 요청 때 해석한다(resolver). 시작 순서와 무관하게 nginx가 뜬다.
+#  - client_max_body_size는 업로드 크기 상한(Gate ③ 결정)이 정해질 때 설정한다(nginx 기본 1m).
+
+server_tokens off;
+absolute_redirect off;
+port_in_redirect off;
+
+${NGX_RESOLVER}
+
+# 앞단(실제 메인 플랫폼 프록시)이 보낸 X-Forwarded-* 값이 있으면 보존하고, 없으면 직접 채운다.
+# 주의: 이 nginx는 로컬 재현용이다. 앞단 프록시가 없는 로컬에서는 클라이언트가 보낸 X-Forwarded-Proto/Host가
+# 그대로 Superset(ProxyFix)에 전달된다. 앞단이 없는 환경에서 이 값을 믿지 않으려면 snippets/proxy-common.conf의
+# $bw_forwarded_proto, $bw_forwarded_host를 각각 $scheme, $http_host로 바꾸고(항상 덮어쓴다) 이미지를 다시 빌드한다.
+# 새 환경변수는 만들지 않는다.
+# 실제 메인 플랫폼 프록시는 이 헤더를 반드시 자기 값으로 덮어써야 한다(docs/deploy-coordination.md 8·14번).
+map $http_x_forwarded_proto $bw_forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+map $http_x_forwarded_host $bw_forwarded_host {
+    default $http_x_forwarded_host;
+    ""      $http_host;
+}
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    # 컨테이너 healthcheck 전용(프록시 경로 밖).
+    location = /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    ${NGX_BASE_REDIRECT}
+
+    # Superset: 접두를 떼지 않고 그대로 전달한다.
+    location = ${NGX_SUPERSET_ROOT} {
+        set $superset_upstream http://superset:8088;
+        proxy_pass $superset_upstream;
+        include /etc/nginx/snippets/proxy-common.conf;
+    }
+    location ^~ ${NGX_SUPERSET_ROOT}/ {
+        set $superset_upstream http://superset:8088;
+        proxy_pass $superset_upstream;
+        include /etc/nginx/snippets/proxy-common.conf;
+    }
+
+    # 포털 API -> backend. 접두는 있어도(유지 전달) 없어도(앞단이 이미 뗌) 받는다.
+    location ~ ^(?:${NGX_BASE_RE})?/api/ {
+        set $backend_upstream http://backend:${NGX_BACKEND_PORT};
+        ${NGX_API_REWRITE}
+        proxy_pass $backend_upstream;
+        include /etc/nginx/snippets/proxy-common.conf;
+    }
+
+    # 해시가 붙은 빌드 산출물
+    location ~ ^(?:${NGX_BASE_RE})?/assets/ {
+        rewrite ^(?:${NGX_BASE_RE})/(.*)$ /$1 break;
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    # 포털 정적 파일. 하위 경로가 있으면 접두 아래에서만 SPA fallback(index.html)을 한다(아래 블록).
+    ${NGX_PORTAL_LOCATION}
+
+    # 접두 밖(루트). 하위 경로가 있으면 정적 자산(/, /index.html, /config.js, /assets/, favicon 등 실제 파일)만 서빙하고
+    # 그 외 경로는 404다(앞단이 접두를 떼고 넘기는 경우의 정적 서빙은 유지된다).
+    # 하위 경로가 없으면(루트 배포) 여기서 SPA fallback을 한다.
+    location / {
+        ${NGX_ROOT_TRY}
+        add_header Cache-Control "no-cache";
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+}

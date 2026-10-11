@@ -1,0 +1,23 @@
+body {
+  margin: 0;
+  font-family: system-ui, "Malgun Gothic", sans-serif;
+  background: #f6f7f9;
+  color: #1f2933;
+}
+
+.shell {
+  max-width: 640px;
+  margin: 48px auto;
+  padding: 0 24px;
+}
+
+table {
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 16px 6px 0;
+}
