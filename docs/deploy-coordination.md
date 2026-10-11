@@ -57,6 +57,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | --- | --- | --- | --- | --- |
 | 26 | **Docker Desktop 없이 BAT 실행하는 방식** | BAT가 실제로 쓰일 사내 환경은 라이선스 문제로 Docker Desktop을 쓸 수 없다. 팀의 실제 방식(Podman, BAT 안에서 `wsl` 경유 등)을 확인한다. 확인 후 필요하면 BAT 6종을 그 방식에 맞게 고친다(명령 이름, 경로 변환, `docker compose` 대체, `service_completed_successfully` 지원 여부, `mem_limit` 적용 여부는 `docs/windows-bat-verification.md`의 "Docker Desktop과 Podman에 따라 달라질 수 있는 확인 항목" 참고). BAT 실행 검증은 이 확인 뒤 사내 환경에서 한다 | 협의 필요(BAT 검증 보류 해소 조건) | - |
 | 27 | **Superset 화면의 Google Fonts 외부 요청** | Superset 6.1.0 화면은 `fonts.googleapis.com`, `fonts.gstatic.com`에서 글꼴을 받는다. 외부 접속이 제한된 사내망에서는 요청이 실패해 기본 글꼴로 표시될 수 있다. 기능에는 영향이 없다. 배포 때 사내망 정책을 확인한다(18번과 연결) | 협의 필요 | - |
+| 28 | **인증·신원 방식 (미결정 8번) 운영자 질문 20개** | 메인 플랫폼이 사용자 신원을 어떻게 넘기는지 등 20개 질문을 `docs/operator-questions.md`에 모았다(핵심 10개 표시). 사용자가 검토해 직접 답하고 남은 것은 운영자에게 전달한다. 답을 받으면 8번 방식과 새 환경변수(적용 전 승인)를 정한다. 이전까지 포털은 `current_user` 한 곳으로 격리하고 로컬은 스텁 신원으로 진행한다(Gate ③ 1라운드 U1) | 협의 필요(8·14·15·20번과 함께) | - |
 
 ## 이미 확인된 사항
 
