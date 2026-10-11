@@ -196,3 +196,9 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).
 - **라이선스 점검 원칙(결정 6):** 새 의존성을 추가할 때 운영 런타임에 들어가는지, 개발·테스트 전용인지, 업스트림 공식 이미지 내부인지를 구분해 `bi-review`가 판정한다. 약한 카피레프트를 우리 코드의 운영 런타임 의존성에 추가하려면 사용자 확인이 필요하다.
 - **Superset 업그레이드 조건:** 로고·일러스트 접두 수정이 포함된 정식 릴리스가 나오면 버전을 올리고 하위 경로(STRIP true/false)와 Embedded를 다시 검증한다(6.1.0 고정 결정 변경은 사용자 승인).
+
+### Gate ③ 3라운드 준비 (2026-10-11)
+- **사실 확인(DB Q40~44, Superset Q46~51):** researcher 2명이 확인하고 reviewer가 원문과 대조했다(`_workspace/gate3/facts-db-r3.md`, `facts-superset-r3.md`, Git 제외). Q40, Q47, Q49, Q51은 "부분 확인"(미검증 항목 명시). `flask-talisman` 패키지 버전은 확인하지 못했다. 모델 변경 없음.
+- **옵션 비교안:** `_workspace/gate3/round3-options.md` (F 앱 계정, D Explore 제공과 팀 필터 기본값, W11, 9, 10, 11, 실험이 바꾸는 이전 결정 표, 질문 Y1~Y13, 기본값 BY1~BY11). reviewer가 2회 검토했다. 사용자 결정은 아직 없다.
+- **미승인 실험 후보:** X-14~X-24(권한 부여 방식, 계정별 권한 매트릭스, Superset 일반 화면 iframe, 작성자 역할, 팀 필터 주소 지정, 서버의 Superset 등록 흐름, 삭제 후 남는 것, 동시 편집 DB 동작 등). 질문 Y13에서 승인 여부를 묻는다.
+- **상태:** 3라운드 질문 보고 후 사용자 결정 대기.
