@@ -53,7 +53,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 ### 7-1. 마이그레이션 (D2·D3·D5·D4·D6·D7, `docs/decisions/03-migration-tool.md`)
 - **D3 (차단):** 마이그레이션 파일에서 `op.execute`, `text()`, `connection.execute` 등에 넘기는 SQL 문자열에 f-string, `%`, `.format()`, `+` 연결이 있는지 확인한다. 하나라도 있으면 차단이다. 마이그레이션 디렉터리 밖에서 raw SQL을 쓰면 차단이다(점검 항목 3).
 - **D2 안전장치 (차단):** 마이그레이션에 `DROP`(`op.drop_table`, `op.drop_column`, `op.drop_index`, `op.drop_constraint`, SQL의 `DROP` 등)이 있는지 확인한다. 있으면 **사용자 확인 기록**(커밋 메시지나 변경 요약의 "DROP 확인: 사용자 승인" 문구)이 있는지 본다. 기록이 없으면 차단이다. D2(동적 객체 분리 방식)는 Gate ③ 결정 전이므로, 사용자 데이터셋 테이블·수식 뷰가 삭제 대상에 섞였는지도 본다.
-- **D5 (중요):** 모든 revision에 `downgrade()`가 실제로 구현되어 있는지(`pass`, `NotImplementedError`만 있으면 미구현) 확인한다. upgrade → downgrade → upgrade 왕복 테스트 결과(qa-engineer 보고)가 첨부되어 있는지 본다. 운영 문제를 되돌리기로 해결하라는 문구나 스크립트가 있으면 지적한다(수정 마이그레이션 추가가 원칙).
+- **D5 (중요):** 모든 revision에 `downgrade()`가 실제로 구현되어 있는지(`pass`, `NotImplementedError`만 있으면 미구현) 확인한다. upgrade → downgrade → upgrade 왕복 테스트 결과(qa-engineer 보고)가 첨부되어 있는지 본다. 운영 문제를 되돌리기로 해결하라는 문구나 스크립트가 있으면 지적한다(수정 마이그레이션 추가가 원칙). **예외:** 업무 객체가 아직 없는 baseline revision은 사유를 적은 의도적 no-op(`return None`)을 허용한다. 첫 실제 객체를 만드는 revision부터는 실질적인 `downgrade()` 구현을 요구한다.
 - **D4 (중요):** `compose.yml`에 backend 이미지를 재사용하는 일회성 `migrate` 서비스가 있고, `backend`가 `migrate`의 `service_completed_successfully`에 의존하는지 확인한다.
 - **D6 (중요):** 테스트용 PostgreSQL 서비스가 `tmpfs` 데이터이고 compose profile로 평소에는 뜨지 않는지 확인한다. 정리 방법이 `-v` 없는 `docker compose down`인지 본다(점검 항목 8과 같이).
 - **D7 (중요):** Superset 메타데이터가 우리 앱 DB와 **별도 데이터베이스**(`superset`, 소유 `superset_meta`)인지, Superset이 업무 데이터를 읽는 연결이 **읽기 전용 계정**(`bi_readonly`, 쓰기 권한 없음, `default_transaction_read_only=on`)인지 확인한다. Superset 연결 문자열이나 설정에 앱 DB 소유자 계정이 쓰이면 차단이다.

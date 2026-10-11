@@ -49,5 +49,6 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - 수식 범위(2번)가 정해져야 `references/baserow/`에서 참고할 모듈 범위(lookup·집계 포함 여부)를 확정할 수 있다.
 - **앱 계정 분리 (조건부 승인, 2026-10-11):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·migrate 계정으로 쓴다. 조건: (1) 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계한다. (2) **Gate ④ 진입 전 분리 완료가 필수 조건**이다. (3) Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. (4) 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다(생략하면 마이그레이션 실행 역할과 런타임 DDL 실행 역할이 같아야 하므로, 분리 시 어느 역할이 동적 객체를 만들고 `bi_readonly`에 어떻게 `SELECT`를 주는지 새로 설계).
 - **D2 (동적 객체 분리 방식) 결정:** 데이터 모델과 함께 옵션(S 별도 schema, N 이름 규칙, R 등록 테이블 기반, D 별도 DB)을 비교해 사용자가 결정한다. 읽기 전용 계정(D7)의 동적 객체 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식도 함께 정한다. 결정 전까지 자동 생성 초안의 `DROP`은 사용자 확인 없이 적용하지 않는다.
+- **Alembic `target_metadata` 연결:** 현재 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않는다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). Gate ③에서 정적 모델 `MetaData`와 `include_object` 필터를 D2 설계와 함께 연결한다.
 - **업로드 크기 상한:** 이 서비스가 다룰 데이터는 대용량이 아니고 현재 엑셀 파일은 5MB 이하다. Gate ② 검증에서 5MB급 샘플로 backend 사용량을 실측한 결과를 근거로 Gate ③에서 상한을 정한다. 프록시의 요청 본문 상한(`docs/deploy-coordination.md` 7번)과 맞춘다.
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).

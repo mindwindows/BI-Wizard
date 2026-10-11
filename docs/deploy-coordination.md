@@ -24,6 +24,16 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 11 | **Secret 주입 방식** | `.env` 배포 방식 또는 Jenkins Credential 매핑. `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, DB 비밀번호는 저장소·이미지·프런트 번들에 넣지 않는다 | 협의 필요 | - |
 | 12 | **운영 DB 백업·복구 정책** | 동적 객체(사용자 데이터셋 테이블, 수식 뷰)와 입력 데이터는 마이그레이션 이력으로 복구되지 않는다. 볼륨 백업 정책이 필요하다 | 협의 필요 | - |
 
+## 구축 중 알게 된 항목 (env-engineer·QA 보고에서 추가)
+
+| 번호 | 항목 | 내용 | 상태 | 결과 기록 |
+| --- | --- | --- | --- | --- |
+| 13 | **Superset 6.1.0 하위 경로 로고 이중 접두** | 로그인 화면이 로고를 `…/superset/bi-wizard/superset/static/…`로 요청해 404가 난다(서버가 준 경로에는 접두가 한 번만 있고 프런트가 한 번 더 붙이는 것으로 보임). 기능에는 영향이 없다고 보고됐으나 QA 재현 결과를 확인한다. 대안: 그대로 둠 / `superset_config.py` 설정만으로 로고 값 변경(효과 미검증) / 프록시에서 이중 접두를 한 번으로 줄이는 rewrite(실제 메인 플랫폼 프록시에도 같은 설정 필요) / 수정이 반영된 릴리스로 변경(6.1.0 고정 결정 변경). **Superset 내부 코드는 수정하지 않는다** | 사용자 결정 대기 | - |
+| 14 | **앞단 프록시의 `X-Forwarded-Proto/Host`** | Superset은 `ENABLE_PROXY_FIX`(1홉 신뢰)로 이 헤더를 믿는다. 메인 플랫폼 프록시가 클라이언트가 보낸 값을 신뢰할 수 있는 값으로 **덮어써야** 한다. 로컬 재현 nginx는 앞단이 보낸 값이 있으면 보존한다. (8번과 연결) | 협의 필요 | - |
+| 15 | **세션 쿠키 충돌 가능성** | Superset 세션 쿠키 이름은 `session`, `Path=/bi-wizard/superset`이다. 포털이 같은 이름의 쿠키를 쓰면 충돌할 수 있다(경로가 달라 지금은 구분됨) | 확인 필요 | - |
+| 16 | **정상 경로 `…/superset/superset/…` 오인** | Superset의 정상 라우트 `/superset/welcome/`이 `SUPERSET_APP_ROOT=/bi-wizard/superset` 아래에서는 `/bi-wizard/superset/superset/welcome/`이 된다. 버그가 아니다. 모니터링·접근 규칙에서 중복 접두로 오인해 차단하지 않도록 알린다 | 협의 필요 | - |
+| 17 | **`/nginx-health`** | frontend 컨테이너 내부 전용 경로다. 메인 플랫폼이 전달할 필요가 없다 | 확인됨 | - |
+
 ## 이미 확인된 사항
 
 - 추가 컨테이너 운영은 허용된다. Superset은 `compose.yml`의 정식 서비스다(2026-10-11, 사용자 확인).
