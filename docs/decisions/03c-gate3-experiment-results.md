@@ -295,3 +295,29 @@
 - **`mem_limit` 1g 판정(10MB 상한, backend 유휴 53MiB 가정):** 전형 1~2건 100~150MB 충분, 최악 1건 약 220MB 충분, 최악 2건 약 390MB(메모리 충분, 시간 36초), 한도 안쪽 폭탄 1건 약 490MB 가능, 2건 약 920MB **OOM 위험**. 20MB 상한은 HZ2 없이 권하기 어렵다.
 - **새 런타임 의존성 확인:** backend 이미지에 `python-multipart`가 없어 `UploadFile`을 선언하면 `RuntimeError`가 난다. 업로드 구현에는 `python-multipart`, `openpyxl`, `defusedxml`(선택)이 필요하고 기능 단위 착수 때 승인을 요청한다(BZ19).
 - 한계: pg8000 INSERT·적재 시간 미측정(그래서 \"확정 적재 30초 이내\"는 판정 불가, 파싱만으로 최악 10MB가 16초), HZ2 프로토타입, `RequestBodyLimitMiddleware` 동작, 한도 안쪽 폭탄은 외삽.
+
+## X-25. guest 역할 권한 이분 탐색, 부정 시험, 하위 경로 재검증 (Z1~Z2 근거; 실험 담당 에이전트 수행, 시험 전용 역할 `x25_guest`와 override)
+| 시험 | 결과 |
+| --- | --- |
+| 기준선: Superset 정의 최소 21개 권한(`PUBLIC_ROLE_PERMISSIONS`)으로 Embedded SDK + guest token 임베드 | 대시보드가 끝까지 그려지고 차트 데이터·필터가 동작 |
+| **최소 권한 집합** | **필수 3개**: `can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`. **기간(시간 범위) 필터를 쓰면 `can_time_range Api` 1개 추가**(없으면 `/api/v1/time_range/` 403으로 팝업 APPLY 비활성). **조건부 2개**: `can_explore_json Superset`(레거시 차트 유형, rose로 확인), `can_read DashboardPermalinkRestApi`(permalink로 필터 복원) |
+| 후보 21개 중 | **14개는 불필요**(단일 제거 16개 통과, 16개 일괄 제거 후 전체 시나리오 재통과). `can_read AnnotationLayerRestApi`는 DB에 존재하지 않는 이름(클래스 권한 이름은 `Annotation`) |
+| 권한 변경 반영 | Superset 재시작 없이 즉시. `GUEST_ROLE_NAME` 변경만 재시작 필요. **역할이 없으면 guest의 모든 API가 500** |
+| 부정 시험 137건 | 목록·생성·수정·삭제·SQL Lab·Explore·CSV/XLSX/YAML 내보내기·다른 대시보드·만료/변조/`alg=none`/틀린 `aud` 토큰은 모두 403/404/401/302로 차단. `Public` 권한 0개. CSV/XLSX는 `can_csv Superset`을 더하면 열림(Z1 ㄴ "내보내기 불허"는 이 권한을 넣지 않음으로 이행) |
+| **막히지 않는 것** | ① 토큰 대시보드의 데이터셋에 대해 질의를 바꾼 요청(저장 안 된 열, 지표, 필터, 서브쿼리·세미콜론 없는 SQL 식)이 200 → **열 단위 숨김은 불가능, 방어선은 `bi_readonly` 권한뿐**. ② 느린 질의는 DB에서 계속 실행됨(`statement_timeout` 같은 DB 측 제한 필요, 적용 시험 안 함). ③ 대시보드 메뉴의 PDF/이미지 내보내기는 클라이언트에서 만들어져 서버가 못 막음. ④ `GET /dashboard/1/embedded`가 200으로 읽혀 `allowed_domains`와 변경자 사용자명(`admin`)이 노출됨 |
+| 하위 경로 `STRIP=true`/`false` | 부정 시험 137건 상태 코드 전부 동일 |
+| 직전 X-21 후속(최소 구성 guest) | `native_filters`(팀/기간/금액)는 **추가 권한 없이 적용**. permalink는 `can_read DashboardPermalinkRestApi` 필요 |
+| Gamma 대조 | 기능 결과 같음, 차이는 CSV 내보내기·생성·메뉴 항목뿐 |
+- 결론: guest 역할은 **최소 3개(+기간 필터 1개, 조건부 2개)** 로 충분하다(Z1 ㄱ 이행). 열 단위 접근 제어는 Superset 쪽에서는 불가능하므로 데이터 공개 범위는 `bi_readonly`가 읽을 수 있는 `bi_data` 전체(불변식 "등록된 데이터는 모두 공개")와 같다. 한계: 차트 유형은 일부만 시험(`time_table`, `cal_heatmap`, `handlebars`는 내 파라미터 오류로 판정 못 함, 지도·deck.gl·워드클라우드 미시험), 워커 1개 인스턴스·Chromium 1종, HTTP만 시험(HTTPS의 CSRF Referer, `Secure` 쿠키 미확인), 시험 전용 훅·`aud` override에서만 확인.
+
+## X-28. guest token 발급 방식 비교 (Z3~Z5 근거)
+| 시험 | 결과 |
+| --- | --- |
+| 발급 전용 계정 최소 권한 | **`can_grant_guest_token SecurityRestApi` 1개**(세션 로그인 + 폼 CSRF 방식). REST(JWT) 로그인 흐름이면 CSRF 조회용 `can_read SecurityRestApi` 포함 2개. 이 계정은 다른 API를 전부 403. CSRF 생략은 400. **`user` 생략은 500** |
+| 대시보드 식별 | 숫자 id와 `Dashboard.uuid`는 발급은 되나 **`Dashboard.uuid`는 사용 시 거부**됨(임베드 설정의 uuid여야 함). **임베드 안 한 대시보드의 숫자 id 토큰은 API로 읽힘** → 서버는 포털 등록 표의 embedded uuid만 쓰고 훅이 id를 확인해야 함 |
+| 발급 지연 | 세션 재사용 약 26ms, 로그인 포함 약 240ms |
+| 검증 훅(`GUEST_TOKEN_VALIDATOR_HOOK`) | **발급 API 경로에서만 호출**(소스+실측), 인자 `{user, resources, rls}`. 거부 시 `400 {"message":["Guest token validation failed"]}` |
+| 직접 서명(표준 라이브러리 HS256, PyJWT 2.10.1) | SDK에서 동작(서명 15µs 안팎). **훅을 호출하지 않으며** 비어 있지 않은 `rls`·`exp` 없는 영구 토큰도 통과 |
+| `aud` | **발급 API 경로는 backend가 알 필요 없음**(Superset이 채움). 직접 서명이면 필요(기본 `http://0.0.0.0:8080/` = `WEBDRIVER_BASEURL`, `GUEST_TOKEN_JWT_AUDIENCE` 명시 권장) |
+| 갱신 | 만료 5초 전 `fetchGuestToken` 재호출(5분 설정에서 295초 시점 실측). 실패하면 10초마다 재시도, 만료 후 401과 차트 "Data error"(영문 개발자용 안내), 재시도 성공 시 자동 복구 |
+- 결론: Z3 ㄱ(서버가 Superset 발급 API를 호출 + 발급 전용 계정)이 동작한다. 발급 전용 계정의 최소 권한은 1~2개이고 **`GUEST_TOKEN_JWT_AUDIENCE` 변수는 이 구성에서 필요 없다**(조건부 승인은 사용하지 않음). 검증 훅은 발급 경로에서만 유효하므로 **직접 서명은 훅을 우회**한다(Z4의 이중 확인이 필요하면 직접 서명 불가). 훅은 `rls`가 비어 있는지, resource type이 dashboard인지, id가 등록된 embedded uuid인지 확인하도록 설계할 수 있다. 서버 쪽에서 `user`를 항상 보내야 한다. 한계: HTTPS 미시험, 단일 워커.

@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(4라운드 결정 완료, X-25~X-29 수행·5라운드 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(4라운드 결정·실험 완료, Z6 결정·5라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -231,6 +231,9 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **옵션 비교안:** `_workspace/gate3/round3-options.md` (F 앱 계정, D Explore 제공과 팀 필터 기본값, W11, 9, 10, 11, 실험이 바꾸는 이전 결정 표, 질문 Y1~Y13, 기본값 BY1~BY11). reviewer가 2회 검토했다. 사용자 결정은 아직 없다.
 - **미승인 실험 후보:** X-14~X-24(권한 부여 방식, 계정별 권한 매트릭스, Superset 일반 화면 iframe, 작성자 역할, 팀 필터 주소 지정, 서버의 Superset 등록 흐름, 삭제 후 남는 것, 동시 편집 DB 동작 등). 질문 Y13에서 승인 여부를 묻는다.
 - **상태:** 3라운드 질문 보고 후 사용자 결정 대기.
+
+### Gate ③ 4라운드 실험 결과 (2026-10-11)
+승인된 X-25~X-29를 수행했고 시험 객체를 이름을 지정해 정리했다(컨테이너 `g3x-*`, `g3x26-*`, `g3x27-*`, 네트워크 `g3x_default`·`g3x27-net`, 볼륨 `g3x_postgres_data`; 남은 볼륨은 `bi-wizard_postgres_data` 하나). 상세는 `03c`의 4라운드 절. 요약: **guest 최소 권한 3개 + 기간 필터 1개 + 조건부 2개로 충분**, 불필요 14개(X-25), 열 단위 접근 제어는 Superset에서 불가능(방어선은 `bi_readonly`), **발급 전용 계정 최소 권한 1~2개, `GUEST_TOKEN_JWT_AUDIENCE` 불필요, 검증 훅은 발급 API 경로에서만 호출되어 직접 서명은 우회**(X-28), **`CreateView` + `literal`은 정상 구성에서 안전하나 `standard_conforming_strings` 세션 고정·역슬래시 등 거부·`CAST` 리터럴 규칙이 필요**, 별도 표 저장(나)도 가능, `text()` 없이 런타임 DDL 가능(X-26), `alembic check` 구성과 2계정 왕복 테스트 성공, db-bootstrap의 `GRANT bi_app TO bi_owner` 반복 실행은 오류 없음(X-29), 10MB 상한 메모리 판정과 변조 파일 방어(강화 사전 검사 필수, 전역 동시 1건 사실상 필수, 프록시 기본 1m은 1MiB 초과 413)(X-27). backend 이미지에 `python-multipart` 없음(업로드 구현 때 의존성 승인 필요).
 
 ### Gate ③ 4라운드 준비 (2026-10-11)
 - **사실 근거:** 새 사실 확인은 하지 않고 0라운드(Q9~Q12, Q1~Q8, Q16~Q20)와 3라운드(Q46~Q51) 사실, 3라운드 실험(03c)을 재사용했다. 상태 표기("부분 확인", 추정)는 그대로 옮겼다. 추가로 메인이 프로젝트 backend 이미지(SQLAlchemy 2.1.4)에서 `sqlalchemy.sql.ddl.CreateView`/`DropView`/`CreateTableAs`의 존재를 import로 확인했다(2라운드 E-9의 "내장 구성요소 부재" 전제 중 CREATE VIEW 부분이 바뀜, GRANT 구성자는 별도). 확인 후보 A-18~A-26은 researcher 확인 대기.
