@@ -17,6 +17,9 @@
 -- 이 블록 전체가 롤백된다. (변수가 아예 없으면 아래 ALTER가 구문 오류로 실패한다.)
 BEGIN;
 
+-- 비밀번호 설정 문장이 실패해도 서버 오류 로그에 문장(평문 비밀번호 포함)이 남지 않게 한다. 고정 문장이다.
+SET LOCAL log_min_error_statement = panic;
+
 SELECT 'CREATE ROLE bi_readonly LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'bi_readonly') \gexec
 

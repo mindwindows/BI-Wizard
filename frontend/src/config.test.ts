@@ -18,6 +18,12 @@ describe("normalizePath", () => {
     expect(normalizePath("bi-wizard")).toBe("");
     expect(normalizePath("//evil.example")).toBe("");
     expect(normalizePath("/a b")).toBe("");
+    expect(normalizePath("/")).toBe("");
+    expect(normalizePath("/a\n/b")).toBe("");
+    expect(normalizePath("/a\n")).toBe("");
+    expect(normalizePath("/..")).toBe("");
+    expect(normalizePath("/a/../b")).toBe("");
+    expect(normalizePath("/a/./b")).toBe("");
   });
 });
 

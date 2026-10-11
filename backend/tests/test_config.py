@@ -17,7 +17,27 @@ def test_base_path_accepts_valid_values(value):
     assert validate_base_path(value) == value
 
 
-@pytest.mark.parametrize("value", ["/", "bi-wizard", "/bi-wizard/", "//a", "/a//b", "/a b", "/a?b"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/",
+        "bi-wizard",
+        "/bi-wizard/",
+        "//a",
+        "/a//b",
+        "/a b",
+        "/a?b",
+        "/a\n/b",
+        "/a\n",
+        "\n/a",
+        "/..",
+        "/a/..",
+        "/a/../b",
+        "/.",
+        "/a/./b",
+        "/../a",
+    ],
+)
 def test_base_path_rejects_invalid_values(value):
     with pytest.raises(ValueError):
         validate_base_path(value)

@@ -12,12 +12,24 @@ base="${APP_BASE_PATH:-}"
 superset="${SUPERSET_APP_ROOT:-}"
 
 # 18-bi-wizard-env.envsh가 이미 검사했지만, 이 파일이 단독으로 실행돼도 안전하도록 한 번 더 확인한다.
-for value in "$base" "$superset"; do
-  if [ -n "$value" ] && ! printf '%s' "$value" | grep -Eq '^(/[A-Za-z0-9._~-]+)+$'; then
-    echo "[frontend] 하위 경로 형식 오류" >&2
-    exit 1
-  fi
-done
+# case 문으로 값 전체를 검사한다(개행, '//', '.'/'..' 세그먼트, 허용 밖 문자를 거부한다).
+valid_path() {
+  v="$1"
+  case "$v" in /*) ;; *) return 1 ;; esac
+  case "$v" in */) return 1 ;; esac
+  case "$v" in *[!A-Za-z0-9._~/-]*) return 1 ;; esac
+  case "$v" in *//*) return 1 ;; esac
+  case "$v" in */. | */./* | */.. | */../*) return 1 ;; esac
+  return 0
+}
+if [ -n "$base" ] && ! valid_path "$base"; then
+  echo "[frontend] APP_BASE_PATH 형식 오류" >&2
+  exit 1
+fi
+if ! valid_path "$superset"; then
+  echo "[frontend] SUPERSET_APP_ROOT 형식 오류(빈 값 불가)" >&2
+  exit 1
+fi
 
 # 매번 원본(/opt/web/dist)에서 새로 복사하므로 재시작해도 치환이 중복되지 않는다.
 cp -R "$SRC"/. "$DEST"/

@@ -13,15 +13,27 @@ from functools import lru_cache
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# 루트 배포는 빈 값, 아니면 앞 "/" 필수, 뒤 "/" 금지.
-_BASE_PATH_PATTERN = re.compile(r"^(/[A-Za-z0-9._~-]+)*$")
+# 세그먼트에 쓸 수 있는 문자. 규칙은 frontend/src/config.ts, nginx 시작 스크립트
+# (18-bi-wizard-env.envsh)와 같다.
+_SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9._~-]+")
 
 
 def validate_base_path(value: str) -> str:
-    """하위 경로 형식을 검사한다. 빈 값(루트 배포)은 허용한다."""
-    if not _BASE_PATH_PATTERN.fullmatch(value):
+    """하위 경로 형식을 검사한다.
+
+    빈 값(루트 배포)은 허용한다. 아니면 앞 '/' 필수, 뒤 '/' 금지, '//' 금지, 세그먼트는 허용 문자만,
+    '.'와 '..' 세그먼트와 개행은 거부한다(값 전체를 검사한다).
+    """
+    if value == "":
+        return value
+    segments = value[1:].split("/") if value.startswith("/") else []
+    valid = bool(segments) and all(
+        _SEGMENT_PATTERN.fullmatch(segment) and segment not in {".", ".."} for segment in segments
+    )
+    if not valid:
         raise ValueError(
-            "하위 경로는 빈 값이거나 '/경로' 형식이어야 한다(앞 '/' 필수, 뒤 '/' 금지)."
+            "하위 경로는 빈 값이거나 '/경로' 형식이어야 한다"
+            "(앞 '/' 필수, 뒤 '/'와 '.'/'..' 세그먼트 금지)."
         )
     return value
 

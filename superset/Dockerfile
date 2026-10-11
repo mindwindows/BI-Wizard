@@ -7,6 +7,6 @@ USER root
 RUN uv pip install --python /app/.venv/bin/python --no-cache psycopg2-binary==2.9.13
 
 COPY --chown=superset:superset superset_config.py /app/pythonpath/superset_config.py
-COPY --chown=superset:superset --chmod=0755 init.sh ensure_admin.py readonly_uri.py /app/bi-wizard/
+COPY --chown=superset:superset --chmod=0755 init.sh ensure_admin.py register_database.py /app/bi-wizard/
 
 USER superset

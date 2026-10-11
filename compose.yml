@@ -133,7 +133,7 @@ services:
     mem_limit: 256m
     environment:
       APP_BASE_PATH: ${APP_BASE_PATH}
-      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT?SUPERSET_APP_ROOT를 .env에 설정하세요}
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT:?SUPERSET_APP_ROOT를 .env에 설정하세요}
       APP_PROXY_STRIP_PREFIX: ${APP_PROXY_STRIP_PREFIX}
       BACKEND_PORT: ${BACKEND_PORT}
     ports:
@@ -168,6 +168,7 @@ services:
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD}
+      SCARF_ANALYTICS: "false"  # superset 서비스 주석 참고
       TZ: ${TZ}
     depends_on:
       postgres:
@@ -190,10 +191,12 @@ services:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
       TZ: ${TZ}
-      # gunicorn: 워커 1개를 주기적으로 재시작해 메모리 증가를 억제한다(고정값).
+      # gunicorn 워커 1개. 주기적 재시작(WORKER_MAX_REQUESTS)은 쓰지 않는다: 워커가 1개라 재시작 순간
+      # 요청 1건이 502가 되고 다음 요청이 지연된다(QA 재현). 메모리 보호는 mem_limit + restart 정책에 맡긴다.
       SERVER_WORKER_AMOUNT: "1"
-      WORKER_MAX_REQUESTS: "1000"
-      WORKER_MAX_REQUESTS_JITTER: "100"
+      # Superset 텔레메트리(Scarf) 끄기: 공식 FAQ의 환경변수(고정값, .env 변수 아님).
+      # 주의: 6.1.0 이미지에서는 효과를 확인하지 못했다(브라우저가 여전히 scarf.sh로 요청한다). 문서(SKILL) 참고.
+      SCARF_ANALYTICS: "false"
     depends_on:
       superset-init:
         condition: service_completed_successfully

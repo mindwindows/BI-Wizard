@@ -1,34 +1,33 @@
 @echo off
-chcp 65001 >nul
 setlocal EnableExtensions
-rem BI-Wizard 로컬 재시작: down 후 up -d --build
-rem .env 값(예: APP_PROXY_STRIP_PREFIX)을 바꾼 뒤 반영할 때도 쓴다. 볼륨 삭제 옵션은 쓰지 않는다.
+rem BI-Wizard local restart: down, then up -d --build
+rem Also use this after editing .env (for example APP_PROXY_STRIP_PREFIX). No volume-removal option is used.
 cd /d "%~dp0.."
 set "RC=0"
 
 if not exist ".env" (
-    echo [오류] .env 파일이 없습니다. .env.example 을 .env 로 복사한 뒤 비어 있는 Secret 값을 채우세요.
+    echo [FAIL] .env not found. Copy .env.example to .env and fill in the empty secret values.
     set "RC=1"
     goto :done
 )
 
 docker compose down
 if errorlevel 1 (
-    echo [오류] docker compose down 이 실패했습니다.
+    echo [FAIL] docker compose down failed.
     set "RC=1"
     goto :done
 )
 
 docker compose up -d --build
 if errorlevel 1 (
-    echo [오류] docker compose up 이 실패했습니다. scripts\logs-local.bat 으로 로그를 확인하세요.
+    echo [FAIL] docker compose up failed. Run scripts\logs-local.bat to see the logs.
     set "RC=1"
     goto :done
 )
 
 docker compose ps
 echo.
-echo 재시작 요청을 마쳤습니다. 상태 확인: scripts\health-check.bat
+echo [OK] Restart requested. Next: scripts\health-check.bat
 
 :done
 echo %cmdcmdline% | find /i "%~nx0" >nul && pause

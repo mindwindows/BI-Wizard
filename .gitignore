@@ -2,7 +2,10 @@
 _workspace/
 
 # 로컬 실제 환경 값 (Secret). .env.example만 Git에 둔다.
+# .env, .env.local, .env.ci 등 .env.* 는 모두 무시하고 .env.example만 예외로 둔다.
 .env
+.env.*
+!.env.example
 
 # 개인 Claude Code 설정
 .claude/settings.local.json
@@ -21,6 +24,3 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
-
-# Jenkins가 .env.example에서 만든 더미 값 env 파일(Secret 아님, 커밋하지 않음)
-.env.ci

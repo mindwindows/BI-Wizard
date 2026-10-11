@@ -3,17 +3,25 @@
 # 공개 설정(APP_BASE_PATH, SUPERSET_APP_ROOT, APP_PROXY_STRIP_PREFIX, BACKEND_PORT)을 검사하고
 # nginx 템플릿(default.conf.template)에서 쓰는 NGX_* 변수를 만든다.
 # 템플릿에는 NGX_* 변수만 치환된다(NGINX_ENVSUBST_FILTER). Secret은 이 컨테이너에 전달되지 않는다.
+#
+# 경로 규칙(backend/app/config.py, frontend/src/config.ts와 같다):
+#   빈 값이 아니면 앞 '/' 필수, 뒤 '/' 금지, 세그먼트는 영문/숫자/'.', '_', '~', '-'만, '//' 금지,
+#   '.'와 '..' 세그먼트 금지, 개행 금지. 빈 값(루트 배포)은 APP_BASE_PATH에만 허용한다.
 
 _bw_fail() {
   echo "[frontend] 설정 오류: $*" >&2
   exit 1
 }
 
-_bw_check_path() {
-  # 빈 값(루트 배포)이거나 '/경로' 형식(앞 '/' 필수, 뒤 '/' 금지)이어야 한다.
-  if [ -n "$2" ] && ! printf '%s' "$2" | grep -Eq '^(/[A-Za-z0-9._~-]+)+$'; then
-    _bw_fail "$1 값의 형식이 올바르지 않습니다(빈 값이거나 '/경로', 뒤 '/' 금지)."
-  fi
+# case 문으로 값 전체를 검사한다(grep은 줄 단위라 개행이 섞이면 통과할 수 있다).
+_bw_valid_path() {
+  _bw_v="$1"
+  case "$_bw_v" in /*) ;; *) return 1 ;; esac
+  case "$_bw_v" in */) return 1 ;; esac
+  case "$_bw_v" in *[!A-Za-z0-9._~/-]*) return 1 ;; esac
+  case "$_bw_v" in *//*) return 1 ;; esac
+  case "$_bw_v" in */. | */./* | */.. | */../*) return 1 ;; esac
+  return 0
 }
 
 _bw_base="${APP_BASE_PATH:-}"
@@ -21,8 +29,17 @@ _bw_superset="${SUPERSET_APP_ROOT:-}"
 _bw_strip="${APP_PROXY_STRIP_PREFIX:-false}"
 _bw_backend_port="${BACKEND_PORT:-8000}"
 
-_bw_check_path APP_BASE_PATH "$_bw_base"
-_bw_check_path SUPERSET_APP_ROOT "$_bw_superset"
+if [ -n "$_bw_base" ] && ! _bw_valid_path "$_bw_base"; then
+  _bw_fail "APP_BASE_PATH 값의 형식이 올바르지 않습니다(빈 값이거나 '/경로', 뒤 '/'와 '.'/'..' 세그먼트 금지)."
+fi
+
+# 빈 값 예외는 APP_BASE_PATH에만 있다. 로컬 프록시 재현에서 SUPERSET_APP_ROOT가 비면 포털과 경로가 겹친다.
+if [ -z "$_bw_superset" ]; then
+  _bw_fail "SUPERSET_APP_ROOT는 비어 있을 수 없습니다(빈 값은 APP_BASE_PATH만 허용)."
+fi
+if ! _bw_valid_path "$_bw_superset"; then
+  _bw_fail "SUPERSET_APP_ROOT 값의 형식이 올바르지 않습니다(앞 '/' 필수, 뒤 '/'와 '.'/'..' 세그먼트 금지)."
+fi
 
 case "$_bw_strip" in
   true | false) ;;
@@ -33,10 +50,6 @@ case "$_bw_backend_port" in
   '' | *[!0-9]*) _bw_fail "BACKEND_PORT는 숫자여야 합니다." ;;
 esac
 
-if [ -z "$_bw_superset" ]; then
-  _bw_fail "로컬 nginx 프록시 재현에서는 SUPERSET_APP_ROOT가 비어 있을 수 없습니다(포털과 경로가 겹칩니다)."
-fi
-
 # 정규식용: '.'만 이스케이프한다(허용 문자는 영문, 숫자, . _ ~ - 와 '/').
 _bw_base_re="$(printf '%s' "$_bw_base" | sed 's/\./\\./g')"
 
@@ -45,11 +58,27 @@ NGX_BASE_RE="$_bw_base_re"
 NGX_SUPERSET_ROOT="$_bw_superset"
 NGX_BACKEND_PORT="$_bw_backend_port"
 
+# 포털 정적 파일/SPA fallback 배치:
+#  - 하위 경로가 있으면 접두 아래에서만 SPA fallback(index.html)을 하고, 접두 밖 루트는 정적 자산만 서빙한다
+#    (그 외 경로는 404). 앞단 프록시가 접두를 떼고 넘기는 경우에도 정적 자산(/, /assets/, /config.js)은 서빙된다.
+#  - 하위 경로가 비어 있으면(루트 배포) 루트가 곧 포털이므로 루트에서 SPA fallback을 한다.
 if [ -n "$_bw_base" ]; then
-  # 하위 경로 자체(끝 '/' 없음)로 들어오면 '/'가 붙은 주소로 보낸다.
   NGX_BASE_REDIRECT="location = ${_bw_base} { return 301 ${_bw_base}/; }"
+  NGX_PORTAL_LOCATION=$(
+    cat <<CONF
+location ${_bw_base}/ {
+        rewrite ^(?:${_bw_base_re})/(.*)\$ /\$1 break;
+        try_files \$uri \$uri/index.html /index.html;
+        add_header Cache-Control "no-cache";
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+CONF
+  )
+  NGX_ROOT_TRY='try_files $uri $uri/index.html =404;'
 else
   NGX_BASE_REDIRECT=""
+  NGX_PORTAL_LOCATION=""
+  NGX_ROOT_TRY='try_files $uri $uri/index.html /index.html;'
 fi
 
 if [ "$_bw_strip" = "true" ] && [ -n "$_bw_base" ]; then
@@ -66,6 +95,6 @@ else
   _bw_fail "DNS resolver를 찾지 못했습니다(NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 필요)."
 fi
 
-export NGX_BASE NGX_BASE_RE NGX_SUPERSET_ROOT NGX_BACKEND_PORT NGX_BASE_REDIRECT NGX_API_REWRITE NGX_RESOLVER
+export NGX_BASE NGX_BASE_RE NGX_SUPERSET_ROOT NGX_BACKEND_PORT NGX_BASE_REDIRECT NGX_PORTAL_LOCATION NGX_ROOT_TRY NGX_API_REWRITE NGX_RESOLVER
 
 echo "[frontend] 하위 경로='${NGX_BASE}', Superset 경로='${NGX_SUPERSET_ROOT}', 접두 제거 전달=${_bw_strip}"

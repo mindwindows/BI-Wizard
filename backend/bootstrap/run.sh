@@ -14,6 +14,14 @@ for name in PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE POSTGRES_READONLY_PASSWOR
   fi
 done
 
+# 접속 계정(POSTGRES_USER)이 상수 역할 이름과 같으면 슈퍼유저 비밀번호를 덮어쓰고 읽기 전용이 걸린다.
+case "${PGUSER}" in
+  bi_readonly | superset_meta)
+    echo "[db-bootstrap] POSTGRES_USER는 bi_readonly, superset_meta와 같은 이름일 수 없습니다." >&2
+    exit 1
+    ;;
+esac
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # healthcheck 이후에 시작되지만, 대상이 바뀌는 경우(테스트 DB 등)를 위해 짧게 기다린다.

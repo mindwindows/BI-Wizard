@@ -70,6 +70,11 @@ pipeline {
     }
 
     post {
+        always {
+            // 빌드마다 만든 테스트/빌드 확인용 이미지가 에이전트 디스크에 쌓이지 않게 이번 빌드의 태그만 지운다.
+            // (prune -a 같은 광범위한 정리는 하지 않는다. 이미 없거나 실패해도 무시한다.)
+            sh '''docker image rm "bi-wizard-backend-test:${BUILD_NUMBER}" "bi-wizard-frontend-test:${BUILD_NUMBER}" "bi-wizard-frontend-build:${BUILD_NUMBER}" || true'''
+        }
         failure {
             echo '파이프라인이 실패했습니다. 실패한 Stage의 로그를 확인하세요. 이후 Stage는 실행되지 않았습니다.'
         }

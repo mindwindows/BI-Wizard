@@ -44,11 +44,12 @@
    scripts\stop-local.bat
    ```
 
-BAT 대신 같은 동작의 명령: `docker compose up -d --build` / `docker compose ps` / `docker compose logs -f backend` / `docker compose down`. **`docker compose down -v`는 쓰지 않습니다**(DB 데이터가 사라집니다).
+BAT의 출력은 ASCII 영어로 `[OK]`, `[FAIL]`, `[MISSING]`, `[EMPTY]`처럼 표시됩니다(일부 Windows cmd에서 UTF-8 BAT가 오동작할 수 있어 영문만 씁니다). BAT 대신 같은 동작의 명령: `docker compose up -d --build` / `docker compose ps` / `docker compose logs -f backend` / `docker compose down`. **`docker compose down -v`는 쓰지 않습니다**(DB 데이터가 사라집니다).
 
 ## 자주 바꾸는 값
-- `.env`의 `APP_BASE_PATH`, `SUPERSET_APP_ROOT`: 하위 경로. 루트 배포는 빈 값, 아니면 앞 `/` 필수·뒤 `/` 금지. 바꾼 뒤 `scripts\restart-local.bat`.
-- `APP_PROXY_STRIP_PREFIX`: 프록시가 접두를 떼고 전달하면 `true`, 유지하면 `false`(기본). 바꾼 뒤 다시 시작하면 됩니다(이미지 재빌드 불필요).
+- `.env`의 `APP_BASE_PATH`, `SUPERSET_APP_ROOT`: 하위 경로. 앞 `/` 필수, 뒤 `/`와 `.`/`..` 세그먼트 금지. **빈 값(루트 배포)은 `APP_BASE_PATH`만 허용**하고 `SUPERSET_APP_ROOT`는 비울 수 없습니다. 바꾼 뒤 `scripts\restart-local.bat`.
+- `APP_PROXY_STRIP_PREFIX`: 프록시가 접두를 떼고 전달하면 `true`, 유지하면 `false`(기본). 바꾼 뒤 다시 시작하면 됩니다(이미지 재빌드 불필요). backend는 `${APP_BASE_PATH}/api/…`와 접두 없는 `/api/…`를 모두 받으며, 이 값은 프록시(nginx)가 보내는 경로를 바꿉니다.
+- `FRONTEND_HOST`: 기본 `127.0.0.1`(이 PC에서만 접속). 같은 LAN에 열려면 `0.0.0.0`이지만 그러면 Superset 관리자 로그인 화면도 LAN에 노출됩니다.
 - 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꿉니다.
 
 ## 테스트와 검증
@@ -70,3 +71,7 @@ docs/       요구사항 브리프, 운영 가이드, 결정 기록, Gate 진행
 references/ 선택된 Reference 소스
 ```
 AI 도구와 기여 규칙은 `AGENTS.md`를 보세요.
+
+## 알아 둘 점
+- Superset 컨테이너는 gunicorn 워커 1개를 주기적으로 재시작하지 않습니다(재시작 순간 502가 나기 때문). 메모리 누수 보호는 `mem_limit`과 `restart: unless-stopped`에 맡기므로, 한도에 닿으면 컨테이너가 재시작되며 그동안 요청이 실패할 수 있습니다.
+- frontend 컨테이너의 nginx 마스터 프로세스는 root로 실행됩니다. 공식 nginx 이미지의 기본 동작이며 의도적인 선택입니다(필요하면 `nginx-unprivileged` 이미지로 전환할 수 있습니다).

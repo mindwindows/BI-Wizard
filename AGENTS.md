@@ -9,6 +9,9 @@
 - Health: `${APP_BASE_PATH}/api/health`, `${APP_BASE_PATH}/api/health/db`, `${SUPERSET_APP_ROOT}/health`. `/health/azure-openai`는 만들지 않는다.
 - **Gate ② 한정 구성:** `POSTGRES_USER`(이미지 슈퍼유저)를 앱·`migrate` 계정으로 쓴다. 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고 **Gate ④ 진입 전에 완료해야 한다.** Gate ④에서 backend가 슈퍼유저로 접속하면 리뷰에서 차단된다.
 - 이 환경이 통과한 상태(Environment Ready)가 기능 개발의 전제다.
+- frontend의 nginx 마스터가 root로 실행되는 것은 **의도적 선택**(공식 nginx 이미지 기본)이다. 필요하면 `nginx-unprivileged` 이미지로 전환할 수 있다.
+- `FRONTEND_HOST` 기본값은 `127.0.0.1`이다(Superset 관리자 로그인이 LAN에 노출되지 않게). 컨테이너 내부 바인딩 변수(`BACKEND_HOST` 등)와는 다른 의미다.
+- Superset 텔레메트리 끄기(`SCARF_ANALYTICS=false`)는 `compose.yml`의 고정값이다. gunicorn은 워커 1개이며 주기적 재시작(`WORKER_MAX_REQUESTS`)을 쓰지 않는다.
 
 ## 2. 환경변수
 - `.env.example`이 이름 기준 원본이다. 운영 가이드의 canonical name(`APP_*`, `FRONTEND_*`, `BACKEND_*`, `POSTGRES_*`, `LOG_LEVEL`, `TZ`)을 그대로 쓰고, 같은 의미의 새 이름을 만들지 않는다. 환경별 이름 분리(`LOCAL_DB_HOST` 등) 금지: 이름은 고정하고 값만 바꾼다.
@@ -25,6 +28,7 @@
 
 ## 3. 하위 경로 배포와 프록시
 - 포털은 메인 플랫폼의 URL 하위 경로로 서비스된다. 프런트 API 호출은 `${basePath}/api/…`(호스트 없는 상대경로)이고 `/api`, `/superset`, `/bi-wizard`를 코드에 하드코딩하지 않는다(`/api` 구간은 `frontend/src/config.ts` 한 곳).
+- 경로 값 규칙: 앞 `/` 필수, 뒤 `/`·`//`·`.`/`..` 세그먼트·개행 금지. **빈 값(루트 배포)은 `APP_BASE_PATH`에만 허용**하고 `SUPERSET_APP_ROOT`는 비울 수 없다. 검증은 `backend/app/config.py`, `frontend/src/config.ts`, nginx 시작 스크립트, `scripts/ci-validate-env.sh`가 같은 규칙으로 한다.
 - `APP_PROXY_STRIP_PREFIX`(기본 `false`)로 포털의 접두 처리(유지/제거)를 **설정값만으로** 전환한다. 코드를 바꾸거나 이미지를 다시 빌드하지 않는다.
 - **Superset 경로는 접두를 떼지 않고 그대로 전달한다**(Superset 6.1.0 요구). 이미지 태그 `6.1.0`을 바꾸지 않는다. 하위 경로 지원은 공식 문서상 BETA이므로 문제가 보이면 **Superset 내부 코드를 수정하지 말고** 대안과 영향을 정리해 보고한다.
 - 로컬 검증 값은 `/bi-wizard`, `/bi-wizard/superset`이다. 실제 값은 웹서버 배포 때 관리자와 정하며, 배포 때 맞출 항목은 `docs/deploy-coordination.md`에 모은다.
@@ -33,7 +37,7 @@
 - 도구는 **Alembic**, 위치는 `backend/migrations/`. 실행은 일회성 `migrate` 서비스(`alembic upgrade head`)뿐이며 앱 코드는 시작 때 마이그레이션이나 `create_all`을 하지 않는다.
 - 마이그레이션 안의 SQL은 **보간 없는 고정 문자열만** 쓴다(f-string, `%`, `.format()`, `+` 금지). 모든 revision에 `downgrade()`를 구현하고 빈 DB 왕복 테스트(`upgrade → downgrade → upgrade`)로 검증한다. 운영 중 문제는 되돌리기가 아니라 수정 마이그레이션 추가로 대응한다.
 - **`DROP`이 있는 자동 생성 초안은 적용하지 않고 사용자 확인을 받는다**(D2 미결정, Gate ③). 확인했다면 변경 요약에 "DROP 확인: 사용자 승인"을 남긴다.
-- 읽기 전용 계정과 Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. `roles.sql`의 psql `:'var'` 인용은 비밀번호 리터럴 두 곳에만 허용하고 식별자 보간은 금지다. backend 밖의 raw SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용).
+- 읽기 전용 계정과 Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. `roles.sql`의 psql `:'var'` 인용은 비밀번호 리터럴 두 곳에만 허용하고 식별자 보간은 금지다. `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사한다.
 - `bi_readonly`의 `SELECT` 권한은 Gate ③에서 마이그레이션으로 부여한다.
 
 ## 5. 라이선스
@@ -59,5 +63,5 @@ CI는 `Jenkinsfile`이다: Checkout → Env Validation → Backend Lint/Test →
 - `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`(볼륨 삭제)를 실행하거나 스크립트·문서에 쓰지 않는다. 필요하면 먼저 사용자에게 묻는다.
 - `main`에 직접 커밋하거나 푸시하지 않는다.
 - Dockerfile에서 `apt-get`을 쓰지 않는다. 특정 PC·세션에서만 필요한 빌드 우회(CA 인증서 등)는 저장소에 넣지 않는다.
-- AI 세션(Linux)에서는 BAT를 실행하지 않는다. BAT 실행 검증은 사용자 Windows PC에서 한다.
+- `scripts/*.bat`는 ASCII(영문)만 쓰고 CRLF, BOM 없음으로 유지한다. AI 세션(Linux)에서는 BAT를 실행하지 않는다. BAT 실행 검증은 사용자 Windows PC에서 한다.
 - Superset 내부 코드를 수정하지 않는다(설정과 공식 CLI만 쓴다).

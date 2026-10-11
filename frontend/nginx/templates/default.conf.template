@@ -19,6 +19,11 @@ port_in_redirect off;
 ${NGX_RESOLVER}
 
 # 앞단(실제 메인 플랫폼 프록시)이 보낸 X-Forwarded-* 값이 있으면 보존하고, 없으면 직접 채운다.
+# 주의: 이 nginx는 로컬 재현용이다. 앞단 프록시가 없는 로컬에서는 클라이언트가 보낸 X-Forwarded-Proto/Host가
+# 그대로 Superset(ProxyFix)에 전달된다. 앞단이 없는 환경에서 이 값을 믿지 않으려면 snippets/proxy-common.conf의
+# $bw_forwarded_proto, $bw_forwarded_host를 각각 $scheme, $http_host로 바꾸고(항상 덮어쓴다) 이미지를 다시 빌드한다.
+# 새 환경변수는 만들지 않는다.
+# 실제 메인 플랫폼 프록시는 이 헤더를 반드시 자기 값으로 덮어써야 한다(docs/deploy-coordination.md 8·14번).
 map $http_x_forwarded_proto $bw_forwarded_proto {
     default $http_x_forwarded_proto;
     ""      $scheme;
@@ -70,10 +75,14 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
     }
 
-    # 포털 정적 파일(SPA). 접두가 있으면 떼고 찾는다.
+    # 포털 정적 파일. 하위 경로가 있으면 접두 아래에서만 SPA fallback(index.html)을 한다(아래 블록).
+    ${NGX_PORTAL_LOCATION}
+
+    # 접두 밖(루트). 하위 경로가 있으면 정적 자산(/, /index.html, /config.js, /assets/, favicon 등 실제 파일)만 서빙하고
+    # 그 외 경로는 404다(앞단이 접두를 떼고 넘기는 경우의 정적 서빙은 유지된다).
+    # 하위 경로가 없으면(루트 배포) 여기서 SPA fallback을 한다.
     location / {
-        rewrite ^(?:${NGX_BASE_RE})/(.*)$ /$1 break;
-        try_files $uri $uri/index.html /index.html;
+        ${NGX_ROOT_TRY}
         add_header Cache-Control "no-cache";
         add_header X-Content-Type-Options "nosniff" always;
     }
