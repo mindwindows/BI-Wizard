@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(0라운드 완료, 1라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(1라운드 결정 완료, 2라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -114,7 +114,7 @@
 | --- | --- | --- |
 | 0 | 공식 문서 사실 확인 | 결정 없음 (완료) |
 | 1 | 8번(인증), B(3번 생성 권한), A(2번 수식 범위) | **결정 완료(2026-10-11, 아래 "Gate ③ 1라운드 결정")**. 8번 답이 늦으면 A를 먼저 진행하고, 8번에 의존하는 B와 이후 항목은 8번 답을 받은 뒤 진행 |
-| 2 | C(6번 평가 경로), D2 | 둘 다 A 뒤. D2 하위 결정(뷰 재생성 방식, `bi_readonly` `SELECT` 부여 방식) 포함 |
+| 2 | C(6번 평가 경로), D2 | **옵션 비교안·질문 제출, 사용자 답 대기(2026-10-11)**. 둘 다 A 뒤. D2 하위 결정(뷰 재생성 방식, `bi_readonly` `SELECT` 부여 방식) 포함 |
 | 3 | 앱 계정 분리, D(7번 Explore), 9~11번 | 앱 계정은 D2 뒤 |
 | 4 | Embedded guest 역할 권한 목록, RLS `clause` 규칙, `CREATE VIEW` 리터럴 처리, 업로드 상한 | guest 역할은 7번과 D2 뒤 |
 | 5 | 인계 설계 일괄 확인(`target_metadata`·`include_object`, 붙여넣기 파서 규격, 순환 검사 방식, Baserow 참고 범위)과 문서 초안 승인 | `target_metadata`는 D2와 앱 계정 뒤 |
@@ -137,6 +137,11 @@
 **영향 정리(4라운드 I, G):** 열람 제한(RLS)이 필요 없으므로 guest token의 `rls`는 빈 목록으로 고정 가능하고(스키마상 빈 배열 통과, 런타임 확인 전), I는 `clause` 생성 규칙이 아니라 "`rls` 항상 빈 목록" 규칙과 강제 방법으로 줄어든다. G는 단일 최소 권한 커스텀 역할로 충분하며 `Public`은 계속 비운다. 권한 목록 확정은 런타임 실험이 필요하다. 자세한 내용은 03b 1-6.
 
 **2라운드 열린 질문:** Q-R1 기준값 표·공통 요약 양식 편집 권한, Q-R2 기준 날짜 열 필수/권장.
+
+### Gate ③ 2라운드 준비 (2026-10-11)
+- **사실 확인(Q22, Q25~Q30, Q32~Q36):** researcher 2명이 확인하고 reviewer 2명이 원문과 대조했다(`_workspace/gate3/facts-db-r2.md`, `facts-superset-r2.md`, Git 제외). 모델 변경 없음.
+- **핵심 사실:** 대시보드 값 선택 필터(팀 등)는 필터 설정의 열 이름을 각 차트 데이터셋에서 정확히 찾고 없으면 조용히 건너뛴다. 날짜 필터는 열 이름 없이 `time_range`만 보내고 각 차트의 시간 조건이 해석한다. 서로 다른 데이터셋 차트를 한 대시보드에 두는 데 코드상 제약이 없다. 물리 데이터셋에는 표시 이름 전용 필드가 없다. 확보한 PostgreSQL 문서에 DDL별 롤백 서술은 없다(런타임 실험 후보).
+- **옵션 비교안:** `_workspace/gate3/round2-options.md` (C 평가 경로, E D2와 하위 결정 및 새 객체 위치, Q-R1, Q-R2, 공통 열 통일, 질문 W1~W12, 기본값 B1~B10, 실험 후보). reviewer가 3회 검토했다. 사용자 결정은 아직 없다.
 
 ### Gate ③ 0라운드 결과 (2026-10-11)
 - **수행:** researcher 2명(DB 쪽, Superset 쪽)이 Q1~Q21을 확인하고, reviewer 2명이 2차에 걸쳐 원문과 대조했다. architect가 1라운드 옵션 비교안을 쓰고 reviewer가 2차에 걸쳐 검토했다. 모델은 정의 파일 그대로(sonnet)이며 변경하지 않았다.
