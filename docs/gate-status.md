@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(계획 승인, 0라운드) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(0라운드 완료, 1라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -120,6 +120,13 @@
 | 5 | 인계 설계 일괄 확인(`target_metadata`·`include_object`, 붙여넣기 파서 규격, 순환 검사 방식, Baserow 참고 범위)과 문서 초안 승인 | `target_metadata`는 D2와 앱 계정 뒤 |
 
 - Gate ④ 시작 전: 앱 계정 분리 완료, 에이전트 모델 재판단.
+
+### Gate ③ 0라운드 결과 (2026-10-11)
+- **수행:** researcher 2명(DB 쪽, Superset 쪽)이 Q1~Q21을 확인하고, reviewer 2명이 2차에 걸쳐 원문과 대조했다. architect가 1라운드 옵션 비교안을 쓰고 reviewer가 2차에 걸쳐 검토했다. 모델은 정의 파일 그대로(sonnet)이며 변경하지 않았다.
+- **근거 원문:** 공식 문서 호스트(postgresql.org, docs.sqlalchemy.org, superset.apache.org 등)는 세션에서 열리지 않았다. 대신 GitHub 원문(PostgreSQL REL_16_STABLE sgml, SQLAlchemy `rel_2_1_4`, Alembic `rel_1_20_0`, Starlette 1.7.0, uvicorn 0.54.0, FastAPI 0.143.0, Superset 6.1.0 태그, Flask-AppBuilder v5.0.2)과 PyPI sdist(openpyxl 3.1.5)를 내려받고, Superset 6.1.0 소스는 이미지에서 꺼내 `_workspace/gate3/sources/`에 두었다. WebFetch 발췌는 근거로 쓰지 않았다.
+- **한계:** PostgreSQL 문서는 REL_16_STABLE(16.15) 기준이며 우리 버전 16.10과 마이너 차이가 있다. 확인하지 못한 항목(예: `CREATE VIEW`를 지명한 bind parameter 불가 문장, 기반 열 타입 변경의 뷰 영향, `CURRENT_DATE`의 시간대, embedded 최소 권한 집합, CSRF)은 `부분 확인`으로 남겼다. 일부는 런타임 실험이 필요하다.
+- **산출물 위치(Git 제외, `_workspace/gate3/`):** `facts-questions.md`, `facts-db.md`, `facts-superset.md`, `round1-options.md`, `sources/`. 결정이 확정되면 `docs/decisions/04~08`에 근거로 옮긴다.
+
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.
