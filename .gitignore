@@ -1,0 +1,23 @@
+# 임시 작업 디렉터리. Gate 산출물은 docs/에 저장해 커밋한다.
+_workspace/
+
+# 로컬 실제 환경 값 (Secret). .env.example만 Git에 둔다.
+.env
+
+# 개인 Claude Code 설정
+.claude/settings.local.json
+
+# 빌드·런타임 산출물
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+coverage/
+
+# OS·IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
