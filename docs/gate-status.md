@@ -2,7 +2,7 @@
 
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
-| ① RESEARCH & DECIDE | 진행 중 | - | - | - |
+| ① RESEARCH & DECIDE | 승인 대기 | - | - | `_workspace/gate1/` (승인 전 초안, Git 제외) |
 | ② ENVIRONMENT BOOTSTRAP | 대기 | - | - | - |
 | ③ MODULARIZE | 대기 | - | - | - |
 | ④ 기능 개발 | 대기 | - | - | - |
