@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(4라운드 결정·실험 완료, Z6 결정·5라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(FU-1 범위로 축소, 04~08 초안·A-27 확인 보고 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -189,6 +189,17 @@
 | 기본값·승인 (BY1~BY11, Y13) | BY1~BY11 모두 이의 없음(`TZ=Asia/Seoul` 유지, 날짜 열 이름 통일 안 함 + 작성자 안내문에 "차트에 시간 필터 필요"). 뷰 재생성 실패는 기존 `/health` 본문에 표시. D5 해석 변경 수용. 실험 X-14, X-15, X-17, X-18, X-20, X-21, X-22, X-23, X-24 승인(X-16 불필요, X-19는 8번 후). X-18에서 `frame_options`/CSP 변경이 필요해지면 결과와 함께 따로 승인 요청. 조건부 설정 변경(작성자 역할 `can_set_embedded`, `superset-init` 확장, backend의 `SUPERSET_APP_ROOT` 전달)은 필요해지는 시점에 내용과 이유를 보고하고 적용 |
 
 **4라운드:** G guest 역할 권한, I RLS 규칙, J `CREATE VIEW` 리터럴, H 업로드 한도, 인계 설계.
+
+### Gate ③ 진행 방식 변경: FU-1 범위로 축소 (2026-10-11, 사용자)
+상세 원문은 `docs/decisions/03b-gate3-round-decisions.md` 5절. **1~4절 결정은 모두 유효**하다.
+
+| 항목 | 내용 |
+| --- | --- |
+| FU-1 포함 | 데이터셋 만들기(열 정의·검증·기준 날짜 열·날짜 단위), 팀·정의 담당자·입력자 권한(인증 스텁), 입력 그리드(한 기간=한 행, 붙여넣기, 칸 단위 동시 편집), 같은 행 수식·수식 보기·미리보기, Superset 데이터셋 등록(서비스 계정)·임베딩 대시보드 보기 |
+| FU-1 제외(후속 단위) | 기준값 표, 이전 행 참조, 같은 데이터셋 집계, 엑셀 가져오기, 참조 열, 공통 요약, 보관·삭제 정책, 변경 기록 |
+| 결정 | K2 팀 단위·여러 팀(브리프 4.3 열 권한 후속 미룸, 권한 화면 팀×사용자), K3 스텁(운영에서 켜지면 시작 거부, `bi-review` 7-5), K6 핵심 함수 + 같은 행 SUM + 열 구분 태그 조건 합산 + 함수 사전 구조, K7 미입력 유지·대소문자 무시·오류 칸 구별 표시, Z6 (가) + 완화책 3가지 + `bi_app` 실행 + 회귀 시험, K12 (나)(A-27 확인 후), K11 ㄷ 수동 계정, 미리보기·뷰 불일치 0건 합격 기준 |
+| 04~08 | FU-1 범위만 약 800줄 이내, 후속 항목은 문서 끝 "후속 기능 단위에서 결정" 절에 나열 |
+| EW | EW-1, EW-3, EW-4, EW-5, EW-6, EW-7만. EW-2(업로드 상한)는 가져오기 단위로. 모델 재판단은 제안만 |
 
 ### Gate ③ 3라운드 후속·4라운드 결정 (2026-10-11)
 상세 원문과 근거는 `docs/decisions/03b-gate3-round-decisions.md` 4절.

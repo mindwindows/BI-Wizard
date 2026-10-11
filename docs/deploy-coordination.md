@@ -64,6 +64,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 32 | **Superset guest token 발급 계정 변수** | 서버가 Superset 발급 API를 호출할 때 쓰는 발급 전용 Superset 계정(데이터셋 등록 계정과 분리). 새 환경변수 2개(후보 `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD`, 4라운드 승인). 발급 API는 사용자별 속도 제한(429)을 둔다. Secret 주입 방식(11번)에 포함해야 한다 | 협의 필요(구현 전) | - |
 | 33 | **Superset 설정 추가 3건** | `GUEST_ROLE_NAME=bi_guest`(최소 권한 커스텀 역할을 `superset-init`이 생성), `GUEST_TOKEN_VALIDATOR_HOOK`(발급 시 `rls` 비어 있음·resource type 확인), 로컬 `GUEST_TOKEN_JWT_AUDIENCE`는 X-28 결과에 따라 필요할 때만. 4라운드 승인(기준선과 다른 설정). 임베드 대시보드의 CSV·이미지 내보내기는 허용하지 않는다 | 협의 필요(구현 전) | - |
 | 34 | **가져오기 처리와 메모리** | 가져오기는 전역 동시 1건·사용자당 1건, openpyxl read-only(pandas 미사용). 메모리 8GB(5번) 안에서 backend `mem_limit` 1g 기준으로 설계하고, X-27 실측 결과에 따라 `mem_limit`/`tmpfs` 변경이 필요해지면 내용과 이유를 보고하고 적용한다. 메인 플랫폼 프록시 타임아웃(10번)이 60초 미만이면 확정 적재 목표(30초) 재검토 | 실측 후 보고 | - |
+| 35 | **운영 서버(컨테이너) 안에서 관리 명령 실행 가능 여부** | 첫 관리자는 서버에서 명령 한 줄로 만든다(FU-1 K3 ㄷ 결정, 새 환경변수 없음). 운영 서버(backend 컨테이너) 안에서 명령을 실행할 수 있는지, 누가 실행하는지 운영자에게 확인해야 한다. 불가능하면 대안(예: 배포 때 한 번 실행하는 일회성 서비스)을 정한다. 인증 스텁은 운영 환경 설정에서 켜져 있으면 backend가 시작을 거부한다 | 운영자 확인 필요 | - |
 
 ## 이미 확인된 사항
 
