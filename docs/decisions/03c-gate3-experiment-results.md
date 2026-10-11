@@ -237,3 +237,61 @@
 - 하위 경로에서 Superset 로고 URL의 접두가 이중으로 붙어 404(Gate ② 알려진 문제와 같음).
 - 사용자 삭제는 대시보드를 연 적이 있으면 `key_value` 외래키 때문에 422로 실패한다. **비활성화는 되고 비활성화한 사용자는 로그인 401** → 사용자 삭제 대신 비활성화(3라운드 Y12 (a))와 일치.
 - `PUT /dashboard/{id}`에 `position_json`만 보내면 차트 연결이 갱신되지 않고, UI가 보내는 `json_metadata.positions`가 연결을 갱신한다.
+
+---
+
+# 4라운드 실험 결과 (승인: 2026-10-11 사용자, `03b-gate3-round-decisions.md` 4-5)
+
+- 승인 범위: X-25, X-26, X-27, X-28, X-29. 클라우드 세션 안에서만 실행. 실험 담당 에이전트가 수행하고 메인이 결과를 확인했다. 전체 표·원출력: `_workspace/gate3/experiments/db-r4-results.md`(X-26, X-29), `import-r4-results.md`(X-27), `superset-r4-results.md`(X-25, X-28), `r4/`(Git 제외).
+- 환경: PostgreSQL **16.10**(`postgres:16.10-bookworm`, tmpfs, 컨테이너 `g3x26-pg`), 프로젝트 backend 이미지 `bi-wizard-backend:local`(SQLAlchemy **2.1.4**, pg8000 **1.31.5**, alembic **1.20.0**, Python 3.12). X-27은 `--memory=1g` 컨테이너(backend `mem_limit`과 같은 조건), openpyxl 3.1.5(시험용으로만 설치).
+- **정리:** `g3x26-pg`, `g3x27-*` 컨테이너와 네트워크 `g3x27-net`을 `docker rm -f`로 이름을 지정해 삭제했다. 볼륨은 쓰지 않았다. 일괄 삭제 명령 없음.
+- **한계:** 모두 합성·모의 데이터이며 실제 회사 엑셀·실제 Excel 클립보드로 검증하지 않았다. 시간 측정은 호스트(4코어)에서 다른 컨테이너가 함께 돌아 잡음이 있다. 절차 이탈: X-27 담당이 초반에 읽기 전용 `git check-ignore`/`git status`를 실행했다(파일 변경 없음).
+
+## X-26. 수식 속 글자 상수의 뷰 렌더링 (Z6 (가)·(나), Z7 근거)
+| 시험 | 결과 |
+| --- | --- |
+| `CreateView` + `literal()` 주입 입력 10종 × `standard_conforming_strings` on/off | **추가 문장 0건, 라운드트립 전부 일치**(정상 구성). 같은 입력을 f-string으로 이어 붙인 대조군은 표 생성·행 삭제·데이터 노출이 실제로 성립 |
+| pg8000 | 파라미터 없는 쿼리를 simple query로 보내 여러 문장이 실행될 수 있음(서버 로그 확인). `%`는 서버에 입력 그대로 도착(두 배로 만들거나 줄이지 않음) |
+| **틈:** 방언은 `standard_conforming_strings`를 **엔진 첫 연결 때 한 번만** 판정 | 첫 연결 뒤 서버 설정이 on→off로 바뀌면 백슬래시 입력으로 **주입이 성립**(`DELETE` 실행, 표 생성). 완화책 3가지(역슬래시 입력 거부 / `connect_args={"startup_params":{"standard_conforming_strings":"on"}}`로 세션 설정 고정 / 같은 트랜잭션에서 라운드트립 확인 후 불일치 시 롤백) 모두 효과 있음 |
+| 규칙 없이 라운드트립이 깨지는 입력 | NUL(서버가 거부 `08P01`), 서로게이트(전송 전 파이썬이 거부), 비유한 수(`NaN`/`Infinity`는 따옴표 없이 렌더되어 FROM의 `nan` 열을 읽을 수 있음). 개행·탭·제어문자·역슬래시·1,000,000자는 깨지지 않음 |
+| 미리보기(bind)와 뷰(literal) 의미 동일성(346건) | **98건이 다름**: float이 뷰에서 numeric으로 계산됨(`0.1*3`), date는 `'2026-10-11'` 문자열 text가 되어 날짜 연산·`extract`·`to_char`가 오류, 소수 없는 `Decimal('12')`는 integer, `%` 연산자는 pg8000 컴파일러가 `%%`를 내서 오류(`mod()`는 됨). 값에 `CAST`를 입히면 324건이 같고 나머지 22건은 규칙(숫자 범위, `%` 연산자, 형 없는 비교)으로 막을 수 있음 |
+| (나) 별도 표 `formula_literals`에 글자 저장, 뷰는 id 서브쿼리 | 뷰 정의에는 숫자 id만 들어감. 글자 수정은 뷰 재생성 없이 즉시 반영(읽기 4초 중 `UPDATE` 0.04초, `CREATE OR REPLACE VIEW`는 락 대기로 실패). `bi_readonly`는 뷰는 읽고 표는 직접 못 읽음. 성능 차이 행 10,000에서 ±1.4ms, 200,000행·20개 비교에서 +2~7ms. 비용: 글자 행을 지웠다 다시 넣으면 id가 바뀌고, 지운 뒤에는 오류 없이 결과가 0이 됨 |
+| 런타임 DDL을 `text()`·`exec_driver_sql` 없이 (AST 검사로 호출 0건 확인, `bi_app`, 한 트랜잭션) | `CreateTable`, `DropTable`, `CreateIndex`, `CreateView`(`or_replace=True` 확인), `DropView`, Alembic `Operations`의 `add_column`, `drop_column`, `alter_column`(`type_`, `new_column_name`), `rename_table`, `create_index`, `drop_index`, `drop_table` **모두 성공**. 문자열이 남는 곳은 `postgresql_using` 하나(표현식을 넘기면 TypeError; 새 열 추가 → `update(cast)` → 옛 열 삭제 → 이름 변경으로 문자열 없이 타입 변경 가능). **내장 부품이 없는 것: `ALTER VIEW … RENAME COLUMN`**(`DropView`+`CreateView`로 대체). `Identity()` 열은 시퀀스를 암묵 생성함 |
+- 결론: **Z6 (가) "내장 부품 + 검증"은 정상 구성에서 안전하지만 두 조건이 필요하다**: ① 세션의 `standard_conforming_strings`를 on으로 고정(`startup_params`) + 역슬래시·제어문자·NUL 거부 + 라운드트립 롤백, ② 값에 `CAST`를 입히는 타입 있는 리터럴 규칙(그렇지 않으면 미리보기와 뷰가 29%에서 달라짐). **(나) 별도 표 저장은 필요하지는 않지만 가능하며**, 뷰에 글자가 들어가지 않는 구조적 이점과 id 재사용·삭제 처리 비용이 있다. Z7 "`text()` 금지"는 현실적이다(예외 `postgresql_using`, 시퀀스 `Identity()` 점검 예외, 열 이름 변경 부품 부재 대체 경로 필요). 한계: 날짜·시간 리터럴과 기타 타입의 `CAST` 규칙 세부, 대량 객체 성능, pg8000이 아닌 드라이버는 시험하지 않았다.
+
+## X-29. `alembic check`와 왕복 테스트 틀, 2계정 마이그레이션 (BZ14·BZ16, Z0 입력)
+| 시험 | 결과 |
+| --- | --- |
+| `target_metadata` = 정적 모델 `MetaData`, `include_schemas=False`(기본) | `bi_data` 동적 객체가 삭제 후보로 **제안되지 않음**(소유자 무관). 뷰·함수는 어느 구성에서도 제안 대상이 아님 |
+| `include_schemas=True`, 필터 없음 | `ds_1`·`ds_2`가 `drop_table`로 제안됨(생성 파일에도 들어감). `include_name`(`bi_data` 제외) 또는 `include_object` 중 하나로 막힘 |
+| 변경 감지 | 열 추가·삭제·표 추가·타입 변경 감지(`compare_type=True`). `alembic check` 종료 코드 0 / 255(차이 있음) / 1(DB 접속 불가). DB가 head 상태여야 함. 현재 저장소(`target_metadata=None`)는 255로 실패 |
+| `bi_owner`로 마이그레이션(정적 표 + `GRANT … TO bi_app` + schema `GRANT` + `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app`) | 한 트랜잭션에서 성공. `bi_app`으로 돌리면 `public` 권한 거부로 실패. 반복 실행해도 오류 없음(`upgrade` 두 번째는 아무것도 안 함) |
+| 멤버십 사전 조건 | `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`를 **이미 있는 상태에서 다시 실행하면 NOTICE만** 나오고 오류 아님(옵션을 다르게 주면 갱신, 옵션 없이 실행하면 덮어쓰지 않음) → **db-bootstrap 매 기동 실행 안전**. 멤버십이 없으면 `ALTER DEFAULT PRIVILEGES`에서 실패하고 전부 롤백(db-bootstrap이 먼저여야 함) |
+| 왕복 테스트(upgrade → downgrade → upgrade, 스냅샷 비교) | **스냅샷 완전 일치**. `ds_1`, `dv_1`, `ds_2`와 `bi_data` schema 보존. `REVOKE`/`ALTER DEFAULT PRIVILEGES … REVOKE` 복원(`pg_default_acl` 0행). 복원 안 되는 것: 빈 `alembic_version` 표, schema ACL의 NULL↔소유자 명시 차이(정규화하면 일치), db-bootstrap이 만든 역할·멤버십·`bi_data`·`public` CREATE 권한. 정적 표 위에 다른 뷰가 있으면 `downgrade`가 막힘 |
+| 실패 시나리오 | 중간 실패 시 DDL과 `alembic_version` 갱신 모두 롤백(한 번의 `upgrade`가 한 트랜잭션이라 앞선 revision도 같이 롤백, `transaction_per_migration=True`면 앞선 revision은 커밋) |
+| 도구 | `alembic heads | grep -c "(head)"`로 head 개수 검사(DB 없이 가능), head가 둘이면 `upgrade head`는 255로 거부 |
+- 결론: Z0 (i)(마이그레이션 유지 + 상속 멤버십 한 줄)는 **동작하고 멱등**이다. `alembic check`는 `include_schemas=False`(기본) + `include_name`/`include_object` 안전망으로 구성할 수 있다. `autogenerate`는 `GRANT`를 만들지 않고 `check`도 잡지 못하므로 권한은 스냅샷 비교(권한 매트릭스 테스트)로 잡아야 한다. 저장소 `test_migrations.py`의 D2 규칙은 `downgrade`의 `op.drop_table`도 DROP으로 잡아 `DROP_APPROVED` 기록이 필요하고, `get_heads() == ["0001"]` 단정은 첫 실제 revision 추가 때 갱신해야 한다(정적 확인). 한계: `DropIndex` 실행, `ALTER VIEW … RENAME COLUMN`(grep 확인만), `version_table_schema` 변경, 정적 표용 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_owner IN SCHEMA public …`, 대량 객체에서의 `include_object` 비용, `profile test` compose 서비스와 Jenkins는 시험하지 않았다(컨테이너 한 대에서 `psql`/`alembic` CLI 사용).
+
+## X-27. 엑셀 가져오기 한도 (Z8~Z10, H 근거; `--memory=1g`, openpyxl 3.1.5 `read_only`, 3회 평균, 합성 데이터)
+| 파일 | 미리보기 | 전체 훑기(파싱만) | 최대 RSS(기준 대비 증가분) | 일반 모드 |
+| --- | --- | --- | --- | --- |
+| 5MB | 2.0초 | 4.6초 | 52MB (24MB) | 253MB, 8.8초 |
+| 10MB | 3.2초 | 8.8초 | 77MB (49MB) | 480MB, 17.7초 |
+| 20MB | 5.9초 | 11.9초(행 10만 상한), 상한 없이 18.4초 | 126MB (98MB) | 미측정 |
+- **최악 10MB**(모든 셀이 서로 다른 짧은 문자열, 공유 문자열 123만 개): 미리보기 11.5초, 전체 15.8초, 증가분 169MB. 메모리와 열기 시간은 파일 크기가 아니라 **공유 문자열 개수**에 비례한다(이전 "10MB 약 90MB" 추정은 전형 표에서 맞았고 최악에서는 3.4배 과소). 일반 모드는 5MB 253MB(이전 265MB), 10MB 480MB(`deploy-coordination.md` 5번 491MB와 일치).
+- 사전 검사(zip 중앙 디렉터리의 해제 크기 합·압축률·항목 수·시트 수): 2~3ms, 메모리 증가 0.1MB. 경계(행 100,001 / 열 101 / 셀 2,000,100)에서 초과 행에서 바로 중단. 동시 실행: 프로세스 분리 시 메모리는 건수에 선형(10MB 3건 RSS 합 229MB, 시간 8.8→10.2초). **한 프로세스 안 스레드 동시 실행은 GIL로 이득이 없다**(10MB 2건 18~20초, 3건 31~34초).
+| 변조 파일 (사전 검사 없이 `read_only` + `iter_rows(max_row=…)` 상한만) | 결과 |
+| --- | --- |
+| 압축 0.74MB / 해제 300MB (행 반복) | 37초, RSS 883MB로 생존 |
+| 같은 방식 800MB·1GB | 45초 후 **OOM kill** |
+| 공백 900MB (압축 0.89MB) / 셀 텍스트 500MB (압축 0.5MB) / 짧은 공유 문자열 300MB | **OOM kill**(3.5초 / 4~5초 / 약 85초) |
+| zip 선언 크기를 속인 파일 | 사전 검사는 통과하지만 `zipfile`이 CRC 오류(`BadZipFile`), 메모리 증가 없음 |
+| 거짓 `<dimension>` A1:XFD1048576 | 상한을 지정하면 무해. 너무 작게 선언하면 데이터가 조용히 잘림 |
+| 시트 5만 개 선언 | 열기만 약 100초 |
+| XML 엔티티(billion laughs, 외부 엔티티) | 이 이미지(Python 3.12.15, expat 2.8.5)에서는 `defusedxml` 없이도 증폭 한도 오류/`undefined entity`로 거부, 내용 유출 없음(방어가 베이스 이미지 expat 버전에 의존). `defusedxml`을 설치하면 openpyxl이 자동 사용하며 DTD 엔티티 선언을 모두 거부 |
+- **HZ1의 "iter_rows 상한"만으로는 무력**하다: openpyxl은 `load_workbook` 시점에 모든 시트의 `<dimension>`을 읽고 `<dimension>`이 없으면 시트 XML 전체를 파싱한다. 해제 크기·압축률(정상 최대 9.3, 폭탄 339 이상)·항목 크기·시트 수·DTD·`<dimension>` 규칙을 갖춘 **강화 사전 검사(HZ1′)** 는 시험한 폭탄을 모두 2~3ms에 거부했고 정상형 29개에서 거짓 양성 0이었다. 남는 위험은 한도 안쪽의 완만한 폭탄(해제 150MB, 비율 50 이하; 한 요청 약 435MB, 19초, 300MB 실측에서 외삽, 미시험)이어서 **전역 동시 1건이 사실상 필수**(동시 2건은 OOM 위험). `RLIMIT_AS=700MB` 자식 프로세스는 폭탄에서 `MemoryError`로 스스로 종료했고 정상 10MB 파일은 영향 없음(HZ2 근거).
+- 형식 신호: 비 zip은 시그니처 `PK\x03\x04` 불일치, 암호화 xlsx는 OLE2 서명 `D0CF11E0A1B11AE1`, `.xlsm`은 `vbaProject.bin`과 `macroEnabled` 콘텐츠 타입(openpyxl도 거부), 외부 링크는 `keep_links=False`면 따라가지 않음, `../` 항목 이름은 무해하나 이름 규칙으로 거부 가능.
+- **프록시 413(실제 `bi-wizard-frontend:local`)**: `client_max_body_size` 지시자가 없어 기본 1m 적용 → 1MiB 초과 본문은 **전부 413**(멀티파트는 1MiB 파일도 413, 오버헤드 약 251바이트). 시험용 복사본에 `11m`을 두면 10MiB 파일(멀티파트 포함)이 통과, 11MiB는 멀티파트 413. 상한과 같은 값으로 두면 상한 크기 파일이 거부되므로 **상한 + 1MiB 여유**가 필요(03b 4-4 Z8의 nginx 변경 승인과 일치).
+- **`mem_limit` 1g 판정(10MB 상한, backend 유휴 53MiB 가정):** 전형 1~2건 100~150MB 충분, 최악 1건 약 220MB 충분, 최악 2건 약 390MB(메모리 충분, 시간 36초), 한도 안쪽 폭탄 1건 약 490MB 가능, 2건 약 920MB **OOM 위험**. 20MB 상한은 HZ2 없이 권하기 어렵다.
+- **새 런타임 의존성 확인:** backend 이미지에 `python-multipart`가 없어 `UploadFile`을 선언하면 `RuntimeError`가 난다. 업로드 구현에는 `python-multipart`, `openpyxl`, `defusedxml`(선택)이 필요하고 기능 단위 착수 때 승인을 요청한다(BZ19).
+- 한계: pg8000 INSERT·적재 시간 미측정(그래서 \"확정 적재 30초 이내\"는 판정 불가, 파싱만으로 최악 10MB가 16초), HZ2 프로토타입, `RequestBodyLimitMiddleware` 동작, 한도 안쪽 폭탄은 외삽.
