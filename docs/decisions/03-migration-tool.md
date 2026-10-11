@@ -34,10 +34,19 @@
 - 모든 revision에 `downgrade()`를 작성한다. `downgrade`는 개발·테스트 환경의 왕복 검증용이며 운영 DB에서 문제 대응으로 쓰지 않는다. 운영 중 문제는 수정 마이그레이션을 추가한다.
 - **D2 안전장치:** 자동 생성 초안에 `DROP`(`op.drop_table`, `op.drop_column`, `op.drop_index`, `op.drop_constraint`, SQL의 `DROP` 등)이 있으면 적용하기 전에 사용자에게 확인받고, 확인했다는 기록을 변경 요약(커밋 메시지 등)에 남긴다. 스키마 비교형 도구는 "DB에 있고 모델에 없는 테이블"을 삭제 후보로 보므로, 사용자가 런타임에 만든 데이터셋 테이블이 삭제 후보로 섞일 수 있다.
 
-### 열린 쟁점 (env-engineer 제안 단계에서 정리)
-1. **읽기 전용 계정 생성과 D3의 충돌 가능성:** 계정 이름·비밀번호를 환경변수로 받아 SQL에 넣으면 D3의 보간 금지와 부딪힌다. 계정 생성(클러스터 수준 `CREATE ROLE`)은 마이그레이션이 아니라 PostgreSQL 초기화 스크립트 쪽에서 하고, 마이그레이션은 고정 이름에 대한 고정 권한문만 쓰는 방식 등을 env-engineer가 제안한다. 동적 객체에 대한 `SELECT` 권한 부여(기본 권한 포함)는 D2와 함께 정한다.
-2. 초기화 스크립트는 빈 볼륨에서 처음 한 번만 실행되므로, 볼륨이 이미 있는 환경에서 읽기 전용 계정을 어떻게 만들지 정해야 한다.
-3. 마이그레이션 디렉터리 경로(`backend/migrations/` 제안)와 Alembic 설정 파일 위치.
+### 읽기 전용 계정과 Superset 메타 DB 생성 방식 (2026-10-11 승인)
+
+근거(공식 소스에서 확인): 공식 postgres 이미지는 `/docker-entrypoint-initdb.d`를 데이터 디렉터리가 비어 있을 때만 실행한다(`docker-entrypoint.sh`). `CREATE ROLE`에는 `IF NOT EXISTS`가 없고 비밀번호는 `PASSWORD '리터럴'`만 받는다(바인드 불가). psql은 변수를 SQL 리터럴·식별자로 인용하는 `:'var'`·`:"var"`와 환경변수를 읽는 `\getenv`, 조건부 실행 `\gexec`을 제공한다(PostgreSQL 16 문서). `ALTER DEFAULT PRIVILEGES`는 `FOR ROLE`을 생략하면 현재 역할이 만드는 객체에 적용된다.
+
+- **매 기동 멱등 `db-bootstrap` 서비스:** postgres 클라이언트 이미지로 `docker compose up`마다 실행한다. `initdb.d`는 쓰지 않는다(볼륨이 이미 있으면 다시 실행되지 않기 때문). 슈퍼유저(`POSTGRES_USER`)로 접속해 `backend/bootstrap/`의 스크립트와 `roles.sql`을 실행한다.
+- **실행 순서:** `postgres`(healthy) → `db-bootstrap`(성공 완료) → `migrate` → `backend`. `superset-init`도 `db-bootstrap` 완료 후 실행한다. 테스트 DB(profile `test`)에도 같은 스크립트를 적용한다.
+- **이름은 코드 상수로 고정:** 읽기 전용 역할 `bi_readonly`, Superset 메타 역할 `superset_meta`, Superset 메타 DB `superset`. 환경변수는 비밀번호만 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`로 받는다. 이름 변수는 두지 않는다.
+- **D3 예외(승인):** `backend/bootstrap/`의 SQL에서 **비밀번호 리터럴 두 곳에 한해** psql `:'var'` 인용 보간을 허용한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간은 금지**한다. 나머지 SQL은 모두 고정 문장이다. 비밀번호 변수는 `\getenv`로 읽고, 비어 있으면 실패한다(fail closed).
+- **안전장치:** `bi_readonly`에 `ALTER ROLE … SET default_transaction_read_only = on`을 설정한다.
+- **권한 부여 시점:** `bi_readonly`의 `SELECT` 권한(`USAGE ON SCHEMA`, `ALTER DEFAULT PRIVILEGES … GRANT SELECT … TO bi_readonly`)은 D2와 함께 Gate ③ 마이그레이션에서 고정 SQL로 쓴다. 이름이 상수라서 D3와 충돌하지 않는다.
+- **Superset 데이터 연결:** `superset-init`이 `set_database_uri`(6.1.0 CLI)로 `bi_readonly` 연결을 등록한다. URI의 비밀번호는 URL 인코딩한다.
+- **앱 계정 (조건부 승인):** Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다(운영 가이드 기준선). 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고, **Gate ④ 진입 전 분리 완료가 필수**이며, Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다(`FOR ROLE`을 생략하면 마이그레이션을 실행하는 역할과 런타임 DDL을 실행하는 역할이 같아야 한다).
+- **마이그레이션 디렉터리:** `backend/migrations/`(승인).
 
 ## 비교 근거 요약
 

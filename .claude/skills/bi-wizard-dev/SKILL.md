@@ -54,6 +54,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - API 계약과 모듈 경계는 승인 후에만 `docs/decisions/`에 확정한다. 이후 계약 변경은 사용자 승인이 필요하다.
 
 ### Gate ④: 기능 개발
+- **진입 조건:** Gate ③에서 설계한 최소 권한 앱 계정 분리가 완료되어 있어야 한다(`docs/gate-status.md` 인계 사항). backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다.
 - 기능 단위 목록은 Gate ③에서 승인된 순서를 따른다. 한 번에 한 단위만 진행한다.
 - 단위마다 다음 순서를 따른다.
   1. backend-dev, frontend-dev가 계약을 확인하고 테스트를 포함해 구현한다.

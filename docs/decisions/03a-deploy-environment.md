@@ -27,9 +27,10 @@
 - 같은 의미의 다른 이름(예: `SUPERSET_BASE_PATH`)을 만들지 않는다.
 
 ### 2-2. 프록시 접두 처리
-- **포털(frontend·backend):** 접두를 떼고 넘기는 방식과 그대로 넘기는 방식을 **설정값만으로 전환**할 수 있게 구성한다(코드 변경 없이). 실제 방식은 웹서버 배포 때 관리자와 맞춘다. 전환 설정값의 이름은 compose 구성 제안에서 정한다(후보: `APP_PROXY_STRIP_PREFIX`).
+- **포털(frontend·backend):** 접두를 떼고 넘기는 방식과 그대로 넘기는 방식을 **설정값만으로 전환**할 수 있게 구성한다(코드 변경 없이). 실제 방식은 웹서버 배포 때 관리자와 맞춘다.
+- **전환 변수 `APP_PROXY_STRIP_PREFIX` (승인, 2026-10-11):** `false`면 프록시가 접두를 **유지한 채** 전달하고, `true`면 프록시가 접두를 **떼고** 전달한다. **기본값은 `false`(접두 유지 전달)** 이다. 운영자 사정상 접두를 떼야 하면 `true`로 바꾼다. 권장 사항은 `docs/deploy-coordination.md` 2번. Gate ② 검증에서는 `true`와 `false` 두 값 모두로 로컬 동작을 확인한다.
 - **Superset:** 접두를 **떼지 않고 그대로** 넘겨야 한다. 6.1.0의 `AppRootMiddleware`는 요청 경로가 접두로 시작하지 않으면 404를 반환한다.
-- **로컬 검증:** 경로 값을 빈 값이 아닌 `/bi-wizard`, `/bi-wizard/superset`으로 두고, frontend nginx가 메인 플랫폼 프록시 역할을 재현한다. 사용자 브라우저가 Superset 경로에 직접 접근할 수 있어야 한다.
+- **로컬 검증:** 경로 값을 빈 값이 아닌 `/bi-wizard`, `/bi-wizard/superset`으로 두고, frontend nginx가 메인 플랫폼 프록시 역할을 재현한다. QA는 `.env`를 만들거나 수정하지 않고, `_workspace/qa/`에 비밀이 아닌 더미 값으로 임시 env 파일을 만들어 `docker compose --env-file`로 지정한다(승인). 사용자 브라우저가 Superset 경로에 직접 접근할 수 있어야 한다.
 - 프런트의 API 경로는 `/api` 고정이 아니라 `${APP_BASE_PATH}/api`다(호스트 없는 상대경로라는 취지는 그대로).
 
 ### 2-3. 메모리 배분 (승인, 한도 합계 8GB 안)
@@ -61,9 +62,13 @@
 ### 2-5. 마이그레이션 디렉터리
 - `backend/migrations/`로 승인한다(`03-migration-tool.md`).
 
-## 3. 열린 사항
+## 3. 읽기 전용 DB 계정 (승인, 2026-10-11)
+상세는 `03-migration-tool.md`의 "읽기 전용 계정과 Superset 메타 DB 생성 방식"을 따른다. 요약: 매 기동 멱등 `db-bootstrap` 서비스(`backend/bootstrap/`, `initdb.d` 미사용), 이름 고정(`bi_readonly`, `superset_meta`, `superset`), 비밀번호만 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, D3 예외는 비밀번호 리터럴 두 곳의 psql `:'var'` 인용만. 추가 서비스 `db-bootstrap`의 메모리 한도는 128MB다(일시적, 시작 시 한 번).
 
-- **읽기 전용 DB 계정의 생성 방식**(03 문서의 열린 쟁점): env-engineer가 먼저 제안하고 승인을 받는다.
-- 프록시 접두 처리 전환 설정값의 변수 이름.
+## 4. 앱 계정 조건 (승인, 2026-10-11)
+Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고, Gate ④ 진입 전 분리 완료가 필수이며, Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다.
+
+## 5. 열린 사항
+
 - 메인 플랫폼 프록시의 실제 동작, 실제 경로 값 등은 `docs/deploy-coordination.md`.
 - 하위 경로 + Embedded의 쿠키·iframe 허용 설정은 같은 origin 가정(`deploy-coordination.md` 9번)이 맞는지에 달려 있다.

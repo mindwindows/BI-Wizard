@@ -65,7 +65,8 @@ docker compose ps
   - `${APP_BASE_PATH}/` 포털과 정적 파일, `${APP_BASE_PATH}/api/health`, `${APP_BASE_PATH}/api/health/db`
   - `${SUPERSET_APP_ROOT}/` 로그인 화면과 정적 파일(중복 접두 `…/superset/superset/…`가 없는지)
   - Embedded: `${SUPERSET_APP_ROOT}/embedded/<id>` iframe 로드. guest token 발급까지 확인하려면 대시보드가 필요하므로 불가능하면 "미실행: 대시보드 없음"으로 적고 가능한 단계까지만 확인한다
-  - 포털의 프록시 접두 처리 설정값을 전환해 같은 확인을 반복한다
+  - `APP_PROXY_STRIP_PREFIX`를 `false`(기본)와 `true` 각각으로 같은 확인을 반복한다. 두 값의 결과를 표로 따로 보고한다
+- **`db-bootstrap` 검증:** 두 번 연속 실행해 오류가 없는지, `docker compose down`(`-v` 없음) 후 `up`에서 계정이 유지되는지, 임시 env 파일의 비밀번호를 바꾸고 다시 `up`하면 반영되는지 확인한다. `bi_readonly`로 접속해 `SELECT 1`은 성공하고 `CREATE TABLE`, `INSERT`는 거부되는지, `SHOW default_transaction_read_only`가 `on`인지 확인한다. `superset` DB가 앱 DB와 별도인지(`\l`) 확인한다. 비밀번호는 보고에 쓰지 않는다.
 - **재현되는 하위 경로 버그가 있으면 Superset 내부 코드를 수정하지 않는다.** 현상, 재현 방법, 대안과 각 영향을 정리해 보고하고 멈춘다.
 - `docker stats --no-stream`으로 컨테이너별 메모리를 기록하고 `mem_limit` 대비 비율을 표로 적는다.
 - **5MB 엑셀 샘플 대리 측정:** 가져오기 기능은 Gate ④에서 구현되므로, backend 이미지 안에서 5MB급 샘플(openpyxl로 생성한 합성 파일 또는 사용자가 제공한 실제 파일)을 openpyxl(read_only)과 pandas로 읽는 일회성 스크립트로 최대 메모리(RSS)를 측정한다. 스크립트와 샘플은 `_workspace/qa/`에 두고 저장소에 넣지 않는다. 보고에 "대리 측정이며 실제 가져오기 파이프라인의 값이 아니다"를 명시하고, 결과를 `docs/deploy-coordination.md` 5번에 기록하도록 메인에게 전달한다.

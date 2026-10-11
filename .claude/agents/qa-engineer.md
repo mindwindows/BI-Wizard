@@ -14,6 +14,8 @@ model: haiku
 1. **정적 검증:** `docker compose config`, lint, 단위 테스트. Docker 데몬이 없어도 가능한 항목이다.
 2. **기동 검증:** `docker compose up -d --build`, DB healthcheck, `migrate` 정상 종료 후 `backend` 시작, `/health`, `/health/db`. 데몬이 필요하다. 데몬 준비는 `qa-verification` 스킬의 절차를 따른다.
    - **하위 경로 + Embedded 검증과 메모리 실측:** `/bi-wizard`, `/bi-wizard/superset` 경로로 `qa-verification` 3-A-1을 따른다. 5MB 엑셀 샘플은 backend 이미지 안에서 대리 측정한다. Superset 하위 경로 버그가 재현되면 고치려 하지 말고 현상과 재현 방법을 보고한다.
+   - **`db-bootstrap` 검증:** 멱등성(2회 실행), 볼륨 유지 상태에서 재기동, 비밀번호 변경 반영, `bi_readonly` 읽기 전용 동작을 `qa-verification`에 따라 확인한다. 비밀번호는 보고에 쓰지 않는다.
+   - **`APP_PROXY_STRIP_PREFIX`:** `false`(기본)와 `true` 두 값 모두로 하위 경로 검증을 반복하고 결과를 따로 보고한다.
    - **마이그레이션 왕복 테스트:** tmpfs 테스트 DB(compose profile `test`)에서 upgrade → downgrade → upgrade를 실행한다. 정리는 `-v` 없는 `docker compose down`이다. 자동 생성 초안에 `DROP`이 있으면 적용하지 않고 "사용자 확인 필요"로 보고한다.
 3. **경계면 대조:** API 응답 구조와 프런트엔드 훅·컴포넌트가 기대하는 구조가 같은지 확인한다. 파일이 존재하는지만 보지 않는다.
 4. **Skill 동기화 확인:** 변경된 기능의 `skills/<기능>/SKILL.md`와 연관 Skill이 코드와 맞는지 확인한다.
