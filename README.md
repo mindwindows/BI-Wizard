@@ -2,16 +2,16 @@
 
 엑셀 데이터를 가져와 데이터셋을 만들고, 수식 열과 Superset 대시보드로 분석하는 사내 포털입니다. 현재는 **Gate ② 환경 구축** 단계라서 업무 기능은 없고, 누구나 같은 명령으로 실행·검증할 수 있는 환경만 있습니다. 요구사항은 `docs/project-brief.md`, 팀 웹서버 운영 가이드는 `docs/AI_AGENT_DEVELOPMENT_GUIDE_요약.md`입니다.
 
-> **Gate ② 한정 구성:** 이 환경에서는 PostgreSQL 슈퍼유저(`POSTGRES_USER`)를 앱과 마이그레이션 계정으로 함께 씁니다. **Gate ④ 진입 전에 최소 권한 앱 계정으로 분리해야 합니다.**
+> **DB 계정 분리 (EW-1):** Gate ②에서는 PostgreSQL 슈퍼유저(`POSTGRES_USER`)를 앱과 마이그레이션 계정으로 함께 썼습니다(Gate ② 한정 구성). 이 구성은 해소되어, 이제 `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **PostgreSQL 이미지의 슈퍼유저 전용**입니다(이미지 초기화, healthcheck, `db-bootstrap`만 씁니다. 운영 가이드의 `POSTGRES_USER`=앱 계정 의미와 다른 의도적 차이입니다). `migrate`는 `bi_owner`(비밀번호 `POSTGRES_OWNER_PASSWORD`), `backend`는 `bi_app`(비밀번호 `POSTGRES_APP_PASSWORD`)로 접속하고, 계정 이름은 코드 상수입니다.
 
 ## 구성
 
 | 서비스 | 역할 |
 | --- | --- |
 | `postgres` | PostgreSQL 16 (앱 DB + Superset 메타 DB) |
-| `db-bootstrap` | (일회성) 읽기 전용 계정 `bi_readonly`, Superset 메타 DB 생성 |
-| `migrate` | (일회성) Alembic 마이그레이션 실행 |
-| `backend` | FastAPI (`/api/health`, `/api/health/db`) |
+| `db-bootstrap` | (일회성, 슈퍼유저로 접속하는 유일한 서비스) 계정 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 빈 schema `bi_data`, Superset 메타 DB 생성 |
+| `migrate` | (일회성) Alembic 마이그레이션 실행 (`bi_owner`) |
+| `backend` | FastAPI (`/api/health`, `/api/health/db`) (`bi_app`) |
 | `frontend` | 포털 정적 파일 + nginx (로컬에서 메인 플랫폼 프록시 역할) |
 | `superset-init`, `superset` | Apache Superset 6.1.0 (초기화 일회성 + 웹) |
 
@@ -26,7 +26,7 @@
    ```
    copy .env.example .env
    ```
-2. `.env`에서 **비어 있는 Secret 6개**를 채웁니다: `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
+2. `.env`에서 **비어 있는 Secret 8개**를 서로 다른 값으로 채웁니다: `POSTGRES_PASSWORD`(이미지 슈퍼유저), `POSTGRES_APP_PASSWORD`(backend), `POSTGRES_OWNER_PASSWORD`(migrate), `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
    생성 예: `python -c "import secrets; print(secrets.token_urlsafe(32))"` 또는 `openssl rand -hex 32`. 값은 영문, 숫자, `-`, `_`만 쓰세요(`$`, `%`, `#`, 따옴표, 공백은 쓰지 않습니다). Secret은 저장소, 이미지, 프런트 번들에 넣지 않습니다.
 3. 검증하고 시작합니다.
    ```
@@ -44,11 +44,14 @@
    scripts\stop-local.bat
    ```
 
+**Gate ② 때 만든 DB 볼륨이 이미 있는 PC:** `.env`에 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `AUTH_STUB_ENABLED=false`를 추가한 뒤 `scripts\start-local.bat`(또는 `docker compose up -d --build`)만 하면 됩니다. `db-bootstrap`이 새 계정을 만들고 기존 `alembic_version` 표의 소유자를 `bi_owner`로 바꾸며, `migrate`가 새 revision(`0002`)을 적용합니다. 데이터는 지워지지 않습니다.
+
 BAT의 출력은 ASCII 영어로 `[OK]`, `[FAIL]`, `[MISSING]`, `[EMPTY]`처럼 표시됩니다(일부 Windows cmd에서 UTF-8 BAT가 오동작할 수 있어 영문만 씁니다). BAT 대신 같은 동작의 명령: `docker compose up -d --build` / `docker compose ps` / `docker compose logs -f backend` / `docker compose down`. **`docker compose down -v`는 쓰지 않습니다**(DB 데이터가 사라집니다).
 
 ## 자주 바꾸는 값
 - `.env`의 `APP_BASE_PATH`, `SUPERSET_APP_ROOT`: 하위 경로. 앞 `/` 필수, 뒤 `/`와 `.`/`..` 세그먼트 금지. **빈 값(루트 배포)은 `APP_BASE_PATH`만 허용**하고 `SUPERSET_APP_ROOT`는 비울 수 없습니다. 바꾼 뒤 `scripts\restart-local.bat`.
 - `APP_PROXY_STRIP_PREFIX`: 프록시가 접두를 떼고 전달하면 `true`, 유지하면 `false`(기본). 바꾼 뒤 다시 시작하면 됩니다(이미지 재빌드 불필요). backend는 `${APP_BASE_PATH}/api/…`와 접두 없는 `/api/…`를 모두 받으며, 이 값은 프록시(nginx)가 보내는 경로를 바꿉니다.
+- `AUTH_STUB_ENABLED`: 인증 스텁(시험용 사용자로 접속자를 흉내 내는 임시 기능) 스위치. 기본 `false`. `true`는 개발·시험 전용이라서 `APP_ENV`가 `.env`에 **명시적으로** `local` 또는 `test`일 때만 backend가 시작하고, 그 밖의 값(`production`, `staging`, 빈 값, 설정 없음)에서는 시작을 거부합니다. 스텁 로그인 화면·API는 아직 없습니다(FU-1a).
 - `FRONTEND_HOST`: 기본 `127.0.0.1`(이 PC에서만 접속). 같은 LAN에 열려면 `0.0.0.0`이지만 그러면 Superset 관리자 로그인 화면도 LAN에 노출됩니다.
 - 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꿉니다.
 
@@ -58,14 +61,14 @@ docker build --target test backend      # ruff + pytest
 docker build --target test frontend     # eslint + tsc + vitest
 docker compose config --quiet           # compose 구성 검증
 ```
-마이그레이션 왕복 테스트(빈 테스트 DB), 하위 경로 전환, 문제 해결은 `skills/local-environment/SKILL.md`를 보세요.
+`docker build --target test backend`의 pytest는 DB 없이 마이그레이션 규칙(head 1개, 고정 SQL, DROP 확인 기록, 오프라인 SQL)과 스텁 스위치 판정을 확인합니다. DB가 필요한 `alembic check`와 마이그레이션 왕복 테스트(빈 테스트 DB), 하위 경로 전환, 문제 해결은 `skills/local-environment/SKILL.md`를 보세요.
 
 ## 폴더
 ```
 backend/    FastAPI, Alembic(migrations/), db-bootstrap(bootstrap/), Dockerfile
 frontend/   React(Vite) 정적 빌드, nginx 설정 템플릿, Dockerfile
 superset/   Superset 6.1.0 위에 PostgreSQL 드라이버와 고정 설정을 얹는 Dockerfile
-scripts/    start/stop/restart/logs/health-check/validate-env .bat, CI용 ci-validate-env.sh
+scripts/    start/stop/restart/logs/health-check/validate-env .bat, CI용 ci-validate-env.sh(와 그 네거티브 시험 test-ci-validate-env.sh)
 skills/     제품 기능 사용설명서 (local-environment부터)
 docs/       요구사항 브리프, 운영 가이드, 결정 기록, Gate 진행 상태
 references/ 선택된 Reference 소스

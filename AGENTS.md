@@ -7,7 +7,7 @@
 - 서비스: `postgres`, `db-bootstrap`(일회성), `migrate`(일회성), `backend`, `frontend`, `superset-init`(일회성), `superset`, 그리고 profile `test`의 `postgres-test`(tmpfs). 순서는 `postgres → db-bootstrap → migrate → backend`, `db-bootstrap → superset-init → superset`.
 - 모든 서비스에 `mem_limit`이 있다(합계 8GB 안, `docs/decisions/03a-deploy-environment.md`). 한도는 `compose.yml`에 고정하고 변수화하지 않는다. Redis/Valkey/Celery는 두지 않는다(필요해지면 사용자와 재논의).
 - Health: `${APP_BASE_PATH}/api/health`, `${APP_BASE_PATH}/api/health/db`, `${SUPERSET_APP_ROOT}/health`. `/health/azure-openai`는 만들지 않는다.
-- **Gate ② 한정 구성:** `POSTGRES_USER`(이미지 슈퍼유저)를 앱·`migrate` 계정으로 쓴다. 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계하고 **Gate ④ 진입 전에 완료해야 한다.** Gate ④에서 backend가 슈퍼유저로 접속하면 리뷰에서 차단된다.
+- **DB 계정 분리(EW-1, Gate ② 한정 구성 해소):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·`migrate` 계정으로 썼다(한정 구성). 이제 `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **이미지 슈퍼유저 전용**(postgres 이미지, healthcheck, `db-bootstrap`)이고 `backend`·`migrate`는 이 계정으로 접속하지 않는다. `migrate`=`bi_owner`(정적 표·`bi_data` 소유), `backend`=`bi_app`(정적 표는 명시 GRANT만, `bi_data`에만 `CREATE`)이며 계정 이름은 코드 상수(`backend/app/db.py`)다. 이것은 운영 가이드 기준선(`POSTGRES_USER`=앱 계정)과의 **의도적 차이**다(`docs/deploy-coordination.md` 29번). backend가 슈퍼유저로 접속하는 구성은 리뷰에서 차단된다.
 - 이 환경이 통과한 상태(Environment Ready)가 기능 개발의 전제다.
 - frontend의 nginx 마스터가 root로 실행되는 것은 **의도적 선택**(공식 nginx 이미지 기본)이다. 필요하면 `nginx-unprivileged` 이미지로 전환할 수 있다.
 - `FRONTEND_HOST` 기본값은 `127.0.0.1`이다(Superset 관리자 로그인이 LAN에 노출되지 않게). 컨테이너 내부 바인딩 변수(`BACKEND_HOST` 등)와는 다른 의미다.
@@ -16,7 +16,8 @@
 ## 2. 환경변수
 - `.env.example`이 이름 기준 원본이다. 운영 가이드의 canonical name(`APP_*`, `FRONTEND_*`, `BACKEND_*`, `POSTGRES_*`, `LOG_LEVEL`, `TZ`)을 그대로 쓰고, 같은 의미의 새 이름을 만들지 않는다. 환경별 이름 분리(`LOCAL_DB_HOST` 등) 금지: 이름은 고정하고 값만 바꾼다.
 - Azure OpenAI 변수(`AZURE_OPENAI_*`)는 없다(브리프 5절 1번: 제외). LLM 사용이 생기면 사용자 승인 후에만 추가한다.
-- 이 프로젝트의 추가 변수: `APP_BASE_PATH`, `APP_PROXY_STRIP_PREFIX`, `SUPERSET_APP_ROOT`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`. 읽기 전용 역할 `bi_readonly`, Superset 메타 역할 `superset_meta`, 메타 DB `superset`의 **이름은 코드 상수**이며 변수로 만들지 않는다.
+- 이 프로젝트의 추가 변수(현재 `.env.example` 26개): `APP_BASE_PATH`, `APP_PROXY_STRIP_PREFIX`, `AUTH_STUB_ENABLED`, `SUPERSET_APP_ROOT`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`. 역할 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 메타 DB `superset`, schema `bi_data`의 **이름은 코드 상수**이며 변수로 만들지 않는다(환경변수는 비밀번호만 받는다).
+- **인증 스텁 스위치 `AUTH_STUB_ENABLED`**(기본 `false`, 승인 AP-13): `true`는 개발·시험 전용이다. 켜져 있으면 `APP_ENV`가 환경변수로 **명시적으로 설정**(코드 기본값 `local`이 채운 것은 미설정으로 본다)되어 있고 값이 `local`·`test`일 때만 backend가 시작하며, 아니면 시작을 거부한다(fail-closed, `backend/app/config.py`, `test_config.py`). 시험용 사용자 시드를 운영 마이그레이션에 넣지 않는다. 스텁 로그인 기능은 FU-1a에서 만든다(지금은 스위치만 있다).
 - **새 변수를 추가할 때** 이 순서로 영향을 확인하고 변경 요약(커밋 메시지)에 기록한다.
   1. `.env.example` (이름, 주석, Secret이면 빈 값)
   2. backend Settings (`backend/app/config.py`) 와 테스트
@@ -36,9 +37,9 @@
 ## 4. 마이그레이션과 DB 계정 (`docs/decisions/03-migration-tool.md`)
 - 도구는 **Alembic**, 위치는 `backend/migrations/`. 실행은 일회성 `migrate` 서비스(`alembic upgrade head`)뿐이며 앱 코드는 시작 때 마이그레이션이나 `create_all`을 하지 않는다.
 - 마이그레이션 안의 SQL은 **보간 없는 고정 문자열만** 쓴다(f-string, `%`, `.format()`, `+` 금지). 모든 revision에 `downgrade()`를 구현하고 빈 DB 왕복 테스트(`upgrade → downgrade → upgrade`)로 검증한다. 운영 중 문제는 되돌리기가 아니라 수정 마이그레이션 추가로 대응한다.
-- **`DROP`이 있는 자동 생성 초안은 적용하지 않고 사용자 확인을 받는다**(D2 미결정, Gate ③). 확인했다면 변경 요약에 "DROP 확인: 사용자 승인"을 남긴다.
-- 읽기 전용 계정과 Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. `roles.sql`의 psql `:'var'` 인용은 비밀번호 리터럴(`PASSWORD :'var'`)에만 허용하고 식별자 보간은 금지다(3라운드에서 앱 계정 비밀번호까지 포함하도록 승인, 구현은 Gate ④ 진입 전). `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사한다.
-- `bi_readonly`의 `SELECT` 권한은 Gate ③에서 마이그레이션으로 부여한다.
+- **`DROP`이 있는 마이그레이션(자동 생성 초안 포함)은 적용하지 않고 사용자 확인을 받는다**(D2 안전장치, `public` 정적 표 대상. `revision`의 `downgrade()`에 있는 `op.drop_table`도 해당). 확인했다면 변경 요약에 "DROP 확인: 사용자 승인"을 남기고 `backend/tests/test_migrations.py`의 `DROP_APPROVED`에 기록한다.
+- DB 계정(`bi_owner`, `bi_app`, `bi_readonly`, `superset_meta`), 빈 schema `bi_data`(소유자 `bi_owner`), Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. **D3 예외 2:** `roles.sql`의 psql `:'var'` 인용은 **비밀번호 리터럴(`PASSWORD :'var'`) 4곳**(`POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`)에만 허용하고 식별자 보간(`:"var"`, `format('%I')`)과 구문 보간은 금지다. 비밀번호는 `\getenv`로 읽고 비면 실패한다(fail closed). 역할·DB·schema 이름은 상수 리터럴이다. db-bootstrap 고정 SQL에는 승인된 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`(마이그레이션이 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app`을 쓰려면 필요), `bi_owner`의 `public` `CREATE`, `bi_readonly`의 `statement_timeout = '30s'`가 들어 있다. `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사하고 그 네거티브 케이스는 `scripts/test-ci-validate-env.sh`가 시험한다.
+- `bi_data`의 `USAGE/CREATE`(`bi_app`)와 `bi_readonly`의 읽기 권한(`USAGE`, 기본 권한 `SELECT`)은 마이그레이션 `0002_bi_data_privileges`가 `bi_owner`로 부여한다(고정 SQL). 동적 객체(`ds_*`, `dv_*`, `de_*`)는 마이그레이션 대상이 아니다: `target_metadata`는 정적 표 `MetaData`(`backend/app/db_metadata.py`) 하나이고 `include_name`/`include_object`가 `bi_data`와 동적 객체 이름을 제외한다(D2 안전장치는 `public` 정적 표의 `DROP` 대상). 왕복 테스트는 `python -m migrations.roundtrip`(테스트 DB), D5 의미는 "권한 상태 복원"이다.
 
 ## 5. 라이선스
 - 허용형만 쓴다: MIT, BSD, Apache 2.0, PSF, PostgreSQL License. `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스는 금지다. 불분명하면 쓰지 말고 질문한다.
@@ -52,6 +53,7 @@
 
 ## 7. 검증 명령
 ```
+sh scripts/ci-validate-env.sh && sh scripts/test-ci-validate-env.sh   # 변수 목록·계정 분리·roles.sql 규칙과 그 네거티브 케이스(Docker 불필요)
 docker compose config --quiet                       # 구성 (CI는 sh scripts/ci-validate-env.sh 로 만든 더미 env 사용)
 docker build --target test backend                  # ruff check/format, pytest
 docker build --target test frontend                 # eslint, tsc, vitest

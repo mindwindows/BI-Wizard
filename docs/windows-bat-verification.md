@@ -17,7 +17,7 @@
 
 ## `.env` 만들기 (비밀 값은 사용자가 직접 채우고 채팅이나 AI에 보내지 않는다)
 1. 저장소 루트에서 `copy .env.example .env`.
-2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 6개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
+2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 8개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
 3. 값 생성 예(호출마다 새 값): `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Python이 없으면 `powershell -NoProfile -Command "-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })"`.
 4. **주의 문자:** 값은 영문, 숫자, `-`, `_`만 쓴다. `$`, `%`, `#`, 작은따옴표, 큰따옴표, 공백, `=`, 한글을 쓰지 않는다. 값 끝에 공백이 남지 않게 한다. 인코딩은 BOM 없는 UTF-8이나 ANSI로 저장한다(메모장의 "UTF-8(BOM 포함)"은 피한다).
 5. **접속 주소 기본값:** `FRONTEND_HOST=127.0.0.1`이 기본이라 이 PC의 브라우저에서만 접속된다. 같은 LAN의 다른 PC에서 접속하려면 `FRONTEND_HOST=0.0.0.0`으로 바꾸고 `scripts\restart-local.bat`을 실행한다. 단 그러면 Superset 관리자 로그인 화면도 LAN에 노출되고 Windows 방화벽 허용 창이 뜰 수 있다. 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꾼다.
