@@ -5,7 +5,7 @@
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | **승인** (FU-1 범위) | 2026-10-11 | FU-1 범위의 04~08 승인, 합계 함수 빈 칸 전파, 지원 차트 6가지, 에이전트 모델 3개 sonnet 변경, §9-2 제안·§10 기능 축소 승인, AP-1·2·5·9·10·11·12·13·14·16 승인(AP-15는 FU-1 착수 때 요청). 상세 `03b` 6절 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` |
-| ④ 기능 개발 | 대기 (진입 전 EW-1 진행 중) | - | - | - |
+| ④ 기능 개발 | 대기 (진입 전 EW-1 완료·검증 통과, 사용자 확인 후 EW-3 이후) | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |
@@ -46,7 +46,7 @@
 ## Gate ② 결과 (2026-10-11, 커밋 `4fbf7ad` 기준 qa-engineer 독립 재검증, reviewer 리뷰)
 | Environment Ready 항목 | 결과 | 근거 |
 | --- | --- | --- |
-| `.env.example` canonical, 중복 없음 | 통과 | 23개, Azure/Redis/Valkey/Celery 없음, `ci-validate-env.sh` 네거티브 18종 |
+| `.env.example` canonical, 중복 없음 | 통과 | 26개(EW-1에서 `AUTH_STUB_ENABLED`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD` 추가), Azure/Redis/Valkey/Celery 없음, `ci-validate-env.sh` 네거티브 18종 |
 | `.env` Secret 보호 | 통과 | 추적 파일에 Secret 없음, `.env`/`.env.*` 무시(`!.env.example`) |
 | backend·frontend·superset Dockerfile 빌드 | 통과 | test/build 타깃 포함 |
 | compose 구성(healthcheck, volume, `mem_limit`, 순서) | 통과 | 8개 서비스, 합계 상시 4.75GiB/테스트 포함 6.875GiB, 태그 고정 |
@@ -235,14 +235,14 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 
 - **RLS `clause`와 `CREATE VIEW`의 SQL 문자열 렌더링 문제:** Superset guest token의 RLS `clause`는 SQL 문자열이고, 수식 속 문자열 리터럴이 뷰 정의(DDL)로 렌더링되는 지점이 생긴다. `CREATE VIEW`에 bind parameter를 쓸 수 없다는 근거는 2012년 메일링 스레드 요약뿐이다. **Gate ③에서 PostgreSQL 공식 문서와 SQLAlchemy 공식 문서로 근거를 확인한 뒤 설계한다.** 설계 전에는 확정하지 않는다.
 - 수식 범위(2번)가 정해져야 `references/baserow/`에서 참고할 모듈 범위(lookup·집계 포함 여부)를 확정할 수 있다.
-- **앱 계정 분리 (조건부 승인, 2026-10-11):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·migrate 계정으로 쓴다. 조건: (1) 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계한다. (2) **Gate ④ 진입 전 분리 완료가 필수 조건**이다. (3) Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. (4) 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다(생략하면 마이그레이션 실행 역할과 런타임 DDL 실행 역할이 같아야 하므로, 분리 시 어느 역할이 동적 객체를 만들고 `bi_readonly`에 어떻게 `SELECT`를 주는지 새로 설계).
+- **앱 계정 분리 (조건부 승인, 2026-10-11; EW-1에서 해소, 아래 "EW-1 결과" 참조):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·migrate 계정으로 쓴다. 조건: (1) 최소 권한 앱 계정 분리는 Gate ③에서 D2와 함께 설계한다. (2) **Gate ④ 진입 전 분리 완료가 필수 조건**이다. (3) Gate ④에서 backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다. (4) 계정을 나눌 때 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 생략 방식도 다시 정한다(생략하면 마이그레이션 실행 역할과 런타임 DDL 실행 역할이 같아야 하므로, 분리 시 어느 역할이 동적 객체를 만들고 `bi_readonly`에 어떻게 `SELECT`를 주는지 새로 설계).
 - **D2 (동적 객체 분리 방식) 결정:** 데이터 모델과 함께 옵션(S 별도 schema, N 이름 규칙, R 등록 테이블 기반, D 별도 DB)을 비교해 사용자가 결정한다. 읽기 전용 계정(D7)의 동적 객체 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식도 함께 정한다. 결정 전까지 자동 생성 초안의 `DROP`은 사용자 확인 없이 적용하지 않는다.
 - **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
-- **왕복 테스트의 실질 범위:** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
+- **왕복 테스트의 실질 범위(EW-1에서 해소: `0002`와 `python -m migrations.roundtrip`이 권한 상태 복원까지 검증):** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
 - **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
 - **Embedded guest 역할 설계(결정됨: 최소 권한 커스텀 역할):** `GUEST_ROLE_NAME`에 지정할 커스텀 역할의 권한 목록을 데이터셋·대시보드 권한 모델과 함께 정한다. 최소한 `…/api/v1/me/roles/` 403을 일으키지 않는 권한이 필요하다(기본 `Public`은 권한이 없어 실패, `Gamma` 대조 실험은 성공). `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다(`bi-review`가 점검). 역할을 만드는 위치와 방식은 Gate ③에서 정한다. 만든 뒤 하위 경로 + Embedded 검증을 다시 한다.
 - **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
-- **Alembic `target_metadata` 연결:** 현재 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않는다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). Gate ③에서 정적 모델 `MetaData`와 `include_object` 필터를 D2 설계와 함께 연결한다.
+- **Alembic `target_metadata` 연결(EW-1에서 해소: `backend/app/db_metadata.py`로 연결됨):** 이전에는 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않았다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). EW-1에서 정적 모델 `MetaData`와 `include_object` 필터를 연결했다.
 - **업로드 크기 상한:** 이 서비스가 다룰 데이터는 대용량이 아니고 현재 엑셀 파일은 5MB 이하다. Gate ② 검증에서 5MB급 샘플로 backend 사용량을 실측한 결과를 근거로 Gate ③에서 상한을 정한다. 프록시의 요청 본문 상한(`docs/deploy-coordination.md` 7번)과 맞춘다.
 - **D6 Jenkins 적용:** Jenkins 실행 환경에서 Docker 사용 가능 여부를 확인한 뒤 정한다(Jenkinsfile의 초기 Stage에는 마이그레이션 왕복 테스트를 아직 넣지 않는다).
 - **라이선스 점검 원칙(결정 6):** 새 의존성을 추가할 때 운영 런타임에 들어가는지, 개발·테스트 전용인지, 업스트림 공식 이미지 내부인지를 구분해 `bi-review`가 판정한다. 약한 카피레프트를 우리 코드의 운영 런타임 의존성에 추가하려면 사용자 확인이 필요하다.
@@ -277,3 +277,10 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **검토:** reviewer 2회(1차: 차단 0·중요 10·권장 20, 2차: 차단 0·중요 6·권장 10)를 모두 반영했다. 3차 검토는 하지 않았다(2차 반영분은 architect 자체 정합 확인만).
 - **A-27 확인:** 조건부 가능(서비스 계정이 전체 열 교체 `PUT`으로 표시 이름 설정, `columns`는 병합이 아니라 교체). 03c A-27, 04~08에 반영 완료.
 - **사용자 확인이 필요한 [제안] 모음:** `04-modules.md` §9-2. 승인 필요 통합 표: §9-1. 기능 축소 기록: §10.
+
+## EW-1 결과 (앱 계정 분리, 2026-10-11)
+- **구현:** db-bootstrap(`bi_owner`·`bi_app`, 빈 `bi_data`, `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`, `bi_readonly` `statement_timeout=30s`, `alembic_version` 소유자 이전), compose(`migrate`=`bi_owner`, `backend`=`bi_app`, 슈퍼유저 변수 미전달), revision `0002_bi_data_privileges`(권한 전용, 실질 `downgrade`), 정적 `MetaData`·`include_name`/`include_object`, 왕복 도구 `python -m migrations.roundtrip`, `AUTH_STUB_ENABLED`(기본 false) + `APP_ENV` 명시·허용목록{local,test} 시작 거부, `ci-validate-env.sh` 규칙과 네거티브 62케이스.
+- **QA 검증(HEAD 7b96176, 11항목 모두 통과):** 이미지 빌드·ruff·pytest 105, 기동 순서와 migrate 실패 시 backend 미기동, backend=`bi_app`·migrate=`bi_owner` 접속, X-15 권한 매트릭스 일치, `statement_timeout` 30.2초 실측 취소(AP-9 효과 확인), `alembic check`·왕복·heads 1개, 스텁 스위치(production/빈 값/미설정/`Local`/`staging` 거부, `local`/`test` 통과), Gate ② 볼륨 재현 후 재기동(데이터 유지, `alembic_version` 소유자 `bi_owner`, 0002까지 상승), 비밀번호 변경 반영, 빈 값 fail closed, 로그의 비밀번호 0건, Superset 회귀 없음.
+- **reviewer:** 차단 없음. 중요 2건(CI 주석 제거 우회, 낡은 문구)과 경미 항목을 반영했다(`ci-validate-env.sh` 보강 후 최종 HEAD에서 `ci-validate-env.sh` 통과, 네거티브 62케이스 실패 0은 메인이 재실행 확인. QA의 전체 시험은 보강 전 커밋 기준).
+- **한계:** 정적 표 매트릭스는 시험용 표로 재현했다(0001·0002에는 정적 표 없음. `0003` 이후 실제 표로 재확인). 보강 후 CI 스크립트 변경분 외 전체 QA 재실행은 하지 않았다. BAT 실행 검증과 Jenkins 실제 실행은 보류 그대로. Superset 경유 `statement_timeout`·비밀번호 변경 후 Superset 연결 유지는 미확인. backend 스텁 거부는 compose에서 재시작 반복으로 나타난다.
+- **사용자 확인이 필요한 사항:** env-engineer가 목록 밖에서 추가한 것 — `scripts/test-ci-validate-env.sh`(신규), pydantic `hide_input_in_errors=True`, `AUTH_STUB_ENABLED`의 compose 필수 처리(기존 `.env`는 변수 3개 추가 필요), `roles.sql`의 `REVOKE ALL ON SCHEMA bi_data FROM PUBLIC`·`REVOKE CREATE ON SCHEMA public FROM PUBLIC`·`ALTER SCHEMA bi_data OWNER TO bi_owner`·`SET LOCAL log_min_error_statement = panic`. 모두 권한을 줄이거나 Gate ② 볼륨 호환용이며 새 변수·의존성은 없다. 운영 DB에서 슈퍼유저를 줄 수 없을 때의 대안은 `deploy-coordination.md` 29번 협의 항목.

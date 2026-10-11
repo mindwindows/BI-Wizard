@@ -104,7 +104,7 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
 
 ### 인증 스텁 스위치 (`AUTH_STUB_ENABLED`)
 - 기본 `false`. 스텁은 개발·시험에서만 켠다. `true`로 두려면 `.env`에 `APP_ENV=local`(또는 `test`)이 **명시**되어 있어야 한다. `.env.example`을 복사했다면 이미 `APP_ENV=local`이 들어 있다.
-- `true`인데 `APP_ENV`가 없거나 비었거나 `local`/`test`가 아니면(예: `production`, `staging`, `Local`) backend는 시작하지 않고 종료한다(`docker compose logs backend`에 "AUTH_STUB_ENABLED=true는 …" 오류). 판정은 `backend/app/config.py`, 시험은 `backend/tests/test_config.py`다.
+- `true`인데 `APP_ENV`가 없거나 비었거나 `local`/`test`가 아니면(예: `production`, `staging`, `Local`) backend는 서비스하지 않는다(compose에서는 `restart: unless-stopped` 때문에 종료와 재시작을 반복하고 포트는 열리지 않는다. `docker compose logs backend`에 "AUTH_STUB_ENABLED=true는 …" 오류). 판정은 `backend/app/config.py`, 시험은 `backend/tests/test_config.py`다.
 - 운영 배포 설정에서는 `false`로 둔다. 스텁 로그인 화면·API는 FU-1a에서 만든다(지금은 스위치만 있다).
 
 ### 마이그레이션 왕복 테스트와 `alembic check` (tmpfs 테스트 DB)
