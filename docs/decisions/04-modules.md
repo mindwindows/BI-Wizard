@@ -16,17 +16,17 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 ### 2-1. 공통 계층
 | 이름 | 책임 | 소유 | 의존 | 금지 · 확장점 |
 | --- | --- | --- | --- | --- |
-| `core` | 설정, 오류 형식, DB 세션(`bi_app`, 미리보기용 읽기 전용 트랜잭션), `/health`, 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB`, `bi_data` 객체 종류[표·뷰·인덱스·제약만, 단 열이 소유한 `Identity` 시퀀스(`row_id`)는 허용], `standard_conforming_strings=on`, 07 §4-3), 포트 정의(`DatasetSyncPort`, 정의 변경 훅, `RowViewPort`), 정적 표 정의(`MetaData` 한 곳 = Alembic `target_metadata`) | 정적 표 정의만(쓰기 책임은 각 모듈) | 없음 | 슈퍼유저·`bi_owner` 접속 금지(시작 자가 점검). 업무 로직 금지 |
-| `auth` | `current_user` 한 곳(신원 어댑터 → `CurrentUser`), 권한 판정(관리자 / 팀 정의 담당자·입력자 / 열람 = 인증된 모두) | 없음(`users`·`team_members` 읽기) | core | 스텁은 개발·시험 전용, 기본 꺼짐·fail-closed이며 운영 설정에서 켜지면 시작 거부(`03b` 5-2 K3, §8). 확장점: 신원 어댑터 교체(8번 미결정) |
+| `core` | 설정, 오류 형식, DB 세션(`bi_app`, 미리보기용 읽기 전용 트랜잭션), `/health`, 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB`, `bi_data` 객체 종류[표·뷰·인덱스·제약만, 단 열이 소유한 `Identity` 시퀀스(`row_id`)는 허용], `standard_conforming_strings=on`, 07 §4-3), 포트 정의(`DatasetSyncPort`[데이터셋 단위·팀 단위 요청], 정의 변경 훅, `RowViewPort`), 정적 표 정의(`MetaData` 한 곳 = Alembic `target_metadata`) | 정적 표 정의만(쓰기 책임은 각 모듈) | 없음 | 슈퍼유저·`bi_owner` 접속 금지(시작 자가 점검). 업무 로직 금지 |
+| `auth` | `current_user` 한 곳(신원 어댑터 → `CurrentUser`), 권한 판정(관리자 / 팀 정의 담당자·입력자 / 열람 = 인증된 모두), 사용자·팀·소속 **읽기 service**(다른 모듈이 팀 이름·코드를 읽는 유일한 길) | 없음(`users`·`teams`·`team_members` 읽기, 쓰기는 access) | core | 스텁은 개발·시험 전용, 기본 꺼짐·fail-closed이며 운영 설정에서 켜지면 시작 거부(`03b` 5-2 K3, §8). 확장점: 신원 어댑터 교체(8번 미결정) |
 | `ddl` | 런타임 동적 DDL 유일 모듈, `ds_`/`dv_`/`de_`/`c_`/`e_` 이름과 인덱스·제약 이름(`ux_ds_<id>_period`, `ck_ds_<id>_period`) 규칙 함수 | `bi_data`의 표·뷰·인덱스·제약(생성·변경) | core | `text()`·`exec_driver_sql` 금지, 객체 종류 허용 목록(`bi-review` 7-4), 이 모듈 밖 DDL 금지, `bi_app`으로만 실행(`03b` 5-2 Z6) |
 
 ### 2-2. FU-1 기능 모듈
 | 모듈 | 책임 | 소유 정적 표 | 소유 동적 객체 | 외부 의존(허용) | 확장점 |
 | --- | --- | --- | --- | --- | --- |
-| `access` | 팀·사용자·소속(역할) 관리, 비활성화, 최초 관리자 서버 명령, `/api/me` | `users` `teams` `team_members` | - | core, auth | 데이터셋별 예외 권한(후속) |
-| `dataset` | 데이터셋·열 정의(타입, 필수·범위, 기준 날짜 열, 날짜 단위, 열 구분 태그), 정의 버전, 등록 + 원본 표 생성을 한 트랜잭션 | `datasets` `dataset_columns` | `ds_<번호>` (ddl 경유) | core, auth, ddl | 열 타입 등록, 검증 규칙 등록, 정의 변경 훅 호출 |
+| `access` | 팀·사용자·소속(역할) 관리, 비활성화, 최초 관리자 서버 명령, `/api/me`, 팀 이름 변경 뒤 팀 단위 동기화 요청 | `users` `teams` `team_members`(쓰기) | - | core(포트), auth | 데이터셋별 예외 권한(후속) |
+| `dataset` | 데이터셋·열 정의(타입, 필수·범위, 기준 날짜 열, 날짜 단위, 열 구분 태그), 정의 버전, 등록 + 원본 표 생성을 한 트랜잭션, **정의 변경 진입점**(§5) | `datasets` `dataset_columns` | `ds_<번호>` (ddl 경유) | core, auth, ddl | 열 타입 등록, 검증 규칙 등록, 정의 변경 훅 호출 |
 | `entry` | 한 기간 = 한 행 입력: 행 조회(계산 열 값·오류는 `RowViewPort`로 받음), 칸 단위 값 비교 갱신, 붙여넣기 일괄(충돌 시 전부 취소), 서버 재검증 | 없음 | `ds_<번호>` 행 읽기·쓰기(DDL 아님) | core(포트 포함), auth, dataset(정의 읽기) | 행·열 전환 보기를 나중에 추가할 수 있게 저장 형식 고정 |
-| `formula` | 수식 파싱·정적 검사·순환 검사, `dv_` 뷰(와 오류 판정 뷰) 생성·시작 시 재생성(정의 해시), 미리보기, 수식 보기, 오류 칸·뷰 재생성 점검 | `formulas` `formula_deps` | `dv_<번호>`, `de_<번호>`(E-A 채택 시) (ddl 경유) | core, auth, dataset(정의 읽기, 계산 열 만들기 때 정의 변경 쓰기 함수), ddl | 함수 사전, 리터럴 렌더러 접점 한 곳, `RowViewPort` 구현 |
+| `formula` | 수식 파싱·정적 검사·순환 검사, `dv_` 뷰(와 오류 판정 뷰) 생성·시작 시 재생성(정의 해시), 미리보기, 수식 보기, 오류 칸·뷰 재생성 점검 | `formulas` `formula_deps` | `dv_<번호>`, `de_<번호>`(E-A 채택 시) (ddl 경유) | core, auth, dataset(정의 읽기·정의 변경 진입점 호출), ddl | 함수 사전, 리터럴 렌더러 접점 한 곳, `RowViewPort` 구현 |
 | `superset` | 서비스 계정으로 가상 데이터셋 등록·열 새로고침, 동기 상태, 대시보드 연결(관리자), 입장권 발급, 임베딩 | `superset_datasets` `superset_dashboards` | 없음(Superset 쪽 역할·계정은 `superset-init`) | core, auth, dataset(읽기), ddl(이름 규칙만), `httpx` → Superset | `DatasetSyncPort` 구현 |
 
 ## 3. 의존 방향 (순환 없음)
@@ -39,7 +39,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | dataset | core, auth, ddl | entry, formula, superset |
 | entry · formula · superset | 각각 core, auth, dataset (+ formula: ddl, superset: ddl 이름) | 없음 |
 - 위상 순서: core → auth·ddl → access·dataset → entry·formula·superset. 마지막 세 모듈은 서로 직접 의존하지 않는다.
-- 역방향 호출은 `core` 포트로 뒤집는다: dataset이 정의 변경 훅을 호출하면 formula가 등록해 뷰를 재생성하고, 정의/뷰가 바뀌면 `DatasetSyncPort`로 커밋 뒤 백그라운드 동기화를 요청하고(superset이 구현하고 자기 표에 상태를 기록, 행이 없으면 `pending`) entry는 계산 열 값·오류를 `RowViewPort`(formula 구현)로 읽는다. 연결은 앱 팩토리 한 곳에서 한다. dataset은 superset을 읽지 않으므로 화면이 동기 상태를 따로 받아 결합한다(S2).
+- 역방향 호출은 `core` 포트로 뒤집는다: dataset이 정의 변경 훅을 호출하면 formula가 등록해 뷰를 재생성하고, 정의/뷰가 바뀌면 `DatasetSyncPort`로 커밋 뒤 백그라운드 동기화를 요청하고(superset이 구현하고 자기 표에 상태를 기록, 행이 없으면 `pending`) entry는 계산 열 값·오류를 `RowViewPort`(formula 구현)로 읽는다. 팀 이름이 바뀌면(05 A4) access가 같은 포트로 팀 단위 동기화를 요청하고 superset이 그 팀의 모든 가상 데이터셋 이름을 갱신한다(08 §2-1). 팀·사용자 정보는 모든 모듈이 auth의 읽기 service로만 읽는다(access↔auth 순환 없음). 연결은 앱 팩토리 한 곳에서 한다. dataset은 superset을 읽지 않으므로 화면이 동기 상태를 따로 받아 결합한다(S2).
 
 ## 4. 화면 목록 **[미답: K9, 기본값 "화면 목록 + 영역 개요"로 씀, 승인 때 확인]**
 01 디자인: C(3분할 작업공간) 기본 + 목록·권한·연결 관리는 B(콘솔형), 1920×1080, Inspector 접기·폭 조절. 세부 화면은 소단위마다 만들고 완료 때 사용자가 확인한다.
@@ -56,7 +56,8 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | S9 관리자 현황(B, 관리자) | Superset 동기 상태·다시 시도(`superset` 모듈 API) + 뷰 재생성 실패·다시 시도(`/checks/views`, `formula` 모듈 API, `/health` 본문과 같은 정보). 화면·Skill은 `dashboard-link` | dashboard-link |
 
 ## 5. 모듈 간 규칙·확장점
-- 층 규칙: router는 service만, service는 자기 repo와 다른 모듈의 service 함수만 호출한다(읽기 함수 외 쓰기는 예외 하나: formula가 계산 열을 만들 때 같은 트랜잭션에서 dataset의 정의 변경 service를 불러 열 INSERT와 `def_version` 갱신을 맡긴다, 06 §3-5). SQL(SQLAlchemy 표현식)은 repo와 `ddl`에만 둔다. 다른 모듈의 표를 직접 쓰지 않는다.
+- 층 규칙: router는 service만, service는 자기 repo와 다른 모듈의 service 함수만 호출한다. 다른 모듈 표의 쓰기는 소유 모듈의 service 함수로만 한다. SQL(SQLAlchemy 표현식)은 repo와 `ddl`에만 둔다.
+- 정의 변경 진입점(dataset service, 06 §3-5): 순서 고정 = `datasets` 행 잠금 → `def_version` 확인 → 열 변경(원본 열·계산 열 INSERT, 계산 열 결과 형 `type` 갱신) → 정의 변경 훅 → `def_hash` 기록. formula가 직접 쓰는 것은 훅 안의 `formulas`·`formula_deps`와 `ddl` 뷰뿐이고, `dataset_columns`·`def_version`·`def_hash`는 진입점 함수가 쓴다(그래서 훅은 새 열 `id`가 있는 상태에서 불린다). 시작 시 재생성·재시도(05 D10)는 같은 진입점의 "버전을 올리지 않는" 형태다. 행 쓰기의 `datasets` 행 잠금·버전 확인도 dataset service 함수로 감싼다(06 §5).
 - 경계 금지: 브라우저 → DB 직접 호출 금지. 브라우저 → Superset REST API 호출 금지(허용 접근은 Embedded iframe과 새 창 링크 둘뿐, 입장권은 FastAPI가 발급하고 서버가 직접 서명하지 않음). 프런트 API 경로는 `config.ts` 한 곳에서 `${basePath}/api`로 조립하고 하드코딩하지 않는다. 클라이언트가 보낸 `rls`·Superset 숫자 id는 받지 않는다(08). SQL 문자열 조립과 `text()` 금지.
 - 확장점 합격선: 함수 추가 = 함수 사전 항목 1개 + 시험 사례(`03b` 5-2 K6) / 열 타입 추가 = 타입 등록 1곳 / 신원 방식 교체 = `auth` 1곳 / 보기 전환 = 저장 형식 변경 없이 화면만 추가.
 
@@ -79,10 +80,10 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 0 | 공통 기반 | core·auth 스텁(fail-closed)·오류 형식·`/health` 필드·시작 자가 점검·정적 `MetaData` → 셸·라우팅(STRIP=true 딥링크)·`config.ts` | EW-1, EW-3, EW-4(`03b` 5-4) | 모든 쓰기 API가 `current_user`에 의존 |
 | 1 | FU-1a | users·teams·team_members, 최초 관리자 명령, `/api/me`·팀·사용자 → 팀 선택, S6 | 0 | 사람 역할 권한 시험 시작 |
 | 2 | FU-1b | datasets·dataset_columns, `ddl`(등록 + `ds_` 생성 한 트랜잭션), 정의 버전 → S2, S3, Inspector | 1 | `bi-review` 7-4 첫 적용. 열 이름 노출은 `c_<번호>` + Superset 표시 이름(확인됨: 03c A-27, 08 §2-3). `dv_` 생성은 1d의 훅 등록 뒤부터라 1b 단독 단계는 `ds_`만 |
-| 3 | FU-1c | 행 조회, 칸 단위 값 비교 갱신(pg8000 `rowcount` 첫 시험), 붙여넣기 일괄 → 그리드, 붙여넣기 파서 | 2 | 1d와 병렬 가능 |
+| 3 | FU-1c | 행 조회, 칸 단위 값 비교 갱신(pg8000 `rowcount` 첫 시험), 붙여넣기 일괄 → 그리드, 붙여넣기 파서 | 2 | 1d와 병렬 가능: 1c는 `RowViewPort` 기본 구현(계산 열 없음)으로 시작하고 1d가 formula 구현으로 교체 |
 | 3 | FU-1d | formulas, 파서·정적 검사·순환 검사, `dv_`(와 `de_`) 생성·정의 해시·시작 시 재생성, 미리보기, 수식 보기, 오류 칸, 뷰 점검 → 수식 편집기, S5 | 2 | 데이터셋마다 뷰 1개(수식 열이 없어도, 팀 열 포함)를 정의 변경 훅이 만든다 **[제안: §9-2]** |
 | 4 | FU-1e | superset_*, 서비스 계정 등록, 연결 uuid 등록, 입장권 발급(`rls` 빈 목록, 속도 제한) → S7, S8, S9 | 1d | 하위 경로(STRIP true/false) + Embedded 재검증 |
-- EW 대응(`03b` 5-4): EW-1 계정 분리 = 0~1d의 DB 전제, EW-3 Superset 서비스·발급 계정과 EW-4 `bi_guest` = 1e의 전제(모두 Gate ④ 진입 전 완료), EW-5~7 = 문서·통합 검증·reviewer 점검. EW-2(업로드 상한)는 가져오기 단위로 넘긴다. 단 붙여넣기 요청 상한을 2MB로 두려면(§9-2 B안) 현재 nginx 기본 1m이 413을 내므로 `client_max_body_size` 변경(`03b` 4-4 Z8 승인)만 FU-1 EW로 당긴다. 변수 `APP_UPLOAD_MAX_MB`는 이월한다.
+- EW 대응(`03b` 5-4): EW-1 계정 분리 = 0~1d의 DB 전제, EW-3 Superset 서비스·발급 계정과 EW-4 `bi_guest` = 1e의 전제(모두 Gate ④ 진입 전 완료), EW-5~7 = 문서·통합 검증·reviewer 점검. EW-2(업로드 상한)는 가져오기 단위로 넘긴다. 단 붙여넣기 요청을 1MiB보다 크게 허용하려면(§9-2 B안) 현재 nginx 기본 1m이 413을 내므로 `client_max_body_size`를 "요청 상한 + 1MiB"로 바꾸는 것(`03b` 4-4 Z8 승인, 03c X-27 원칙)만 FU-1 EW로 당긴다. 변수 `APP_UPLOAD_MAX_MB`는 이월한다.
 
 ### 7-2. FU-1 다음 단위 순서 제안 (세부 설계 없음, 의존 순서)
 | 단위 | 이유 |
@@ -97,7 +98,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 ## 8. FU-1 합격 기준 개요 (`03b` 5-2에 있는 것만, 상세는 07·08)
 - 수식 미리보기와 뷰 결과의 **불일치 0건**(X-26에서 `CAST` 적용 후에도 남은 22건의 원인 분석 포함, 차분 시험은 07 §6).
 - X-26 주입 사례 10종 + 역슬래시 사례를 **회귀 시험으로 고정**. 완화책 3가지(세션 `standard_conforming_strings` 고정, 역슬래시·제어문자·NUL 거부, 생성 후 재읽기 비교·불일치 시 롤백)와 런타임 DDL `bi_app` 실행을 시험한다.
-- 인증 스텁 fail-closed(`bi-review` 7-5): 스위치 미설정은 꺼짐(기본 false)이고, 스위치가 켜졌는데 `APP_ENV`가 허용 목록(local·test 등) 밖이거나 알 수 없는 값이면 backend가 시작을 거부함을 시험한다. 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별(config.js 변경 없음)하고 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 스위치 이름은 AP-13 승인 전이라 확정하지 않는다.
+- 인증 스텁 fail-closed(`bi-review` 7-5): 스위치 미설정은 꺼짐(기본 false)이고, 스위치가 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test 등) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부함을 시험한다. 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별(config.js 변경 없음)하고 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 스위치 이름은 AP-13 승인 전이라 확정하지 않는다.
 - K6 핵심 함수 전부에 시험 사례가 있고 함수 추가가 사전 항목 1개로 끝난다. K7: 빈 칸은 미입력으로 유지되고 결과도 빈 값(`MIN`·`MAX`·`SUM`·`SUMTAG`은 전파 **[제안: §9-2]**), 글자 비교는 대소문자 무시, 오류 칸은 뷰가 NULL을 돌려주고(계산 열은 저장되지 않음) 화면에서 구별 표시되며 점검 목록에 노출. 03b 5-2 K7 ㄷ의 "빈 값으로 저장"은 계산 열이 저장되지 않는 뷰 설계에서는 이 뜻으로 읽는다 **[제안: 해석]**.
 - K12 열 이름 방식 (나)는 서비스 계정 표시 이름 갱신이 확인됨(03c A-27, 조건부 가능: 전체 열 교체 `PUT`). 합격 기준은 08 P4.
 - 공통 완료 기준은 `feature-unit`, 권한 매트릭스·왕복 시험은 EW-1 완료 기준(`03b` 3-6 BY4)을 따른다. Superset 쪽 합격 기준 P1~P4는 08 §6.
@@ -114,12 +115,12 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | AP-10 | `bi-review` 7-4 문구: `Identity()` 암묵 시퀀스(`row_id`)를 "시퀀스 금지"의 예외로 명시(런타임 Alembic `Operations` 허용은 7-4에 이미 있어 06 AP-10 ②는 승인 항목이 아님) | 06 AP-10 | 06 승인 때 |
 | AP-11 | `03-migration-tool.md` D2 안전장치를 "정적 표 대상"으로 좁히는 문구(선택, 현행 유지도 가능) | 06 AP-11 | 06 승인 때 |
 | AP-12 | backend → Superset 내부 주소(코드 상수 제안 또는 새 변수), `SUPERSET_APP_ROOT` 전달(조건부) | 08 AP-12 | EW-3 |
-| AP-13 | 새 환경변수 후보 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 운영 판별 방식: `APP_ENV` 코드 기본값이 `local`이라 비어 있으면 켜질 위험이 있으므로 허용 목록 밖·알 수 없는 값이면 거부하는 fail-closed(§8). 이름은 승인 전 확정 아님 | 05 AP-1 | FU-1a 착수 전 |
+| AP-13 | 새 환경변수 후보 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 운영 판별 방식: `APP_ENV` 코드 기본값이 `local`이라 비어 있으면 켜질 위험이 있으므로 스위치가 켜졌을 때 `APP_ENV`가 명시적으로 설정되고 허용 목록 안일 때만 시작을 허용하는 fail-closed(§8). 이름은 승인 전 확정 아님 | 05 AP-1 | FU-1a 착수 전 |
 | AP-14 | 이 문서 부록 A의 이름·용어 추가·변경 확인: `PERIOD_CONFLICT`·`WRITE_BUSY`와 05 오류 코드 사전, `de_`/`e_`, `row_id`·`team` 예약, `bi_author`/`bi_author_schema`, 셀 "오류 코드", `SUMTAG`, `RowViewPort`, 시작 자가 점검 항목 추가 | 05 AP-2, 06 §2, 07 §10, 08 §5 | 04 승인 때 |
 | AP-15 | 새 런타임 의존성(패키지·라이선스 확인 뒤 착수 때 요청): backend `lark`, frontend 라우터·AG Grid Community·Superset Embedded SDK. `httpx`는 승인됨 | 07 §10, 08 §7 | FU-1 착수 때 |
 | AP-16 | 조건부(필요해질 때 보고 후 적용): `superset-init` 확장(서비스·발급 계정, `bi_author*` 생성; `bi_guest`와 그 설정은 `03b` 4-2 Z2로 승인됨), 발급 전용 계정 변수 이름 확정, compose `tmpfs`/`mem_limit` | 08 §7 | EW-3·EW-4 |
 | AP-17 | 에이전트 모델 재판단(FU-1 착수 전). 제안만 하며 승인 전에는 바꾸지 않음 | - | FU-1 착수 전 |
-- 승인 항목이 아닌 것: 첫 관리자 서버 명령은 `03b` 5-2 K3 ㄷ로 결정됐고(새 환경변수 없음) 운영 서버에서 실행 가능한지만 운영자 확인 항목이다(`deploy-coordination.md` 35번). revision `downgrade`의 `op.drop_table`에 필요한 `DROP_APPROVED` 기록은 기존 D2 규칙의 적용일 뿐 새 승인이 아니다. 정규식 평가 의존성은 FU-1 밖(§10).
+- 승인 항목이 아닌 것: 첫 관리자 서버 명령은 `03b` 5-2 K3 ㄷ로 결정됐고(새 환경변수 없음) 운영 서버에서 실행 가능한지만 운영자 확인 항목이다(`deploy-coordination.md` 35번). revision `downgrade`의 `op.drop_table`에 필요한 `DROP_APPROVED` 기록은 기존 D2 규칙의 적용일 뿐 새 승인이 아니다. 정규식 평가 의존성은 FU-1 밖(§10). 이 표에 없는 AP 번호는 결번이다: AP-3 정규식 의존성(후속), AP-4 위 설명, AP-6 해소(직접 서명 폴백 불채택), AP-7 브라우저 자동화 개발 의존성(필요해질 때), AP-8 작성자 계정 자동 생성(미채택).
 
 ### 9-2. 사용자 확인이 필요한 [제안] 모음 (문서 간 중복 제거, 항목 뒤는 출처)
 | 분류 | 제안 | 출처 |
@@ -127,9 +128,9 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 권한 | 정의 담당자도 데이터 입력 가능 **[미답]** / 관리자는 팀 소속 역할 없이는 정의·입력 권한 없음 / 오류 칸 목록(D7)은 읽기 공개 | 06 §4-1, 05 §1·D7 |
 | 단위·구조 | FU-1을 Skill 단위 1a~1e로 분할 / 수식이 없어도 데이터셋마다 `dv_` 뷰 1개 / 기준 날짜 열이 없는 데이터셋은 "같은 기간 하나·기간 정렬" 규칙이 없음 | 04 §6·§7, 06 §3-3·§3-4 |
 | 값 표현 | `number`는 십진 문자열 `"1234.50"`·미입력 `null`(일반 JSON 숫자 기본값과 다름) / 임시 행은 화면 메모리 / 글자 NFC 정규화·상수 200자·서식 문자 거부 / 표시 이름 길이 상한(팀 50·데이터셋 100·열 100자)과 열 이름 금지 문자 / `teams.code` 형식 `^[a-z0-9_]{1,32}$` | 05 §1·§2-3, 06 §2, 07 §1·§3·§4-2 |
-| 붙여넣기 상한 | **A(05 기본값)** 요청 1MiB 이하·5,000행 / **B** 2MB 유지 + nginx `client_max_body_size` 변경을 FU-1 EW에 포함(현재 기본 1m이면 1MiB 초과는 413) | 05 C4, 03c X-27, §7-1 |
-| 수식 | `MIN`·`MAX`·`SUM`·`SUMTAG` 빈 칸 전파(대안: 건너뜀) / **오류 판정 구조 E-A 보조 뷰 `de_<번호>`(대안: 포털이 만드는 판정 SELECT, DB 객체 없음)** / 함수 `SUMTAG`·`[열 이름]` 문법 / `ROUND*` 자릿수 상수·`&` 숫자 자동 변환 불가·글자 대소 비교 제외 / 열 태그는 숫자 열에 하나 / 미리보기 20행·5초·사용자당 1건 + 전역 동시 상한 / 상수 부분식 오류는 C0가 상수 SELECT로 거부 | 07 §2-2·§3·§3-1·§5, 06 §3-4 |
-| 데이터 모델 | 필수·범위는 앱 검증 / `row_id` 둠 / 열 단위 UPDATE GRANT로 `team_id`·`kind` 불변을 DB가 강제, `type`은 계산 열 결과 형 때문에 갱신 허용(raw 열 type 변경 금지는 앱 규칙) / 열거는 `text` + CHECK, 제약 이름 규칙 / `teams.name` 유일 / 기준 날짜 열·`date_unit`은 행 0개일 때만 변경 / 정의 변경은 `datasets` 행 `FOR UPDATE` 한 가지 잠금 / `bi_data` 소유자 `bi_owner` | 06 §1~§3·§5·§6 |
+| 붙여넣기 상한 | **A(05 기본값)** 요청 1MiB 이하·5,000행 / **B** 1MiB보다 큰 요청(예: 2MB) 허용 + nginx `client_max_body_size`를 "요청 상한 + 1MiB"(2MB면 3m 이상)로 바꾸는 것을 FU-1 EW에 포함. A안에서도 nginx 기본 1m이 먼저 413(JSON 아님)을 내므로 프런트가 JSON이 아닌 413도 처리 | 05 C4, 03c X-27, §7-1 |
+| 수식 | `MIN`·`MAX`·`SUM`·`SUMTAG` 빈 칸 전파(대안: 건너뜀) / **오류 판정 구조 E-A 보조 뷰 `de_<번호>`(대안: 포털이 만드는 판정 SELECT, DB 객체 없음)** / 함수 `SUMTAG`·`[열 이름]` 문법 / `ROUND*` 자릿수 상수·`&` 숫자 자동 변환 불가·글자 대소 비교 제외 / 열 태그는 숫자 열에 하나 / 미리보기 20행·5초·사용자당 1건 + 전역 동시 상한 / 상수 부분식 오류는 C0가 상수 SELECT로 거부 / **[사용자 확인] 03b 5-2 K7 ㄷ "오류 칸은 빈 값으로 저장"을 "뷰가 NULL을 돌려줌(계산 열은 저장하지 않음)"으로 읽는 재해석** | 07 §2-2·§3·§3-1·§5, 06 §3-4 |
+| 데이터 모델 | 필수·범위는 앱 검증 / `row_id` 둠 / 열 단위 UPDATE GRANT로 `team_id`·`kind` 불변을 DB가 강제, `type`은 계산 열 결과 형 때문에 갱신 허용(raw 열 type 변경 금지는 앱 규칙) / 열거는 `text` + CHECK, 제약 이름 규칙 / `teams.name` 유일 / 기준 날짜 열·`date_unit`은 행 0개일 때만 변경 / 정의 변경은 `datasets` 행 `FOR NO KEY UPDATE` 한 가지 잠금 / 행 쓰기에 `expected_version` 일치 요구(03b Y8의 정의 편집 범위 밖이며, 열 추가 때 열려 있는 그리드 입력이 409가 되는 영향) / 기준 날짜 열은 `required`로 취급 / `bi_data` 소유자 `bi_owner` | 06 §1~§3·§5·§6 |
 | API | `/health` 새 필드는 메모리 값(worker 1개 전제) / `E3`가 `embedded_uuid`를 모두에게 노출(입장권 요청은 포털 id만 받음) / `E1` 상태는 읽기 공개·`last_error`는 관리자 / `LAST_ADMIN` 보호 / 검사(D2) 실패도 200 / 스텁 쿠키 방식 / D6 응답에 원문 없음 / `WRITE_BUSY` 재시도 코드 / 기존 행 수정은 `expected` 필수 | 05 §1·§2·§3·§6 |
 | Superset | guest 조건부 2권한은 FU-1 미포함·`can_time_range`는 포함 / 발급 계정 REST(JWT) 2권한 / 작성자 역할 `bi_author`·`bi_author_schema` / 가상 데이터셋 이름 형식·공개 안내 문구 / 서비스 계정 이름 변경 금지 / 훅은 Superset 쪽 임베드 설정으로 확인 / 대시보드 PDF·이미지 내보내기는 클라이언트가 만들어 서버가 못 막음(수용 여부) | 08 §2~§5 |
 
@@ -161,11 +162,12 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 용어 | 뜻 | 식별자·표기 |
 | --- | --- | --- |
 | 팀 | 데이터셋 소유 단위. 관리자가 만들고 소속을 지정, 한 사용자가 여러 팀에 속할 수 있음 | `teams`, 불변 `code`(필터 값), 바꿀 수 있는 `name` |
-| 관리자 / 정의 담당자 / 입력자 | 팀·소속 관리 등 전체 권한 / 팀의 데이터셋 생성·열·수식 편집 / 데이터 입력 | `users.is_admin` / `team_members.role` = `definer` / `entry`. 관리자의 정의·입력 권한은 팀 소속 역할로만, 정의 담당자의 입력 가능 여부는 **[제안·미답: §9-2]** |
+| 관리자 / 정의 담당자 / 입력자 | 팀·소속·연결 관리, 모든 열람(정의·입력 권한은 아님) / 팀의 데이터셋 생성·열·수식 편집 / 데이터 입력 | `users.is_admin` / `team_members.role` = `definer` / `entry`. 관리자의 정의·입력 권한은 팀 소속 역할로만, 정의 담당자의 입력 가능 여부는 **[제안·미답: §9-2]** |
 | 열람자 | 인증된 모든 사용자(전 팀 데이터·수식 열람) | 별도 역할 값 없음(`03b` 1-3) |
 | `current_user` | 접속자를 알려 주는 단 한 곳, 스텁은 개발·시험용 신원 흉내 | `CurrentUser`(id, display_name, is_active, is_admin, memberships) (제안) |
 | 데이터셋 | 화면 용어("표"·"뷰"는 화면에서 안 씀). 내부 번호 = `datasets.id` | 원본 표 `bi_data.ds_<번호>`, 수식 뷰 `bi_data.dv_<번호>` (결정 2-6) |
-| 열 | 원본 열(`raw`) 또는 계산 열(`formula`). 내부 번호 이름과 표시 이름이 따로 있음. 표시 이름은 `[` `]` `"`·제어문자를 쓸 수 없고 길이 상한이 있음 [제안] | `c_<번호>`(번호 = `dataset_columns.id`), `display_name`. Superset에는 `c_<번호>` + 표시 이름(`verbose_name`, 확인됨: 03c A-27) |
+| 열 | 원본 열(`raw`) 또는 계산 열(`formula`). 내부 번호 이름과 표시 이름이 따로 있음. 표시 이름은 `[` `]` `"`·제어문자를 쓸 수 없고 `team`·`팀`·`row_id`·`행 번호`는 예약, 길이 상한이 있음 [제안] | `c_<번호>`(번호 = `dataset_columns.id`), `display_name`. Superset에는 `c_<번호>` + 표시 이름(`verbose_name`, 확인됨: 03c A-27) |
+| `RowViewPort` | entry가 행 조회에서 계산 열 값·오류를 받는 `core` 포트. formula가 `dv_`와 `de_`를 `row_id`로 결합해 구현하고, 1d 전에는 계산 열 없는 기본 구현 | 07 §3-1·§9 (제안) |
 | 행 고유 번호 / 임시 행 | 행을 지정하는 번호(갱신·충돌 응답·순서 안정) / 필수 칸을 다 채우기 전 화면 메모리에만 있는 새 행(서버·`ds_`에 상태 없음) | `row_id` (bigint identity, PK, 제안) / draft(05 §2-3, 제안) |
 | 기준 날짜 열 / 날짜 단위 | 기간을 정하는 `date` 열(이전 행·기준값·요약 연결에 쓸 때만 필수) / 일·월·연, 시각 없음, 기간의 첫날로 저장 | `datasets.base_date_column_id`, `datasets.date_unit` (결정 2-2, 2-3 W3) |
 | 한 기간 = 한 행 | 저장·입력 모두 기간 하나가 행 하나, 항목은 열 | 기준 날짜 열이 있으면 같은 기간 행은 기본 하나(`03b` 3-4 Y9) |
@@ -178,7 +180,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 수식 보기 / 미리보기 | 계산 열의 수식을 열 이름으로 풀어 읽기 전용 표시(AST에서 생성, `formulas.expression`은 보관용 원문) / 저장 전 일부 행 계산(뷰와 같은 변환기) | 07 §9 (결정 1-6, 2-3 W7) |
 | 정의 버전 / 정의 해시 | 데이터셋 정의 변경 번호(충돌 확인) / 뷰 SQL 구조 해시(시작 시 재생성 판단) | `datasets.def_version`, `datasets.def_hash` (결정 3-4, 2-3 W2) |
 | 정적 표 / 동적 객체 | Alembic이 관리하는 포털 표(`public`, 등록 표 포함) / 런타임 DDL이 만드는 `ds_`·`dv_`·`de_`(`bi_data`) | 소유 계정 `bi_owner` / `bi_app` (결정 2-3 W1, 3-2) |
-| 서비스 계정 / 발급 전용 계정 | Superset 데이터셋 등록·새로고침용 / 입장권 발급용(서로 분리) | `SUPERSET_SERVICE_USER`·`_PASSWORD`(결정) / `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(후보, 08에서 확정) |
+| 서비스 계정 / 발급 전용 계정 | Superset 데이터셋 등록·새로고침용 / 입장권 발급용(서로 분리) | `SUPERSET_SERVICE_USER`·`_PASSWORD`(결정) / `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(후보, 08 승인 때 확정) |
 | 입장권(guest token) / embedded uuid | 대시보드 임베드용 5분짜리 접속 허가, `rls`는 항상 빈 목록 / 관리자가 수동 등록하는 임베드 번호 | `superset_dashboards.embedded_uuid` (결정 4-2) |
 | 가상 데이터셋 | `dv_` 뷰를 읽는 Superset 데이터셋(읽기 쉬운 이름) | 이름 `[<팀 표시 이름>] <데이터셋 표시 이름>` (제안, 결정 3-3 Y6) |
 

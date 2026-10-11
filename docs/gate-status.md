@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(FU-1 범위로 축소, 04~08 초안·A-27 확인 보고 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(04~08 초안 작성·reviewer 검토 2회 완료, 사용자 확인 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -270,3 +270,10 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **내용:** `_workspace/gate3/round5-options.md`(Git 제외): K-1 결정 총정리표(영역 9개, 약 100행), K-2 충돌·빈틈 39건, K-3 04~08 문서별 목차·기능↔Skill 대응·작성 순서, K-4 질문 K1~K13(하위 포함 약 26건)과 기본값 BK1~BK51·승인 필요 목록 AP-1~11, K-5 초안 작성 계획(S0~S9), K-6 Gate ④ 진입 전 선행 작업(EW-1~7), K-7 열린 항목. reviewer가 2회 검토했고 지적을 반영했다. 사용자 결정은 아직 없다.
 - **정정:** 인계 설계 4건은 4라운드 BZ12~BZ14로 이미 승인되어 5라운드 범위에서 제외된다. 5라운드는 "설계 일괄 확인(K)"과 04~08 초안 작성 계획이다.
 - **상태:** 5라운드 질문 보고 후 사용자 결정 대기. 04~08 초안은 아직 작성하지 않았다.
+
+### Gate ③ 04~08 초안 (FU-1 범위, 2026-10-11)
+- **파일:** `docs/decisions/04-modules.md`(212줄), `05-api-contract.md`(150), `06-data-model.md`(143), `07-formula-engine.md`(164), `08-superset-embedding.md`(106). 합계 775줄(800줄 이내). 모두 "상태: 초안(승인 전)". 후속 항목은 각 문서 끝에 항목만 나열.
+- **작성 순서:** 04 골격·부록 A 용어 사전 → 06·07·08(병렬) → 05 → 04 마무리 → reviewer 교차 검토. 에이전트 모델 변경 없음(architect·reviewer=sonnet).
+- **검토:** reviewer 2회(1차: 차단 0·중요 10·권장 20, 2차: 차단 0·중요 6·권장 10)를 모두 반영했다. 3차 검토는 하지 않았다(2차 반영분은 architect 자체 정합 확인만).
+- **A-27 확인:** 조건부 가능(서비스 계정이 전체 열 교체 `PUT`으로 표시 이름 설정, `columns`는 병합이 아니라 교체). 03c A-27, 04~08에 반영 완료.
+- **사용자 확인이 필요한 [제안] 모음:** `04-modules.md` §9-2. 승인 필요 통합 표: §9-1. 기능 축소 기록: §10.
