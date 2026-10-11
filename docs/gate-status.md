@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(3라운드 결정·실험 완료, 4라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(4라운드 결정 완료, X-25~X-29 수행·5라운드 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -143,7 +143,7 @@
 | --- | --- |
 | 업무 현실 | 팀 탭은 "행 = 항목, 열 = 월". 데이터 단위는 월이 가장 흔하고 일부 연, 최소 단위는 일(시각 없음). 5개 팀, 팀당 10개 이내(최대 약 50). 기준값은 숫자와 글자 모두 |
 | 저장·입력 | "한 기간 = 한 행, 항목 = 열"로 고정. 입력 화면도 같음. 행·열 전환 보기는 첫 버전 제외(나중에 추가할 수 있게 설계를 막지 않음) |
-| 이관 | 웹 밖의 명령줄 전처리 도구("월 = 열" → "월 = 행", 원본 입력 행만, 계산 행 제외). 사용법 Skill을 둔다. 위치와 순서는 04-modules.md에서 제안. 웹 가져오기는 "표 형태"만 |
+| 이관 | ~~웹 밖의 명령줄 전처리 도구~~ → **4라운드(2026-10-11)에서 범위 제외**: 기존 팀 탭은 자동 변환하지 않고 새 시스템에서 데이터셋을 처음부터 다시 정의한다. 웹 가져오기는 "표 형태"만(유지) |
 | 날짜 단위 | 데이터셋마다 날짜 단위(일/월/연) 속성, 기준 날짜는 기간의 첫날로 저장, 입력 화면이 단위에 맞게 표시·검증 |
 | W1 D2 | 전용 schema 하나(S-1) |
 | W2 | (a) schema 단위 기본 권한 부여 (b) 서버 시작 시 정의 해시 비교 후 재생성, 실패는 헬스 체크 |
@@ -189,6 +189,18 @@
 | 기본값·승인 (BY1~BY11, Y13) | BY1~BY11 모두 이의 없음(`TZ=Asia/Seoul` 유지, 날짜 열 이름 통일 안 함 + 작성자 안내문에 "차트에 시간 필터 필요"). 뷰 재생성 실패는 기존 `/health` 본문에 표시. D5 해석 변경 수용. 실험 X-14, X-15, X-17, X-18, X-20, X-21, X-22, X-23, X-24 승인(X-16 불필요, X-19는 8번 후). X-18에서 `frame_options`/CSP 변경이 필요해지면 결과와 함께 따로 승인 요청. 조건부 설정 변경(작성자 역할 `can_set_embedded`, `superset-init` 확장, backend의 `SUPERSET_APP_ROOT` 전달)은 필요해지는 시점에 내용과 이유를 보고하고 적용 |
 
 **4라운드:** G guest 역할 권한, I RLS 규칙, J `CREATE VIEW` 리터럴, H 업로드 한도, 인계 설계.
+
+### Gate ③ 3라운드 후속·4라운드 결정 (2026-10-11)
+상세 원문과 근거는 `docs/decisions/03b-gate3-round-decisions.md` 4절.
+
+| 항목 | 결정 |
+| --- | --- |
+| 3라운드 후속 | Z0: `bi_readonly` 읽기 권한은 마이그레이션에 유지 + db-bootstrap에 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE` 한 줄 추가 승인. Z13: Superset 작성 화면은 새 창 유지. Z14: 팀 필터는 모두 같은 기본값 |
+| G·I (Z1~Z5) | guest 권한은 최소 21개에서 X-25로 줄임, CSV·이미지 내보내기 불허. `superset-init`이 매 기동 멱등 생성, `GUEST_ROLE_NAME=bi_guest` 승인. guest token은 서버가 Superset 발급 API를 호출하고 발급 전용 새 Superset 계정(환경변수 2개 승인, `GUEST_TOKEN_JWT_AUDIENCE`는 필요할 때만), embedded uuid는 관리자 수동 입력. `rls`는 서버가 항상 빈 목록 + Superset 검증 훅(`superset_config.py` 설정 추가 승인). 유효 시간 기본 5분 |
+| J (Z6·Z7) | Z6 기본값 "보류"(X-26 결과 후 (가) 내장 부품 + 검증 / (나) 별도 표 저장 중에서만 결정, (다) 금지 제외). Z7: 런타임 DDL은 SQLAlchemy 내장 구성요소만·한 모듈·`text()` 금지·객체 종류 허용 목록(표·뷰·인덱스·제약). `bi-review` 7-4 승인 |
+| H (Z8~Z11) | 업로드 10MB, 새 환경변수 `APP_UPLOAD_MAX_MB` 하나로 공유, 로컬 nginx `client_max_body_size` 변경 승인. 전역 동시 1건 + 사용자당 1건, 행 100,000 / 열 100 / 셀 2,000,000 / 붙여넣기 5,000행, 발급 API 사용자별 속도 제한(429) 승인. 동기 처리 + 확정 때 재전송. 원본 파일은 이름·크기·해시 정보만 보관. 브리프 4.7 이탈 승인(pandas 미사용, openpyxl read-only) |
+| 기본값·실험 | BZ1~BZ20 이의 없음. X-25~X-29 실행 승인. `tmpfs`/`mem_limit` 변경은 내용·이유 보고 후 적용 |
+| 범위 변경 | 기존 엑셀 이관용 전처리 도구 제외(과거 자료 일괄 이관이 필요해지면 추가). U-1·U-2는 세션이 만든 합성 샘플(`docs/samples/`)로 대체하고 "실제 자료로 검증하지 않음"을 한계로 기록 |
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.

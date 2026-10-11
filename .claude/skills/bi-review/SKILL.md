@@ -74,6 +74,11 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 우리 버전(PostgreSQL 16, Superset 6.1.0 등)과 다른 버전의 문서를 근거로 삼았다면 그 사실이 적혀 있는지 본다.
 - 사실 확인에 설계안·추천이 섞여 있으면 지적한다.
 
+### 7-4. 런타임 동적 DDL (차단, 2026-10-11 4라운드 결정 Z7)
+- 서비스가 실행 중에 사용자 데이터 표·뷰를 만들고 바꾸고 지우는 코드는 **SQLAlchemy 내장 구성요소**(`CreateTable`, `DropTable`, `CreateIndex`, `CreateView`, `DropView`, Alembic `Operations` 등)만 쓰고 **한 모듈 안에만** 둔다. 그 모듈 안에서도 `text()`와 `exec_driver_sql`로 SQL 문자열을 실행하거나 f-string·`%`·`.format()`·`+`로 SQL을 조립하면 차단이다. 모듈 밖에서 `literal_binds`를 쓰는 것도 차단이다.
+- 이름은 번호로 만든 이름(`ds_<번호>`, `dv_<번호>`)만 쓴다. 만들 수 있는 **객체 종류는 허용 목록(표·뷰·인덱스·제약)** 이다. `bi_data`에 함수·시퀀스·타입·권한 부여(`GRANT … TO PUBLIC` 등)를 만드는 코드는 차단이다(03c X-15: `bi_app`이 만들 수 있고 `bi_readonly`가 함수를 실행할 수 있어 권한 상승 경로가 됨). 열 타입 변경·열 이름 변경·`DROP … CASCADE`는 허용 목록 안의 동작이다.
+- 수식 속 글자 상수를 뷰에 넣는 방식은 Z6(X-26 결과 후 결정)이 확정되기 전에는 구현하지 않는다. 확정 후에는 입력 검증(제어문자·역슬래시 금지, 길이 제한)과 라운드트립 확인을 점검한다.
+
 ### 8. 파괴적 명령 (차단)
 - 스크립트나 문서가 다음을 실행하도록 쓰지 않았는지 확인한다: `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`
 

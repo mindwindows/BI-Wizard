@@ -61,3 +61,8 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 - `feature-unit`: 완료 기준
 - `product-skill-authoring`: 기능 Skill 작성
 - `modularize`: 계약과 모듈 경계
+
+## 4라운드 결정 반영 (2026-10-11, 구현은 Gate ④)
+- **런타임 DDL:** SQLAlchemy 내장 구성요소만, 한 모듈, `text()`·`exec_driver_sql` 금지, 객체 종류는 표·뷰·인덱스·제약(`bi-review` 7-4).
+- **guest token:** 서버가 Superset 발급 API를 호출하고(발급 전용 Superset 계정), `rls`는 항상 빈 목록, 대시보드 id는 포털 등록 표의 embedded uuid(관리자 수동 입력)만 쓴다. 발급 API는 사용자별 속도 제한(429)을 둔다.
+- **가져오기:** openpyxl read-only(pandas 미사용), 업로드 상한 `APP_UPLOAD_MAX_MB`(기본 10), 전역 동시 1건 + 사용자당 1건, 행 100,000 / 열 100 / 셀 2,000,000, 동기 처리 + 확정 때 재전송, 원본 파일은 이름·크기·해시만 보관.

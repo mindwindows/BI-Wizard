@@ -95,3 +95,8 @@ D2는 **전용 schema 하나(S-1)** 로 결정됐다: 사용자 데이터셋 원
 - **D5 의미 변경(승인):** 첫 실제 revision의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다. 왕복 테스트(upgrade → downgrade → upgrade)는 정적 표와 권한 상태가 복원되는지를 검증하며, "빈 DB에서 모든 객체가 사라진다"는 보장은 하지 않는다. 운영 DB에는 여전히 `downgrade`를 쓰지 않는다.
 - **B10 변경(승인):** 등록(정적 표 `INSERT`) + 물리 표·뷰 + 권한 부여를 한 트랜잭션으로 처리하고 시작 시 대조는 안전망으로 유지한다(03c X-1).
 - **적용 시점:** 구현은 Gate ③ 설계 후 Gate ④ 진입 전(env-engineer).
+
+## 4라운드 후속 결정 (Z0, 2026-10-11, 사용자 결정)
+- **`bi_readonly` 읽기 권한 부여는 마이그레이션에 둔다(기존 "권한 부여 시점" 문구 유지).** `USAGE ON SCHEMA bi_data`와 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`는 `bi_owner`로 실행하는 마이그레이션의 고정 SQL이다(이름이 상수라 D3 위반이 아니다).
+- **db-bootstrap에 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE` 한 줄(고정 SQL)을 추가한다(승인).** 근거: 03c X-14, `FOR ROLE bi_app`은 `bi_owner`가 `bi_app`의 **상속 멤버**일 때만 동작(`INHERIT FALSE`는 거부). `bi_owner`는 `bi_app`의 일상 권한을 상속한다(`bi_owner`가 어차피 정적 표 소유자라 실질 증가는 `bi_app`이 `bi_data`에 가진 권한 정도). 매 기동 반복 실행 시 동작은 X-29에서 확인한다.
+- 5-(f) 왕복 테스트는 이 선택에 따라 복원 대상에 `bi_readonly` 읽기 권한(기본 권한)을 **포함**하고, db-bootstrap이 만든 멤버십·`bi_data` schema는 **제외**한다.

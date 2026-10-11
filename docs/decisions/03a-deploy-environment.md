@@ -86,6 +86,13 @@ Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 최소 �
 - **DB 시간대:** `TZ=Asia/Seoul` 유지(회사 시간대 확인됨).
 - **`/health` 응답:** 기본 경로(`/health`, `/health/db`)는 그대로, 응답 필드만 추가(`views`, `views_failed_count`, `public_create`, `db_timezone`).
 
+## 5-2. 4라운드 결정 반영 (2026-10-11, 사용자)
+상세는 `03b-gate3-round-decisions.md` 4절. 이 문서와 관련된 것만 요약한다.
+- **새 환경변수(승인):** `APP_UPLOAD_MAX_MB`(업로드 상한 10MB, 서버·프록시·화면 공유), 발급 전용 Superset 계정 변수 2개, 조건부 `GUEST_TOKEN_JWT_AUDIENCE`(X-28에서 필요할 때만).
+- **기준선과 다른 설정(승인):** `GUEST_ROLE_NAME=bi_guest`, `GUEST_TOKEN_VALIDATOR_HOOK`, 로컬 nginx `client_max_body_size`. 구현은 Gate ④ 진입 전 env 작업.
+- **compose:** `tmpfs`/`mem_limit` 변경이 필요해지면 내용과 이유를 보고하고 적용한다. 가져오기 한도·메모리 설계 기준은 backend `mem_limit` 1g.
+- **포털·Superset origin:** 포털 안 iframe은 도입하지 않지만(Z13 새 창 유지), Embedded 대시보드는 같은 origin 가정(`deploy-coordination.md` 9번)이 필요하다(03c X-18: 다른 호스트면 `/embedded/`까지 차단).
+
 ## 6. 열린 사항
 
 - 메인 플랫폼 프록시의 실제 동작, 실제 경로 값 등은 `docs/deploy-coordination.md`.

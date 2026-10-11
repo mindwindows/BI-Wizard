@@ -60,6 +60,10 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 28 | **인증·신원 방식 (미결정 8번) 운영자 질문 20개** | 메인 플랫폼이 사용자 신원을 어떻게 넘기는지 등 20개 질문을 `docs/operator-questions.md`에 모았다(핵심 10개 표시). 사용자가 검토해 직접 답하고 남은 것은 운영자에게 전달한다. 답을 받으면 8번 방식과 새 환경변수(적용 전 승인)를 정한다. 이전까지 포털은 `current_user` 한 곳으로 격리하고 로컬은 스텁 신원으로 진행한다(Gate ③ 1라운드 U1) | 협의 필요(8·14·15·20번과 함께) | - |
 | 29 | **`POSTGRES_USER` 의미 축소(운영 가이드 기준선과의 의도적 차이)와 새 환경변수** | 3라운드 결정(2026-10-11)으로 DB 계정을 분리한다: `bi_owner`(마이그레이션·정적 표 소유), `bi_app`(런타임, `bi_data`에만 `CREATE`), `bi_readonly`(Superset). `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **이미지 슈퍼유저 전용**이 되어 backend·migrate는 더 이상 이 계정으로 접속하지 않는다(운영 가이드의 `POSTGRES_USER`는 앱 계정 의미라 다름). 새 비밀번호 변수: `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`. 배포 때 운영 가이드의 `.env`/Secret 틀에 이 변수들을 추가해야 한다. 구현은 Gate ④ 진입 전 | 협의 필요(구현 전) | - |
 | 30 | **Superset 서비스 계정 변수** | 서버가 Superset에 데이터셋을 등록·새로고침하는 전용 Superset 계정(최소 권한). 새 환경변수 `SUPERSET_SERVICE_USER`, `SUPERSET_SERVICE_PASSWORD`(3라운드 승인). 서버 이미지에 `httpx`가 운영 의존성으로 들어간다(허용형 라이선스). 구현은 Gate ④ | 협의 필요(구현 전) | - |
+| 31 | **업로드 상한 `APP_UPLOAD_MAX_MB`와 프록시 본문 상한** | 4라운드 결정(2026-10-11): 업로드 상한 10MB, 새 환경변수 `APP_UPLOAD_MAX_MB` 하나를 서버·프록시·화면이 공유한다. 메인 플랫폼 프록시의 요청 본문 상한(예: nginx `client_max_body_size`)을 **앱 상한 + 약 1MB 여유**(예: 11MB 이상)로 맞춰야 한다(7번과 연결). 로컬 compose의 nginx도 같은 값으로 바꾼다(구현은 Gate ④ 진입 전) | 협의 필요(구현 전) | - |
+| 32 | **Superset guest token 발급 계정 변수** | 서버가 Superset 발급 API를 호출할 때 쓰는 발급 전용 Superset 계정(데이터셋 등록 계정과 분리). 새 환경변수 2개(후보 `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD`, 4라운드 승인). 발급 API는 사용자별 속도 제한(429)을 둔다. Secret 주입 방식(11번)에 포함해야 한다 | 협의 필요(구현 전) | - |
+| 33 | **Superset 설정 추가 3건** | `GUEST_ROLE_NAME=bi_guest`(최소 권한 커스텀 역할을 `superset-init`이 생성), `GUEST_TOKEN_VALIDATOR_HOOK`(발급 시 `rls` 비어 있음·resource type 확인), 로컬 `GUEST_TOKEN_JWT_AUDIENCE`는 X-28 결과에 따라 필요할 때만. 4라운드 승인(기준선과 다른 설정). 임베드 대시보드의 CSV·이미지 내보내기는 허용하지 않는다 | 협의 필요(구현 전) | - |
+| 34 | **가져오기 처리와 메모리** | 가져오기는 전역 동시 1건·사용자당 1건, openpyxl read-only(pandas 미사용). 메모리 8GB(5번) 안에서 backend `mem_limit` 1g 기준으로 설계하고, X-27 실측 결과에 따라 `mem_limit`/`tmpfs` 변경이 필요해지면 내용과 이유를 보고하고 적용한다. 메인 플랫폼 프록시 타임아웃(10번)이 60초 미만이면 확정 적재 목표(30초) 재검토 | 실측 후 보고 | - |
 
 ## 이미 확인된 사항
 
