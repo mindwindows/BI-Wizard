@@ -32,7 +32,7 @@ model: sonnet
 - 실제 하위 경로 값 등 웹서버 배포 때 관리자와 맞출 항목이 새로 생기면 `docs/deploy-coordination.md`에 추가하도록 메인에게 알린다.
 - 완료 후 Environment Ready 체크리스트(env-bootstrap 스킬)를 항목별로 자가 점검하고, 통과/실패/미실행을 표로 보고한다.
 
-- Gate ②에서는 `POSTGRES_USER`를 앱·migrate 계정으로 쓴다. 이 구성은 Gate ④ 진입 전에 최소 권한 앱 계정으로 분리되어야 하므로 README/AGENTS.md에 "Gate ② 한정 구성"이라고 적는다.
+- `POSTGRES_USER`는 이미지 슈퍼유저 전용(db-bootstrap·healthcheck)이다. backend=`bi_app`, migrate=`bi_owner`(03b 3절)로 접속하며 두 서비스에 슈퍼유저 변수를 전달하지 않는다.
 - 우리 코드의 운영 런타임 파이썬·JS 의존성은 허용형 라이선스(MIT, BSD, Apache 2.0, PSF)만 쓴다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소의 LGPL·MPL은 수정·재배포하지 않는 조건으로 허용된다(사용자 결정, 2026-10-11). 추가한 패키지의 라이선스와 위치를 PyPI/npm 메타데이터로 확인해 보고하고, 새 "주의" 항목은 `docs/deploy-coordination.md`의 "배포 전 회사 오픈소스 정책 확인" 표에 추가한다. psycopg2/psycopg(LGPL)는 backend에 쓰지 않는다(예: pg8000 BSD, asyncpg Apache 2.0). Superset 이미지가 포함하는 드라이버의 라이선스는 별도로 보고한다.
 - Dockerfile에서 `apt-get`을 쓰지 않는다(이 세션에서는 컨테이너 안에서 프록시·CA가 없어 실패한다). 이 세션에서만 필요한 빌드 우회는 저장소에 넣지 않고 `_workspace/qa/`의 임시 override 파일로 처리한다.
 

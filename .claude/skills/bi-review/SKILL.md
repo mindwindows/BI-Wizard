@@ -30,7 +30,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 문자열 연결, f-string, `%` 포맷, `.format()`으로 SQL을 만들지 않았는지 확인한다.
 - SQLAlchemy 표현식을 썼는지 확인한다.
 - **예외(D3, `docs/decisions/03-migration-tool.md`):** 마이그레이션 디렉터리(`backend/migrations/`) 안에서만 **보간이 전혀 없는 고정 SQL 문**(`op.execute("...")` 등)을 허용한다. 마이그레이션 안에서도 변수 보간은 차단이다.
-- **예외 2(부트스트랩, 승인 2026-10-11):** `backend/bootstrap/`의 SQL에서만 **비밀번호 리터럴**(`PASSWORD :'var'`: `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, 그리고 3라운드에서 승인된 앱 계정용 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`. 2026-10-11 문구 변경 승인, 구현은 Gate ④ 진입 전)에 한해 psql의 `:'var'` 인용 보간을 허용한다. 비밀번호는 `\getenv`로 읽고 비어 있으면 실패해야 한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간, 비밀번호 외 값의 보간은 차단**이다. 역할·DB 이름(`bi_readonly`, `superset_meta`, `superset`)은 상수 리터럴이어야 한다.
+- **예외 2(부트스트랩, 승인 2026-10-11):** `backend/bootstrap/`의 SQL에서만 **비밀번호 리터럴**(`PASSWORD :'var'`: `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, 그리고 3라운드에서 승인된 앱 계정용 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`. 2026-10-11 문구 변경 승인, EW-1에서 구현됨)에 한해 psql의 `:'var'` 인용 보간을 허용한다. 비밀번호는 `\getenv`로 읽고 비어 있으면 실패해야 한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간, 비밀번호 외 값의 보간은 차단**이다. 역할·DB 이름(`bi_readonly`, `superset_meta`, `superset`)은 상수 리터럴이어야 한다.
 - 위 두 경로(`backend/migrations/`, `backend/bootstrap/`) 밖의 raw SQL은 예외 없이 차단이다.
 
 ### 4. 환경변수 (중요)
@@ -61,7 +61,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - **D6 (중요):** 테스트용 PostgreSQL 서비스가 `tmpfs` 데이터이고 compose profile로 평소에는 뜨지 않는지 확인한다. 정리 방법이 `-v` 없는 `docker compose down`인지 본다(점검 항목 8과 같이).
 - **D7 (중요):** Superset 메타데이터가 우리 앱 DB와 **별도 데이터베이스**(`superset`, 소유 `superset_meta`)인지, Superset이 업무 데이터를 읽는 연결이 **읽기 전용 계정**(`bi_readonly`, 쓰기 권한 없음, `default_transaction_read_only=on`)인지 확인한다. Superset 연결 문자열이나 설정에 앱 DB 소유자 계정이 쓰이면 차단이다.
 - **db-bootstrap (중요):** 매 기동 멱등으로 실행되는 일회성 서비스이고(`initdb.d` 미사용), `postgres`(healthy) → `db-bootstrap` → `migrate` → `backend` 순서가 `depends_on`으로 걸려 있는지 확인한다. 스크립트가 두 번 실행해도 오류가 없도록 `\gexec` 조건부 생성 + `ALTER ROLE … PASSWORD`로 작성됐는지 본다.
-- **앱 계정 (Gate ④ 진입 후 차단):** Gate ② 구성은 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·migrate 계정으로 쓰는 것을 허용한다. **Gate ④ 진입 후에는 backend가 슈퍼유저로 접속하는 구성을 차단**한다(최소 권한 앱 계정 분리는 Gate ③에서 설계하고 Gate ④ 진입 전 완료해야 한다). 분리 후에는 `ALTER DEFAULT PRIVILEGES`의 `FOR ROLE` 사용 방식이 재설계됐는지 본다.
+- **앱 계정 (차단, EW-1 구현 완료 2026-10-11):** backend는 `bi_app`, migrate는 `bi_owner`(코드 상수)로만 접속한다. backend·migrate에 이미지 슈퍼유저 변수(`POSTGRES_USER`, `POSTGRES_PASSWORD`)나 상대 계정의 비밀번호가 전달되거나 슈퍼유저로 접속하면 **차단**이다. 마이그레이션의 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app`은 db-bootstrap의 승인된 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`가 있을 때만 쓴다.
 - **접두 처리 변수 (중요):** `APP_PROXY_STRIP_PREFIX`의 기본값이 `false`(접두 유지 전달)인지, `true`/`false` 두 값 모두 로컬에서 검증됐는지 확인한다.
 - 마이그레이션 도구는 Alembic이다. 다른 도구(Flyway, Atlas 등)나 앱 시작 시 `create_all`로 스키마를 만드는 코드가 새로 들어오면 사용자 승인 여부를 확인한다.
 
