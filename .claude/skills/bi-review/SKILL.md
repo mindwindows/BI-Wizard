@@ -30,7 +30,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 문자열 연결, f-string, `%` 포맷, `.format()`으로 SQL을 만들지 않았는지 확인한다.
 - SQLAlchemy 표현식을 썼는지 확인한다.
 - **예외(D3, `docs/decisions/03-migration-tool.md`):** 마이그레이션 디렉터리(`backend/migrations/`) 안에서만 **보간이 전혀 없는 고정 SQL 문**(`op.execute("...")` 등)을 허용한다. 마이그레이션 안에서도 변수 보간은 차단이다.
-- **예외 2(부트스트랩, 승인 2026-10-11):** `backend/bootstrap/`의 SQL에서만 **비밀번호 리터럴 두 곳**(`POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`)에 한해 psql의 `:'var'` 인용 보간을 허용한다. 비밀번호는 `\getenv`로 읽고 비어 있으면 실패해야 한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간, 비밀번호 외 값의 보간은 차단**이다. 역할·DB 이름(`bi_readonly`, `superset_meta`, `superset`)은 상수 리터럴이어야 한다.
+- **예외 2(부트스트랩, 승인 2026-10-11):** `backend/bootstrap/`의 SQL에서만 **비밀번호 리터럴**(`PASSWORD :'var'`: `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, 그리고 3라운드에서 승인된 앱 계정용 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`. 2026-10-11 문구 변경 승인, 구현은 Gate ④ 진입 전)에 한해 psql의 `:'var'` 인용 보간을 허용한다. 비밀번호는 `\getenv`로 읽고 비어 있으면 실패해야 한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간, 비밀번호 외 값의 보간은 차단**이다. 역할·DB 이름(`bi_readonly`, `superset_meta`, `superset`)은 상수 리터럴이어야 한다.
 - 위 두 경로(`backend/migrations/`, `backend/bootstrap/`) 밖의 raw SQL은 예외 없이 차단이다.
 
 ### 4. 환경변수 (중요)
@@ -66,7 +66,7 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 마이그레이션 도구는 Alembic이다. 다른 도구(Flyway, Atlas 등)나 앱 시작 시 `create_all`로 스키마를 만드는 코드가 새로 들어오면 사용자 승인 여부를 확인한다.
 
 ### 7-2. Superset Embedded guest 역할 (차단, 2026-10-11 결정)
-- 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 운영 guest 역할은 최소 권한 커스텀 역할이어야 한다(권한 목록은 Gate ③에서 정의). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
+- 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 이 금지는 **임베딩 대시보드를 보는 guest 역할에만 적용**된다(2026-10-11 사용자 확정). 운영 guest 역할은 최소 권한 커스텀 역할이어야 한다(권한 목록은 Gate ③ 4라운드 G에서 정의). 포털 작성자 역할은 내장 `Gamma`를 사용자에게 직접 부여하지 않고 **`Gamma`를 복사한 커스텀 역할 + schema 단위 데이터 접근 보조 역할**로 만든다(내장 `Gamma` 직접 부여는 차단). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
 - Scarf 호스트가 CSP에 다시 들어갔는지, 효과 없는 `SCARF_ANALYTICS` 변수가 다시 생겼는지 확인한다(중요).
 
 ### 7-3. 사실 확인 교차 검증 (Gate ③, 요청 시)

@@ -41,7 +41,7 @@
 - **매 기동 멱등 `db-bootstrap` 서비스:** postgres 클라이언트 이미지로 `docker compose up`마다 실행한다. `initdb.d`는 쓰지 않는다(볼륨이 이미 있으면 다시 실행되지 않기 때문). 슈퍼유저(`POSTGRES_USER`)로 접속해 `backend/bootstrap/`의 스크립트와 `roles.sql`을 실행한다.
 - **실행 순서:** `postgres`(healthy) → `db-bootstrap`(성공 완료) → `migrate` → `backend`. `superset-init`도 `db-bootstrap` 완료 후 실행한다. 테스트 DB(profile `test`)에도 같은 스크립트를 적용한다.
 - **이름은 코드 상수로 고정:** 읽기 전용 역할 `bi_readonly`, Superset 메타 역할 `superset_meta`, Superset 메타 DB `superset`. 환경변수는 비밀번호만 `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`로 받는다. 이름 변수는 두지 않는다.
-- **D3 예외(승인):** `backend/bootstrap/`의 SQL에서 **비밀번호 리터럴 두 곳에 한해** psql `:'var'` 인용 보간을 허용한다. **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간은 금지**한다. 나머지 SQL은 모두 고정 문장이다. 비밀번호 변수는 `\getenv`로 읽고, 비어 있으면 실패한다(fail closed).
+- **D3 예외(승인):** `backend/bootstrap/`의 SQL에서 **비밀번호 리터럴(`PASSWORD :'var'`)에 한해** psql `:'var'` 인용 보간을 허용한다(2026-10-11 3라운드에서 앱 계정 비밀번호 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`까지 포함하도록 문구 변경 승인. 범위는 `backend/bootstrap/`). **식별자 보간(`:"var"`, `format('%I')` 포함)과 구문 보간은 금지**한다. 나머지 SQL은 모두 고정 문장이다. 비밀번호 변수는 `\getenv`로 읽고, 비어 있으면 실패한다(fail closed).
 - **안전장치:** `bi_readonly`에 `ALTER ROLE … SET default_transaction_read_only = on`을 설정한다.
 - **권한 부여 시점:** `bi_readonly`의 `SELECT` 권한(`USAGE ON SCHEMA`, `ALTER DEFAULT PRIVILEGES … GRANT SELECT … TO bi_readonly`)은 D2와 함께 Gate ③ 마이그레이션에서 고정 SQL로 쓴다. 이름이 상수라서 D3와 충돌하지 않는다.
 - **Superset 데이터 연결:** `superset-init`이 `set_database_uri`(6.1.0 CLI)로 `bi_readonly` 연결을 등록한다. URI의 비밀번호는 URL 인코딩한다.
@@ -86,3 +86,12 @@
 
 ## D2 결정 (Gate ③ 2라운드, 2026-10-11, 사용자 결정)
 D2는 **전용 schema 하나(S-1)** 로 결정됐다: 사용자 데이터셋 원본 표와 수식 뷰는 전용 schema(예: `bi_data`, 이름은 상수)에, 포털 정적 표(팀·사용자·멤버십·데이터셋 등록·열 정의·수식 메타데이터·기준값 표 등)는 `public`에 둔다. 읽기 전용 계정(D7)에는 schema 단위 기본 권한을 부여하고(고정 SQL, 마이그레이션 안), 수식 규칙 변경 시 뷰 재생성은 서버 시작 시 정의 해시 비교로 한다(실패는 헬스 체크에 표시). `DROP` 사용자 확인 안전장치는 그대로 유지한다. `target_metadata`·`include_object` 연결과 앱 계정 분리는 3라운드 F와 06에서 정한다. 상세와 근거는 `docs/decisions/03b-gate3-round-decisions.md` 2절.
+
+## 3라운드 결정 반영: 앱 계정 분리와 D3·D5·B10 (Gate ③ 3라운드, 2026-10-11, 사용자 결정)
+상세와 근거는 `03b-gate3-round-decisions.md` 3-2.
+- **계정:** `bi_owner`(마이그레이션·정적 표 소유)와 `bi_app`(런타임, `bi_data`에만 `CREATE`) 2개로 분리한다. 이름은 코드 상수이고 비밀번호만 `POSTGRES_OWNER_PASSWORD`, `POSTGRES_APP_PASSWORD`로 받는다(승인). `POSTGRES_USER`는 이미지 슈퍼유저 전용이다(운영 가이드 기준선과의 의도적 차이, `docs/deploy-coordination.md` 29번).
+- **D3 예외 2:** 비밀번호 리터럴(`PASSWORD :'var'`)의 psql `:'var'`만 허용하며, 새 계정 비밀번호까지 포함하도록 문구를 바꾼다. 식별자 보간 금지는 유지한다.
+- **`bi_data` schema 생성:** 마이그레이션에서 **db-bootstrap으로 이동**한다(빈 schema만. 비슈퍼유저 `bi_owner`가 schema를 만들려면 DB `CREATE` 권한이 필요한데 DB 이름이 변수라 D3 때문에 고정 문장으로 줄 수 없음). 권한과 기본 권한 부여는 마이그레이션의 고정 SQL이다. `bi_readonly` 읽기 권한 부여 위치는 X-14 결과 후 다시 묻는다.
+- **D5 의미 변경(승인):** 첫 실제 revision의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다. 왕복 테스트(upgrade → downgrade → upgrade)는 정적 표와 권한 상태가 복원되는지를 검증하며, "빈 DB에서 모든 객체가 사라진다"는 보장은 하지 않는다. 운영 DB에는 여전히 `downgrade`를 쓰지 않는다.
+- **B10 변경(승인):** 등록(정적 표 `INSERT`) + 물리 표·뷰 + 권한 부여를 한 트랜잭션으로 처리하고 시작 시 대조는 안전망으로 유지한다(03c X-1).
+- **적용 시점:** 구현은 Gate ③ 설계 후 Gate ④ 진입 전(env-engineer).

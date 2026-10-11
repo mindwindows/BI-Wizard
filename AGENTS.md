@@ -37,7 +37,7 @@
 - 도구는 **Alembic**, 위치는 `backend/migrations/`. 실행은 일회성 `migrate` 서비스(`alembic upgrade head`)뿐이며 앱 코드는 시작 때 마이그레이션이나 `create_all`을 하지 않는다.
 - 마이그레이션 안의 SQL은 **보간 없는 고정 문자열만** 쓴다(f-string, `%`, `.format()`, `+` 금지). 모든 revision에 `downgrade()`를 구현하고 빈 DB 왕복 테스트(`upgrade → downgrade → upgrade`)로 검증한다. 운영 중 문제는 되돌리기가 아니라 수정 마이그레이션 추가로 대응한다.
 - **`DROP`이 있는 자동 생성 초안은 적용하지 않고 사용자 확인을 받는다**(D2 미결정, Gate ③). 확인했다면 변경 요약에 "DROP 확인: 사용자 승인"을 남긴다.
-- 읽기 전용 계정과 Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. `roles.sql`의 psql `:'var'` 인용은 비밀번호 리터럴 두 곳에만 허용하고 식별자 보간은 금지다. `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사한다.
+- 읽기 전용 계정과 Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. `roles.sql`의 psql `:'var'` 인용은 비밀번호 리터럴(`PASSWORD :'var'`)에만 허용하고 식별자 보간은 금지다(3라운드에서 앱 계정 비밀번호까지 포함하도록 승인, 구현은 Gate ④ 진입 전). `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사한다.
 - `bi_readonly`의 `SELECT` 권한은 Gate ③에서 마이그레이션으로 부여한다.
 
 ## 5. 라이선스

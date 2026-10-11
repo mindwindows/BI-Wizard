@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
-| ③ MODULARIZE | 진행 중(2라운드 결정 완료, 런타임 실험·3라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
+| ③ MODULARIZE | 진행 중(3라운드 결정 완료, 승인된 실험 수행·4라운드 질문 대기) | - (계획 승인 2026-10-11) | 진행 계획, 산출물 5개 문서, 미결정 8~11번 추가, 결정 라운드 순서 승인. 사실 확인은 researcher, reviewer 교차 검증 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` (승인 후 생성) |
 | ④ 기능 개발 | 대기 | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
@@ -16,20 +16,20 @@
 | 4 | 팀 웹서버 Superset 운영 조건 | 결정됨 | 추가 컨테이너 운영 허용, Superset은 `compose.yml` 정식 서비스. Redis/Valkey 제외. 메인 플랫폼의 URL 하위 경로로 서비스. 메모리는 프로젝트 전체 합계 8GB로 시작(부족하면 증설 요청) (2026-10-11, 사용자 결정, `docs/decisions/03a-deploy-environment.md`). 배포 때 관리자와 맞출 항목은 `docs/deploy-coordination.md` |
 | 5 | 디자인 방향 | 결정 | C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형) (2026-10-11, Gate ①) |
 | 6 | 수식 미리보기·자동완성을 위한 저장 전 수식 평가 경로 | 결정됨 (세부는 07) | C0 정적 검사(문법·열 이름·타입·순환, 자동완성)를 기본으로, 값 미리보기는 C1-a(뷰와 같은 변환기로 원본 전체를 계산하고 일부 행 표시, 읽기 전용 트랜잭션 + 타임아웃). (2026-10-11, 2라운드 W7, 03b 2-3) |
-| 7 | Superset 차트 작성 화면(Explore)을 포털에서 어떻게 제공할지 | 미결정 | - (Gate ③에서 결정. Embedded SDK로 가능한 범위를 공식 문서로 확인한 뒤 결정) |
+| 7 | Superset 차트 작성 화면(Explore)을 포털에서 어떻게 제공할지 | 결정됨 | Superset 일반 화면을 새 창 링크로 열고 별도 로그인(8번 인증 결정 후 자동 연동을 목표로, iframe은 X-18 결과 후 판단). 각 팀 정의 담당자가 작성, 작성자 역할은 Gamma 복사본 + schema 보조 역할 (2026-10-11, 3라운드, 03b 3-1) |
 | 8 | 포털 사용자 인증과 신원 출처 | 방식 미결정, 진행 방식 결정 | 인증은 `current_user` 한 곳으로 모으고 로컬에서는 스텁 신원으로 B 이후 라운드를 진행(U1 승인, 2026-10-11). 방식(헤더/토큰/자체 로그인/SSO)은 운영자 확인 후 결정하고 운영 어댑터는 Gate ④ 중 교체. 운영자 질문 20개는 `docs/operator-questions.md`(핵심 10개 표시), 사용자가 검토·전달. 새 환경변수는 각 방식이 정해질 때 따로 승인 |
-| 9 | 동시 편집 정책 | 미결정 | - (Gate ③ 3라운드). 2라운드 사실: 같은 기간에 여러 줄이 생기는 일은 없고 "한 기간 = 한 행" 입력 |
-| 10 | Superset 데이터셋·대시보드 등록 방식 | 미결정 | - (Gate ③ 3라운드). 1라운드 결정: 서로 다른 데이터셋의 차트를 한 대시보드에 나란히 배치하는 것은 Superset 대시보드 기본 기능으로 처리하고, 여러 데이터셋을 하나의 차트로 합치는 기능은 필요 없음(U10) |
-| 11 | 삭제 정책 | 미결정 | - (Gate ③ 3라운드) |
+| 9 | 동시 편집 정책 | 결정됨 | 행 편집은 칸 단위 값 비교 갱신, 붙여넣기·가져오기는 충돌 시 전부 취소, 정의 편집은 데이터셋 단위 직렬화 + 정의 버전 확인. 같은 기간 행은 기본 하나만(끌 수 있음), 기간 수정은 허용 + 확인창, 기준 날짜 열 타입 변경 금지 (2026-10-11, 3라운드, 03b 3-4) |
+| 10 | Superset 데이터셋·대시보드 등록 방식 | 결정됨 | 데이터셋 등록·열 새로고침은 서버의 Superset 서비스 계정(읽기 쉬운 이름의 가상 데이터셋, `httpx`), 차트·대시보드는 사람, 임베드 켜기는 관리자 수동. 새 변수 `SUPERSET_SERVICE_USER`/`SUPERSET_SERVICE_PASSWORD` (2026-10-11, 3라운드, 03b 3-3) |
+| 11 | 삭제 정책 | 결정됨 | 행·열·수식·데이터셋은 보관/사용 중지가 기본, 영구 삭제는 관리자만. 표·뷰 `DROP`은 보관 후 30일 뒤에만, 열 `DROP COLUMN`은 관리자 확인 후 즉시. 팀·사용자는 비활성화만, 참조 중인 값 삭제는 막지 않고 점검 화면 표시, 공통 지표·기준값 이름 완전 삭제는 관리자만 (2026-10-11, 3라운드, 03b 3-5) |
 
 ## Gate ② 결정 사항: DB 마이그레이션 (2026-10-11, `docs/decisions/03-migration-tool.md`)
 | 번호 | 항목 | 상태 | 결정 |
 | --- | --- | --- | --- |
 | D1 | 마이그레이션 도구 | 결정 | Alembic |
 | D2 | 동적 객체(사용자 데이터셋 테이블·수식 뷰) 분리 방식 | **결정 (Gate ③ 2라운드, 2026-10-11)** | **전용 schema 하나(S-1)**: 사용자 데이터 표와 수식 뷰는 `bi_data`(이름 상수)에, 포털 정적 표는 `public`에. 읽기 전용 계정은 schema 단위 기본 권한, 뷰 재생성은 서버 시작 시 정의 해시 비교(실패는 헬스 체크). 상세 03b 2-3·2-6. 그때까지 `DROP` 사용자 확인 안전장치는 유지 |
-| D3 | 마이그레이션 raw SQL 허용 범위 | 결정 | 마이그레이션 디렉터리 안에서만 고정 SQL 문(`op.execute` 등) 허용, 변수 보간(f-string, `%`, `.format()`, `+`) 금지. 그 밖의 코드는 기존 SQL 문자열 조립 금지 규칙 |
+| D3 | 마이그레이션 raw SQL 허용 범위 | 결정 | 마이그레이션 디렉터리 안에서만 고정 SQL 문(`op.execute` 등) 허용, 변수 보간(f-string, `%`, `.format()`, `+`) 금지. 그 밖의 코드는 기존 SQL 문자열 조립 금지 규칙 · **예외 2(`backend/bootstrap/`)의 비밀번호 리터럴 범위가 앱 계정 비밀번호까지 확대(3라운드 승인, 식별자 보간 금지는 유지)** |
 | D4 | 마이그레이션 실행 위치 | 결정 | backend 이미지를 재사용하는 일회성 `migrate` 서비스. `backend`는 `migrate` 성공 완료 후에만 시작(`depends_on`) |
-| D5 | 되돌리기 정책 | 결정 | 모든 마이그레이션에 `downgrade` 작성, 빈 DB에서 upgrade → downgrade → upgrade 왕복 테스트. 운영 중 문제는 수정 마이그레이션 추가로 대응 |
+| D5 | 되돌리기 정책 | 결정 | 모든 마이그레이션에 `downgrade` 작성, 빈 DB에서 upgrade → downgrade → upgrade 왕복 테스트. 운영 중 문제는 수정 마이그레이션 추가로 대응 · **3라운드 승인: 첫 실제 revision의 `downgrade()`가 `bi_data` schema를 지우지 않으므로 왕복 테스트는 "정적 표·권한 상태 복원" 기준(03-migration-tool.md 3라운드 반영)** |
 | D6 | 빈 DB 검증 방식 | 결정 (Jenkins 적용은 추후) | tmpfs 테스트 전용 PostgreSQL 서비스를 compose profile로 정의(평소 미기동), 정리는 `-v` 없는 `docker compose down`. **Jenkins 적용은 Jenkins 실행 환경(Docker 사용 가능 여부) 확인 후 결정** |
 | D7 | Superset 메타데이터 DB | 결정 | 같은 PostgreSQL 컨테이너 안의 별도 데이터베이스. Superset의 업무 데이터 연결은 읽기 전용 DB 계정 |
 
@@ -38,7 +38,7 @@
 - 미결정 1번 "제외", 미결정 4번 "결정됨"이다. Azure OpenAI 변수·Health 경로·체크리스트 항목은 만들지 않고, Superset은 `compose.yml`의 정식 서비스이며 Redis/Valkey는 두지 않는다.
 - **하위 경로 버그가 재현되면** Superset 내부 코드는 수정하지 않고, 대안과 각 영향을 정리해 보고한 뒤 멈춘다.
 - **5MB 엑셀 샘플로 backend 메모리를 실측**해 보고하고(Gate ② 검증), 결과를 `docs/deploy-coordination.md` 5번에 기록한다.
-- **읽기 전용 계정 제안 승인(2026-10-11):** 매 기동 멱등 `db-bootstrap`(`backend/bootstrap/`, `initdb.d` 미사용), D3 예외(비밀번호 리터럴 두 곳의 psql `:'var'`만, 식별자 보간 금지), 이름 고정 `bi_readonly`/`superset_meta`/`superset`, 비밀번호 변수 `POSTGRES_READONLY_PASSWORD`/`SUPERSET_DB_PASSWORD`. 앱 계정은 Gate ②에서 `POSTGRES_USER`를 쓰며, 분리 조건은 아래 Gate ③ 인계 사항.
+- **읽기 전용 계정 제안 승인(2026-10-11):** 매 기동 멱등 `db-bootstrap`(`backend/bootstrap/`, `initdb.d` 미사용), D3 예외(비밀번호 리터럴의 psql `:'var'`만, 식별자 보간 금지. 2026-10-11 3라운드에서 앱 계정 비밀번호까지 포함하도록 문구 변경 승인), 이름 고정 `bi_readonly`/`superset_meta`/`superset`, 비밀번호 변수 `POSTGRES_READONLY_PASSWORD`/`SUPERSET_DB_PASSWORD`. 앱 계정은 Gate ②에서 `POSTGRES_USER`를 쓰며, 분리 조건은 아래 Gate ③ 인계 사항.
 - **접두 처리 전환 변수 `APP_PROXY_STRIP_PREFIX` 승인:** 기본값 `false`(접두 유지 전달). Gate ② 검증에서 `true`/`false` 두 값 모두로 로컬 동작을 확인한다. 배포 협의 권장 사항은 `docs/deploy-coordination.md` 2번.
 - **QA 환경 파일 규칙 승인:** QA는 `.env`를 만들거나 수정하지 않고 `_workspace/qa/`의 비밀이 아닌 더미 값 임시 env 파일을 `--env-file`로 지정한다.
 - **현재 단계:** env-engineer ⇄ qa-engineer 구축·검증 단계 진행 중. 완료 후 Environment Ready 결과, `docker stats` 실측, 하위 경로 + Embedded 검증, BAT 검증 요청서를 보고한다.
@@ -69,7 +69,7 @@
 | --- | --- | --- | --- |
 | 1 | 사후 승인 | BAT 영문(ASCII) 변환, frontend·postgres·backend 포트의 `127.0.0.1` 게시, 변수 4개(`SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`) 승인. 웹서버에서는 메인 플랫폼 프록시 위치에 따라 `FRONTEND_HOST`를 바꿔야 할 수 있다는 점을 배포 협의 목록에 추가. **하네스 규칙 신설:** 새 환경변수 추가, 운영 가이드 기준선과 다른 설정, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다 | `docs/deploy-coordination.md` 20번, `CLAUDE.md`, `bi-wizard-dev`, 에이전트 정의 |
 | 2 | 에이전트 모델 | 정의 파일은 현재대로 유지(env-engineer, qa-engineer, frontend-dev는 haiku). 호출 시 모델 변경은 사전 승인 없이 하지 않는다. 이번 Gate ② 호출 때 바꾼 에이전트와 사유는 보고했다. **Gate ④ 시작 전에 모델 판단을 다시 한다** | 아래 "모델 변경 기록", `CLAUDE.md` |
-| 3 | Embedded guest 역할 | 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다 | Gate ② 결과 표, Gate ③ 인계, `bi-review` |
+| 3 | Embedded guest 역할 | 최소 권한 커스텀 역할로 한다. 권한 목록은 Gate ③에서 데이터 모델과 함께 정한다. `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다. **이 금지는 임베딩 대시보드를 보는 guest 역할에만 적용(2026-10-11 3라운드 확정)**, 작성자 역할은 Gamma 복사본 + schema 보조 역할 | Gate ② 결과 표, Gate ③ 인계, `bi-review` |
 | 4 | 로고 이중 접두 | 그대로 둔다(알려진 문제). 수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다 | `docs/deploy-coordination.md` 13번 |
 | 5 | Scarf | `superset_config.py`의 CSP에서 Scarf 호스트 제거, 효과 없는 `SCARF_ANALYTICS` 변수 삭제. 변경 후 Superset 화면과 임베딩(Gamma 대조 조건) 재확인 | `superset/superset_config.py`, `compose.yml`, `docs/deploy-coordination.md` 18번 |
 | 6 | 라이선스 | "주의" 항목 모두 허용. 원칙: 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다. 허용 목록은 "배포 전 회사 오픈소스 정책 확인"으로 기록 | `docs/project-brief.md` 4.1, `gate-research`, `bi-review`, `docs/deploy-coordination.md` 22~25번 |
@@ -175,6 +175,20 @@
 - **한계:** PostgreSQL 문서는 REL_16_STABLE(16.15) 기준이며 우리 버전 16.10과 마이너 차이가 있다. 확인하지 못한 항목(예: `CREATE VIEW`를 지명한 bind parameter 불가 문장, 기반 열 타입 변경의 뷰 영향, `CURRENT_DATE`의 시간대, embedded 최소 권한 집합, CSRF)은 `부분 확인`으로 남겼다. 일부는 런타임 실험이 필요하다.
 - **산출물 위치(Git 제외, `_workspace/gate3/`):** `facts-questions.md`, `facts-db.md`, `facts-superset.md`, `round1-options.md`, `sources/`. 결정이 확정되면 `docs/decisions/04~08`에 근거로 옮긴다.
 
+
+### Gate ③ 3라운드 결정 (2026-10-11, 사용자: "3라운드는 모두 추천안대로 확정")
+상세 원문과 근거는 `docs/decisions/03b-gate3-round-decisions.md` 3절.
+
+| 항목 | 결정 |
+| --- | --- |
+| 차트 작성 (D, Y3·Y4) | Superset 일반 화면 새 창 링크 + 별도 로그인, 8번 후 자동 연동 목표, iframe은 X-18 후 판단. 각 팀 정의 담당자가 작성. 작성자 역할은 Gamma 복사본 커스텀 역할 + schema 단위 보조 역할. **Gate ②의 "Gamma·PUBLIC_ROLE_LIKE 운영 금지"는 임베딩 대시보드를 보는 guest 역할에만 적용(명시).** 불변식: Superset에 등록된 데이터는 모두 공개 |
+| 계정 분리 (F, Y1·Y2) | 역할 2개 `bi_owner`, `bi_app`. 승인: 빈 schema 생성을 db-bootstrap으로 이동(D5 의미 변경 포함), B10 변경(등록·물리 객체·권한 한 트랜잭션). `bi_readonly` 권한 부여 위치(Y1 ㄴ)는 X-14 후 재질문. 새 변수 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`. `POSTGRES_USER` 의미 축소는 운영 가이드 기준선과의 의도적 차이(`deploy-coordination.md` 29번). D3 예외 2는 새 계정 비밀번호까지 포함하되 `backend/bootstrap/` 비밀번호 리터럴로 한정, 식별자 보간 금지 유지. 구현은 Gate ④ 진입 전 |
+| Superset 등록·이름·필터 (Y5·Y6·Y7) | 데이터셋 등록·새로고침은 서버 서비스 계정, 차트·대시보드는 사람, 임베드 켜기는 관리자 수동. `httpx`, `SUPERSET_SERVICE_USER`/`SUPERSET_SERVICE_PASSWORD` 승인. 읽기 쉬운 이름의 가상 데이터셋. 팀 필터는 모두 같은 기본값으로 시작, 소속 팀 기본값은 X-21 후 재판단 |
+| 동시 편집 (Y8·Y9) | 03b 3-4 참조 (칸 단위 값 비교, 전부 취소, 데이터셋 단위 직렬화, 기간 규칙, 기준 날짜 열 타입 변경 금지 = 브리프 4.3 기능 축소) |
+| 삭제 (Y10~Y12) | 03b 3-5 참조 (보관 기본, 영구 삭제 관리자만, 표·뷰 DROP 보관 후 30일, 열 DROP COLUMN 관리자 확인 후 즉시) |
+| 기본값·승인 (BY1~BY11, Y13) | BY1~BY11 모두 이의 없음(`TZ=Asia/Seoul` 유지, 날짜 열 이름 통일 안 함 + 작성자 안내문에 "차트에 시간 필터 필요"). 뷰 재생성 실패는 기존 `/health` 본문에 표시. D5 해석 변경 수용. 실험 X-14, X-15, X-17, X-18, X-20, X-21, X-22, X-23, X-24 승인(X-16 불필요, X-19는 8번 후). X-18에서 `frame_options`/CSP 변경이 필요해지면 결과와 함께 따로 승인 요청. 조건부 설정 변경(작성자 역할 `can_set_embedded`, `superset-init` 확장, backend의 `SUPERSET_APP_ROOT` 전달)은 필요해지는 시점에 내용과 이유를 보고하고 적용 |
+
+**4라운드:** G guest 역할 권한, I RLS 규칙, J `CREATE VIEW` 리터럴, H 업로드 한도, 인계 설계.
 
 ## Gate ③ 인계 사항
 Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 가지는 설계 전에 반영한다.
