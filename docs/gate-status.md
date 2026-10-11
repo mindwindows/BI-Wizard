@@ -190,6 +190,20 @@
 
 **4라운드:** G guest 역할 권한, I RLS 규칙, J `CREATE VIEW` 리터럴, H 업로드 한도, 인계 설계.
 
+### FU-1용 Gate ④ 전 환경 작업(EW) 계획 (제안, 2026-10-11, 실행 요청 아님)
+03b 5-4에 따라 FU-1에 필요한 것만 넣었다. **EW-2(업로드 상한)는 엑셀 가져오기 단위로 이월.** 담당은 env-engineer(구현), qa-engineer(검증), reviewer(점검), 모델은 정의 파일 그대로이며 재판단은 제안만 한다(아래). 실행은 Gate ③ 승인 후 별도 요청으로 한다.
+
+| 단위 | 내용 | 선행 | 승인·보고 시점 | 검증 |
+| --- | --- | --- | --- | --- |
+| EW-1 계정 분리 | db-bootstrap: `bi_owner`·`bi_app` 생성(비밀번호 리터럴 2개), 빈 `bi_data`(소유 `bi_owner`), `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE` 한 줄, (AP-5) `public` 스키마 `CREATE`를 `bi_owner`에 부여, (AP-9) `bi_readonly` `statement_timeout`. compose: `migrate`→`bi_owner`, `backend`→`bi_app`. `.env.example`·backend 설정·`ci-validate-env.sh`·`validate-env.bat`·Jenkinsfile Credential 매핑·README·`skills/local-environment`·`AGENTS.md`·`deploy-coordination.md` 갱신. 마이그레이션 틀: 정적 `MetaData` + `target_metadata` + `include_name`/`include_object` + `alembic check`/`alembic heads` 개수 검사, `test_migrations.py`의 D2 규칙·`get_heads()` 단정 갱신, 왕복 스냅샷 시험 틀. **인증 스텁 켜기 설정(AP-13 `AUTH_STUB_ENABLED` 후보)과 운영 판별 방식 확정**(승인 후 `.env.example`·시작 거부 시험은 FU-1a 코드와 함께) | 없음(03c X-14·X-15·X-29로 방식 확인) | 착수 요청, AP-5·AP-9·AP-10·AP-13, 모델 재판단 승인 | 권한 매트릭스 시험, 비슈퍼유저 접속, `bi_owner` 왕복, db-bootstrap 멱등·비밀번호 변경·빈 값 실패, `bi-review` 차단 확인 |
+| EW-3 Superset 계정 | 서비스 계정 변수(`SUPERSET_SERVICE_USER`/`_PASSWORD`)와 발급 전용 계정 변수 2개(이름 확정), `superset-init` 확장(`sync_permissions` → 서비스 역할 4권한 → 발급 역할 → 작성자 역할[`bi_author` Gamma 복사본 + `bi_author_schema`] → 계정 멱등 생성), backend→Superset 내부 주소·`SUPERSET_APP_ROOT` 전달(AP-12) | EW-1, 08 승인, `superset-init` 구현 방법 확인(A-22·A-26) | 내용·이유 보고 후 적용, 변수 이름 확정 | 계정·역할 권한 시험(03c X-22·X-28 재현), 로그에 비밀번호 0건 |
+| EW-4 guest 역할 | `GUEST_ROLE_NAME=bi_guest`, 권한 목록 파일(필수 3 + `can_time_range Api` 1, 조건부 2 기본 제외), 생성 스크립트(없는 권한이면 시작 실패, 생성 후 재읽기 비교), `GUEST_TOKEN_VALIDATOR_HOOK`(확인: `rls` 비어 있음·resource 1개 dashboard·임베드 uuid 일치), 불변 시험(`Public` 0개, `PUBLIC_ROLE_LIKE` 미설정), `bi-review` 7-2 확장(AP-1) | EW-3 | 08 승인 때 | 하위 경로 + Embedded 재검증(STRIP true/false), 부정 시험, 차트 유형 스모크 |
+| EW-5 문서·하네스 | `CLAUDE.md` 변경 이력, `bi-review`(7-1 D3 예외 2·D5 문구, 7-2 확장, 7-4 AP-10), `env-bootstrap`·`backend-fastapi`·`modularize` 문구, `gate-status.md`, 04~08 확정본 | EW-1~4 | 승인된 변경만 | reviewer 점검 |
+| EW-6 통합 검증 | qa-engineer: `docker compose config`, `ci-validate-env.sh` 네거티브 케이스, STRIP true/false, `docker stats` 재측정(DC 5번), 권한 매트릭스 | EW-1~4 | 결과 보고 | Environment Ready 재확인 |
+| EW-7 reviewer | 슈퍼유저 접속 없음, D3 예외 2 범위, Secret 로그 0건, `httpx` 라이선스, 스텁 시작 거부 | EW-6 | 차단·중요 0건 | `bi-review` |
+- 순서: EW-1 → EW-3 → EW-4 → EW-5 → EW-6 → EW-7. 이월: EW-2 업로드 한도(`APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위(FU-7)에서 요청. 앱 코드(시작 자가 점검, `/health` 필드, 스텁 시작 거부, 정적 `MetaData` 연결)는 FU-1a~ 단위의 backend-dev 몫이다.
+- **에이전트 모델 재판단(제안만, 승인 전에는 바꾸지 않음):** ① EW-1 착수 전: env-engineer·qa-engineer(정의 haiku). EW-1은 권한·db-bootstrap·compose 의존 순서·권한 매트릭스가 얽혀 있어 sonnet이 안전하다는 판단 후보. 정의 파일 변경이 필요하고 승인이 필요하다. ② FU-1 착수 전: frontend-dev(정의 haiku)는 입력 그리드·붙여넣기 파서 상태 기계·수식 편집기·3분할 작업공간 복잡도에 비해 약할 수 있다는 판단 후보. backend-dev·architect·reviewer·researcher(sonnet)는 유지. 비용 영향은 호출 수에 비례(정량 근거 없음).
+
 ### Gate ③ 진행 방식 변경: FU-1 범위로 축소 (2026-10-11, 사용자)
 상세 원문은 `docs/decisions/03b-gate3-round-decisions.md` 5절. **1~4절 결정은 모두 유효**하다.
 
