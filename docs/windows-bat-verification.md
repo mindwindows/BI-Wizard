@@ -1,5 +1,7 @@
 # Windows PC BAT 검증 요청서 (Gate ②)
 
+> **상태: 보류(사내 환경에서 검증, 2026-10-11).** 개인 PC 검증은 하지 않는다. 사내 환경은 Docker Desktop을 쓸 수 없으므로 사내 컨테이너 실행 방식(`docs/deploy-coordination.md` 26번)을 확인한 뒤, 사내 워크스테이션 또는 팀 웹서버 배포 준비 때 이 요청서로 검증한다. 아래 "Docker Desktop" 전제 문구는 그 방식에 맞게 바꿔 읽는다.
+
 - 작성: qa-engineer, 2026-10-11 (커밋 `4fbf7ad` 기준)
 - **BAT 6종은 Linux 클라우드 세션에서 실행하지 않았다.** 같은 동작의 `docker compose` 명령은 Linux에서 모두 검증했다. 아래는 사용자가 Windows PC에서 직접 확인할 항목이다.
 - `scripts\*.bat`은 모두 ASCII 영문 메시지, CRLF, BOM 없음이다(`chcp` 미사용). 한글 깨짐과 레이블 인식 문제 우려는 이 구성으로 해소했다. 실제 동작은 이 요청서로 확인한다.

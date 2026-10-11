@@ -3,7 +3,7 @@
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
-| ② ENVIRONMENT BOOTSTRAP | 승인 대기 | - | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안 승인 완료. 환경 구축·검증(env-engineer ⇄ qa-engineer, reviewer) 완료. Gate ② 결과에 대한 사용자 결정 8건 반영 완료(2026-10-11, 아래 "Gate ② 결과 결정"). 남은 것은 Windows PC BAT 검증 결과와 Gate ② 승인 | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
+| ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | 대기 | - | - | - |
 | ④ 기능 개발 | 대기 | - | - | - |
 
@@ -56,8 +56,8 @@
 | **하위 경로**(`APP_PROXY_STRIP_PREFIX` false/true 각각) | 통과 | 포털, API, Superset 로그인·화면 이동, 접두 밖 404, 재빌드 없는 전환 |
 | **Embedded iframe** | **환경 검증 완료(하위 경로 + Gamma 대조 실험), 운영 역할은 Gate ③에서 정의** | 기본 guest 역할 `Public`에는 권한이 없어 `…/api/v1/me/roles/` 403이다. 하위 경로가 원인이 아니다(루트+Public도 실패, 하위 경로+Gamma는 성공). Gamma는 대조 실험에만 썼고 운영 설정에는 쓰지 않는다. 운영 역할은 최소 권한 커스텀 역할로 Gate ③에서 정의 |
 | 메모리(`mem_limit`, 실측, 5MB 샘플) | 통과 | `docs/deploy-coordination.md` 5번 |
-| BAT 6종 | 부분(보류) | 작성과 정적 검증 완료. 실행은 사용자 Windows PC(`docs/windows-bat-verification.md`) |
-| Jenkinsfile CI | 부분 | 6단계 정적 확인, 각 단계 명령은 로컬에서 통과. Jenkins 실행은 미실행 |
+| BAT 6종 | 부분(보류: 사내 환경에서 검증) | 작성과 정적 검증 완료. 실행 검증은 보류(아래 "Gate ② 보류 항목") |
+| Jenkinsfile CI | 부분(보류: Jenkins 실행 환경 확인 후) | 6단계 정적 확인, 각 단계 명령은 로컬에서 통과. Jenkins 실제 실행은 보류 |
 | `skills/local-environment`, README, AGENTS.md | 통과 | 실행한 명령과 대조 |
 
 ## Gate ② 결과 결정 (2026-10-11, 사용자)
@@ -71,6 +71,12 @@
 | 6 | 라이선스 | "주의" 항목 모두 허용. 원칙: 운영 런타임에 포함되는 우리 코드의 의존성은 허용형만 사용한다. 개발·테스트 전용 도구와 업스트림 공식 이미지 내부 구성요소는 약한 카피레프트(LGPL, MPL)를 수정·재배포하지 않는 조건으로 허용한다. GPL·AGPL·EUPL 등 강한 카피레프트와 비오픈소스 라이선스는 위치와 관계없이 금지한다. 허용 목록은 "배포 전 회사 오픈소스 정책 확인"으로 기록 | `docs/project-brief.md` 4.1, `gate-research`, `bi-review`, `docs/deploy-coordination.md` 22~25번 |
 | 7 | favicon | 포털 favicon 404 수정(`frontend/index.html`에 `data:,` 아이콘). Superset 404 오류 페이지 일러스트의 접두 누락은 알려진 문제로 기록 | `frontend/index.html`, `docs/deploy-coordination.md` 21번 |
 | 8 | 볼륨 정리 | 시험용 볼륨을 이름을 지정해 삭제하는 것을 이번 한 번만 허용. `bi-wizard_postgres_data`는 삭제하지 않음. 이름 없는 볼륨은 어떤 컨테이너·메인 볼륨과도 연결되지 않은 것만 삭제. 일괄 삭제 명령 금지, 이미지 유지 | 아래 "볼륨 정리 기록" |
+
+## Gate ② 보류 항목 (조건부 승인, 2026-10-11)
+| 항목 | 상태 | 보류 사유 | 해소 시점 | 관련 문서 |
+| --- | --- | --- | --- | --- |
+| BAT 6종 실행 검증 | 보류(사내 환경에서 검증) | 개인 PC는 디스크 여유가 부족하고, BAT가 실제로 쓰일 사내 환경은 라이선스 문제로 Docker Desktop을 쓸 수 없어 개인 PC 검증의 실익이 작다(사용자 판단). 같은 동작의 `docker compose` 명령은 Linux에서 모두 검증했다 | 사내 워크스테이션으로 옮길 때 또는 팀 웹서버 배포를 준비할 때. 그 전에 사내 환경의 컨테이너 실행 방식(Podman, BAT 안의 `wsl` 경유 등)을 확인하고 필요하면 BAT를 그 방식에 맞게 고친다 | `docs/windows-bat-verification.md`, `docs/deploy-coordination.md` 26번 |
+| Jenkinsfile CI의 Jenkins 실제 실행 | 보류(Jenkins 실행 환경 확인 후) | Jenkins 실행 환경(Docker 사용 가능 여부 등) 미확인 | `docs/deploy-coordination.md` 6번 확인 후. D6(마이그레이션 왕복 테스트의 Jenkins 적용)도 같이 정한다 | `Jenkinsfile`, `docs/deploy-coordination.md` 6번 |
 
 ### 재검증 결과 (결정 5·7 반영 후, 프로젝트 `envfix`, STRIP=false)
 - Superset 컨테이너 기동 healthy, `superset_config.py` 로드 오류 없음(CSP `img-src`에 scarf 호스트 없음 확인).
