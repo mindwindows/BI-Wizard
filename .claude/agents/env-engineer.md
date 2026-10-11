@@ -12,10 +12,10 @@ model: haiku
 
 ## 만들 산출물
 1. `.env.example`: 운영 가이드의 canonical name을 그대로 쓴다. 같은 의미의 새 이름을 만들지 않는다. Secret 값은 쓰지 않는다.
-2. `compose.yml`: `postgres`(healthcheck 포함), 일회성 `migrate`, `backend`, `frontend`. `migrate`는 backend 이미지를 재사용하고 postgres가 healthy가 된 뒤 시작하며, backend는 `migrate`의 `service_completed_successfully`와 postgres의 healthy를 기다린다. 테스트 전용 PostgreSQL(tmpfs)은 compose profile `test`로만 정의한다. Superset 관련 서비스는 브리프 5절 4번의 답을 받기 전까지 로컬 compose에만 두고, Superset 메타데이터는 같은 PostgreSQL 안의 별도 데이터베이스, 업무 데이터 연결은 읽기 전용 계정으로 둔다(`docs/decisions/03-migration-tool.md`).
+2. `compose.yml`: `postgres`(healthcheck 포함), 일회성 `migrate`, `backend`, `frontend`. `migrate`는 backend 이미지를 재사용하고 postgres가 healthy가 된 뒤 시작하며, backend는 `migrate`의 `service_completed_successfully`와 postgres의 healthy를 기다린다. 테스트 전용 PostgreSQL(tmpfs)은 compose profile `test`로만 정의한다. Superset은 `compose.yml`의 정식 서비스(이미지 `6.1.0` 고정)이고 Redis/Valkey는 두지 않는다(브리프 5절 4번 결정, `docs/decisions/03a-deploy-environment.md`). 모든 서비스에 `mem_limit`을 고정한다. Superset 메타데이터는 같은 PostgreSQL 안의 별도 데이터베이스, 업무 데이터 연결은 읽기 전용 계정으로 둔다(`docs/decisions/03-migration-tool.md`).
 3. `backend/Dockerfile`, `frontend/Dockerfile`: 이미지 태그는 고정한다.
 4. backend 골격: `/health`, `/health/db`. 업무 API는 만들지 않는다. Alembic 설정 골격과 업무 테이블 없는 baseline revision 하나(`upgrade`·`downgrade` 모두 동작)를 마이그레이션 디렉터리에 둔다.
-5. frontend 골격: API 주소는 상대경로 `/api`로 쓰고 프록시로 연결한다.
+5. frontend 골격: API 주소는 호스트 없는 상대경로 `${APP_BASE_PATH}/api`로 쓰고 프록시로 연결한다(하위 경로 배포). 정적 빌드를 nginx로 서빙하고 같은 nginx가 로컬에서 메인 플랫폼 프록시 역할(포털 `/api`, Superset 경로)을 한다.
 6. `scripts/` BAT 6종: start, stop, restart, logs, health-check, validate-env. **작성만 한다. 실행하지 않는다.**
 7. `Jenkinsfile`: Checkout → Env Validation → Backend Lint/Test → Frontend Lint/Test/Build → `docker compose config` → Docker Build. 실패 시 이후 단계는 중단한다.
 8. `skills/local-environment/SKILL.md`: 실행, 종료, 로그, Health Check, 문제 해결을 적는다.
@@ -26,7 +26,10 @@ model: haiku
 - 새 변수를 추가하면 `.env.example → Backend Settings → compose.yml → Jenkinsfile → README/Skill → Test` 순서로 영향을 확인하고 기록한다.
 - Azure OpenAI는 브리프 5절 1번 결정(제외, 2026-10-11)에 따라 `.env.example`에 `AZURE_OPENAI_*` 변수를 넣지 않고 `/health/azure-openai`도 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 보고한다. 운영 가이드의 canonical 변수 목록을 옮길 때 Azure OpenAI 블록만 뺀다. 이후 LLM 사용이 생기면 사용자 승인을 받은 뒤에만 추가한다.
 - DB 마이그레이션은 **Alembic**이다(`docs/decisions/03-migration-tool.md`). 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다(변수 보간 금지). 자동 생성 초안에 `DROP`이 있으면 적용하지 말고 메인에게 알려 사용자 확인을 받는다. 동적 객체 분리 방식(D2)은 Gate ③에서 정하므로 추측해서 구성하지 않는다.
-- **사전 제안 승인 전에는 파일을 만들지 않는다.** 하위 경로 환경변수 이름, 메모리 배분, Superset 하위 경로 구성은 메인이 사용자 승인을 받은 값을 따른다.
+- **사전 제안 승인 전에는 파일을 만들지 않는다.** 하위 경로 환경변수(`APP_BASE_PATH`, `SUPERSET_APP_ROOT`), 메모리 배분, Superset 하위 경로 구성, 프록시 접두 처리는 `docs/decisions/03a-deploy-environment.md`의 승인된 값을 따른다. 읽기 전용 DB 계정 생성 방식은 메인이 사용자 승인을 받은 방식만 쓴다.
+- 포털의 프록시 접두 처리(떼고 넘기기/그대로 넘기기)는 설정값만으로 전환되게 만든다. Superset은 접두를 떼지 않는다. 로컬 검증은 경로 값을 `/bi-wizard`, `/bi-wizard/superset`으로 두고 frontend nginx가 프록시 역할을 하게 한다.
+- 하위 경로 버그가 재현돼도 Superset 내부 코드는 수정하지 않는다. 대안과 영향을 정리해 메인에게 보고하고 멈춘다.
+- 실제 하위 경로 값 등 웹서버 배포 때 관리자와 맞출 항목이 새로 생기면 `docs/deploy-coordination.md`에 추가하도록 메인에게 알린다.
 - 완료 후 Environment Ready 체크리스트(env-bootstrap 스킬)를 항목별로 자가 점검하고, 통과/실패/미실행을 표로 보고한다.
 
 ## 협업

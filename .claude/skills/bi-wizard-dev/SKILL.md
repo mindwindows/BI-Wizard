@@ -26,7 +26,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 | Gate | 실행 모드 | 에이전트 | 승인 전 산출물 | 승인 후 위치 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 서브에이전트 병렬 2건, 이후 리뷰 | researcher ×2 (디자인, 기술 Reference), reviewer | 디자인 2~3안, Reference 3~5개 비교표 | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md` |
-| ② ENVIRONMENT BOOTSTRAP | 지속형 협업 (생성·검증) | architect(마이그레이션 도구 제안), env-engineer ⇄ qa-engineer, reviewer | Environment Ready 체크리스트 결과, BAT 검증 요청서 | 저장소 파일(compose, Dockerfile, `.env.example`, `AGENTS.md` 등). `docs/decisions/03-migration-tool.md` |
+| ② ENVIRONMENT BOOTSTRAP | 지속형 협업 (생성·검증) | architect(마이그레이션 도구 제안), env-engineer ⇄ qa-engineer, reviewer | Environment Ready 체크리스트 결과, BAT 검증 요청서 | 저장소 파일(compose, Dockerfile, `.env.example`, `AGENTS.md` 등). `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | 서브에이전트 생성 후 리뷰 | architect, reviewer | 모듈 경계, 기능↔Skill 대응표, API 계약 초안, 데이터 모델, 기능 단위 순서 | `docs/decisions/04-modules.md`, `docs/decisions/05-api-contract.md` |
 | ④ 기능 개발 | 지속형 협업 + 기능 단위마다 리뷰 | backend-dev, frontend-dev, qa-engineer (상시), reviewer (단위 완료 시) | 기능 단위별 코드·테스트·Skill | 저장소 파일(`backend/`, `frontend/`, `skills/<기능>/`). 완료 후 커밋 |
 
@@ -43,7 +43,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - env-engineer는 **파일을 만들기 전에** 사전 제안(하위 경로 환경변수 이름, 메모리 배분, 하위 경로 구성 확인 결과 등)을 메인에게 올리고, 메인이 사용자 승인을 받은 뒤에 만든다.
 - env-engineer가 환경을 만들고, qa-engineer가 `qa-verification` 스킬에 따라 검증한다. 둘은 SendMessage로 문제를 주고받는다.
 - Environment Ready 체크리스트(`env-bootstrap` 스킬)가 모두 통과하거나, 실패 항목에 사용자 승인이 난 뒤에만 Gate ③으로 넘어간다.
-- 이 Gate에서 사용자에게 **미결정 4번(팀 웹서버의 Superset 운영 조건)** 을 질문한다. 운영자 확인이 필요한 항목이므로, 답을 모르면 "웹서버 운영자 확인 필요"라고 전달한다. 확인 중이면 Superset은 로컬 `compose.yml`에만 포함한다.
+- **미결정 4번(팀 웹서버의 Superset 운영 조건)은 "결정됨"이다(2026-10-11).** 추가 컨테이너 운영이 허용되어 Superset은 `compose.yml`의 정식 서비스이고, Redis/Valkey는 제외하며, BI-Wizard는 메인 플랫폼의 URL 하위 경로(`APP_BASE_PATH`, `SUPERSET_APP_ROOT`)로 서비스되고, 메모리는 프로젝트 전체 8GB로 시작한다(`docs/decisions/03a-deploy-environment.md`). 웹서버 배포 때 관리자와 맞출 항목은 `docs/deploy-coordination.md`에 모은다. 새로 알게 된 협의 항목은 이 파일에 추가한다.
 - **미결정 1번(Azure OpenAI 항목 처리)은 "제외"로 결정됐다(2026-10-11).** `.env.example`에 Azure OpenAI 변수를 넣지 않고 `/health/azure-openai`를 만들지 않으며, 체크리스트 항목은 "해당 없음"이다.
 - BAT 파일은 작성만 하고, 실행 검증 요청서를 사용자에게 준다.
 

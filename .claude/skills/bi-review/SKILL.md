@@ -35,7 +35,8 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 
 ### 5. 경계 (중요)
 - 브라우저 코드가 DB나 Superset 내부를 직접 호출하지 않는지 확인한다.
-- API 주소가 상대경로 `/api`인지 확인한다.
+- API 주소가 `APP_BASE_PATH` 기준 상대경로(`${APP_BASE_PATH}/api`)인지 확인한다. `/api`, `/superset`, `/bi-wizard` 같은 경로가 코드에 하드코딩되어 있으면 중요 항목이다(하위 경로 배포, `docs/decisions/03a-deploy-environment.md`).
+- Superset 경로는 접두를 떼지 않고 그대로 전달하는 구성인지 확인한다. 포털의 접두 처리는 설정값만으로 전환되는지 본다.
 
 ### 6. Skill 동기화 (중요)
 - 기능 코드가 바뀌었는데 `skills/<기능>/SKILL.md`가 갱신되지 않았다면 완료로 보지 않는다.
@@ -43,7 +44,8 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 
 ### 7. 미결정 사항 (차단)
 - 브리프 5절의 미결정 항목을 임의로 정한 흔적이 없는지 확인한다. `docs/gate-status.md`의 미결정 표가 현재 상태의 정본이다.
-- 수식 범위(2번), 생성 권한(3번), Superset 운영 조건(4번), 수식 평가 경로(6번), Explore 제공 방식(7번)이 승인 전에 코드에 확정되어 있으면 차단 항목이다.
+- 수식 범위(2번), 생성 권한(3번), 수식 평가 경로(6번), Explore 제공 방식(7번)이 승인 전에 코드에 확정되어 있으면 차단 항목이다.
+- 결정된 Superset 운영 조건(4번)을 어기면 차단이다: Redis/Valkey 또는 Celery 서비스를 사용자 승인 없이 추가, Superset 이미지를 `6.1.0`이 아닌 태그로 변경, Superset 내부 코드 수정(브리프 4.6), 서비스에 `mem_limit` 누락 또는 한도 합계가 8GB 초과(`docs/decisions/03a-deploy-environment.md`).
 - 결정된 항목을 어기면 차단이다. Azure OpenAI(1번)는 "제외"로 결정됐으므로 `AZURE_OPENAI_*` 변수, `/health/azure-openai`, Azure OpenAI 호출 코드가 사용자 승인 없이 들어 있으면 차단한다. 디자인(5번) 결정은 `docs/decisions/01-design-direction.md`를 따른다.
 
 ### 7-1. 마이그레이션 (D2·D3·D5·D4·D6·D7, `docs/decisions/03-migration-tool.md`)

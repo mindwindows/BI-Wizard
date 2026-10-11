@@ -68,7 +68,7 @@
 - `service_completed_successfully`의 Podman 계열 지원(`podman-compose`, Podman의 `docker compose` provider). 개발자 PC가 Podman이면 **사용자 PC 검증 대상**이다.
 - Windows 경로 bind mount 동작(마이그레이션 파일을 컨테이너에서 호스트로 가져오는 경로).
 - Jenkins 에이전트의 Docker 사용 가능 여부 (D6의 Jenkins 적용을 정하기 위한 선행 확인).
-- Superset 내부 Alembic과 `alembic_version` 테이블 충돌 가능성은 D7(별도 데이터베이스)로 피한다. Superset의 팀 웹서버 운영 조건은 브리프 5절 4번(운영자 확인 중)이다.
+- Superset 내부 Alembic과 `alembic_version` 테이블 충돌 가능성은 D7(별도 데이터베이스)로 피한다. Superset의 팀 웹서버 운영 조건은 브리프 5절 4번에서 결정됐다(`docs/decisions/03a-deploy-environment.md`: 정식 서비스, Redis/Valkey 제외, 하위 경로 배포, 메모리 8GB).
 - 코드나 설정을 실행해 검증한 항목은 없다. 학습 비용은 모두 추정이다.
 
 ## 하네스 반영

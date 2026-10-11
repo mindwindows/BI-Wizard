@@ -12,8 +12,8 @@ description: BI-Wizard 프런트엔드(React, AG Grid Community)의 구현 규�
 
 ## 필수 규칙
 - **`ag-grid-enterprise`를 설치하지 않는다.** 필요해 보이는 기능이 Enterprise 전용인지 먼저 확인한다.
-- **API는 상대경로:** `/api`로 호출한다. 주소를 하드코딩하지 않는다.
-- **DB와 Superset 직접 호출 금지:** 모든 데이터는 FastAPI를 거친다.
+- **API는 상대경로:** `${APP_BASE_PATH}/api`로 호출한다(호스트 없는 상대경로, 하위 경로 배포). 주소와 경로 접두(`/api`, `/bi-wizard` 등)를 하드코딩하지 않는다. `APP_BASE_PATH`는 프런트에 넘기는 유일한 공개 설정이며 빌드·런타임 기준 경로(Vite `base` 등)에 쓴다.
+- **DB와 Superset 직접 호출 금지:** 모든 데이터는 FastAPI를 거친다. 예외는 Embedded SDK가 만드는 Superset iframe뿐이며, `supersetDomain`은 `SUPERSET_APP_ROOT`를 포함한 주소로 구성한다.
 - **Secret 금지:** 번들에 `.env` 값을 넣지 않는다. 필요한 공개 설정만 런타임에 받는다.
 
 ## AG Grid Community의 한계와 대응

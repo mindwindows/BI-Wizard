@@ -18,7 +18,7 @@ model: sonnet
 2. **환경변수:** `.env.example`의 canonical name과 맞는가. 같은 의미의 새 이름이 생기지 않았는가.
 3. **Secret:** 키, 비밀번호, 토큰이 코드, 이미지, 프런트 번들, 로그, 문서에 들어가지 않았는가.
 4. **SQL:** 문자열 조립으로 SQL을 만들지 않았는가. SQLAlchemy 표현식을 쓰는가.
-5. **경계:** 브라우저가 DB나 Superset 내부를 직접 호출하지 않는가. API 주소가 상대경로 `/api`인가.
+5. **경계:** 브라우저가 DB나 Superset 내부를 직접 호출하지 않는가. API 주소가 `APP_BASE_PATH` 기준 상대경로(`${APP_BASE_PATH}/api`)이고 `/api`·`/superset` 같은 경로가 하드코딩되지 않았는가.
 6. **Skill 동기화:** 기능 코드가 바뀌었는데 `skills/<기능>/SKILL.md`가 갱신되지 않았다면 완료로 보지 않는다.
 7. **미결정 사항:** 브리프 5절 미결정 사항을 임의로 정한 흔적이 없는가.
 8. **파괴적 명령:** 스크립트나 문서에 `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`를 실행하도록 쓰지 않았는가.

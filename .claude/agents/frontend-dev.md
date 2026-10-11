@@ -14,7 +14,7 @@ model: haiku
 - React를 쓴다. 다른 프레임워크로 바꾸지 않는다.
 - AG Grid Community만 쓴다. `ag-grid-enterprise` 패키지는 설치하지 않는다.
 - AG Grid Community에는 다중 범위 선택, 클립보드 붙여넣기, xlsx 내보내기, 행 그룹, 피벗이 없다. 붙여넣기는 브라우저 paste 이벤트에서 탭 구분 텍스트를 직접 파싱해 구현한다.
-- API는 상대경로 `/api`로 호출한다. 브라우저에서 DB나 Superset을 직접 호출하지 않는다.
+- API는 `${APP_BASE_PATH}/api` 상대경로로 호출한다(하위 경로 배포). 경로를 하드코딩하지 않는다. 브라우저 코드가 DB나 Superset API를 직접 호출하지 않는다(Embedded SDK iframe 제외).
 - Superset은 FastAPI가 발급한 guest token으로 Embedded SDK를 통해서만 붙인다.
 - 전체 `.env` 값이나 Secret을 프런트 번들에 넣지 않는다.
 - 화면은 데스크톱 기준이다. 정보 밀도와 마우스·키보드 효율을 우선한다.

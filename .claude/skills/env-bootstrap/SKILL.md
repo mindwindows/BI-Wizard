@@ -13,7 +13,7 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - 종료: `docker compose down` (볼륨 삭제 옵션 금지)
 - 서비스: `postgres`, `migrate`(일회성), `backend`, `frontend`, 그리고 확인 후 추가되는 Superset 관련 서비스. 테스트 전용 PostgreSQL 서비스는 compose profile `test`에만 있다.
 - Health: `/health`, `/health/db`를 업무 API보다 먼저 만든다. `/health/azure-openai`는 만들지 않는다(브리프 5절 1번 결정: 제외).
-- Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API는 상대경로 `/api`와 프록시로 연결한다.
+- Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API는 호스트 없는 상대경로 `${APP_BASE_PATH}/api`와 프록시로 연결한다(하위 경로 배포, 아래 "하위 경로 배포와 메모리").
 - BAT 6종: `start-local.bat`, `stop-local.bat`, `restart-local.bat`, `logs-local.bat`, `health-check.bat`, `validate-env.bat`. Linux 세션에서는 작성만 한다.
 
 ## 환경변수 규칙
@@ -29,7 +29,15 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 
 ## 미결정·결정 사항 반영 방식
 - **Azure OpenAI (브리프 5절 1번, 결정됨: 제외):** `.env.example`에서 `AZURE_OPENAI_*` 변수를 뺀다. `/health/azure-openai`는 만들지 않는다. Environment Ready 체크리스트의 해당 항목은 "해당 없음"으로 표시한다. 이후 LLM 사용이 생기면 사용자 승인 후에 다시 논의한다.
-- **Superset과 캐시 서비스 (브리프 5절 4번):** 로컬 `compose.yml`에만 넣는다. 팀 웹서버 구성은 운영자 확인 전까지 확정하지 않는다. Redis 대체로 Valkey를 쓸 수 있으나 라이선스 확인은 사용자 승인 후에 한다.
+- **Superset (브리프 5절 4번, 결정됨):** `compose.yml`의 **정식 서비스**다. 이미지는 `6.1.0`으로 고정한다. **Redis/Valkey는 두지 않는다**(Superset 기본 캐시가 메타데이터 DB). 필요해 보이면 추가하지 말고 메인에게 알린다. 실제 하위 경로 값과 프록시 접두 처리 같은 배포 협의 항목은 `docs/deploy-coordination.md`에 추가한다.
+
+## 하위 경로 배포와 메모리 (`docs/decisions/03a-deploy-environment.md`)
+- **변수:** `APP_BASE_PATH`(포털 하위 경로)와 `SUPERSET_APP_ROOT`(Superset 하위 경로, Superset 공식 변수명 그대로)만 쓴다. 형식은 루트 배포는 빈 값, 아니면 앞 `/` 필수·뒤 `/` 금지다. 두 값은 독립 값이며 한쪽에서 다른 쪽을 파생하지 않는다. 같은 의미의 다른 이름을 만들지 않는다. `.env.example`에는 예시 값 `/bi-wizard`, `/bi-wizard/superset`과 "운영자 확인 필요" 주석을 둔다. 프런트 컨테이너에는 `APP_BASE_PATH`만 공개 설정으로 넘긴다.
+- **프록시 접두 처리:** 포털(frontend·backend)은 접두를 떼고 넘기는 방식과 그대로 넘기는 방식을 **설정값만으로** 전환할 수 있게 구성한다. Superset은 접두를 **떼지 않고 그대로** 넘긴다(6.1.0은 접두로 시작하지 않는 요청에 404).
+- **로컬 재현:** 로컬 검증은 경로 값을 `/bi-wizard`, `/bi-wizard/superset`으로 둔다(빈 값 아님). frontend nginx가 메인 플랫폼 프록시 역할을 재현하고, 사용자 브라우저가 Superset 경로에 직접 접근할 수 있어야 한다.
+- **API 경로:** 프런트는 `${APP_BASE_PATH}/api`로 호출한다(호스트 없는 상대경로). `/api`나 `/superset`을 코드에 하드코딩하지 않는다.
+- **Superset:** 이미지 `6.1.0` 고정, 하위 경로는 공식 문서상 BETA다. `GUEST_TOKEN_JWT_SECRET`, `SECRET_KEY`는 `.env` Secret으로 덮어쓴다(기본값은 자리표시 값). 설정은 환경변수에서 읽는 고정 `superset_config.py`로 전달한다. **하위 경로 버그가 재현되면 Superset 내부 코드를 수정하지 말고**, 대안과 각 영향을 정리해 메인에게 보고하고 멈춘다.
+- **메모리:** `compose.yml`에 `mem_limit`을 고정한다(postgres 1.5GB, superset 2.0GB, backend 1.0GB, frontend 256MB, migrate 512MB, superset-init 1.0GB, postgres-test 512MB). 합계는 8GB 안이다. Redis/Valkey와 Celery는 두지 않는다. 숫자는 추정이므로 기동 후 `docker stats`로 실측해 보고한다.
 
 ## 마이그레이션 구성 (`docs/decisions/03-migration-tool.md`)
 - **도구:** Alembic(D1). backend 이미지에 패키지를 추가하고 마이그레이션 디렉터리(제안: `backend/migrations/`)와 설정 골격을 둔다. 업무 테이블 revision은 만들지 않는다. 왕복 테스트를 돌릴 수 있도록 업무 테이블이 없는 기준(baseline) revision 하나(`upgrade`와 `downgrade` 모두 동작)만 둔다.
@@ -48,7 +56,9 @@ description: Gate ② ENVIRONMENT BOOTSTRAP에서 실행 환경(compose.yml, Doc
 - [ ] Compose 시작과 종료가 실제로 성공한다. (Docker 데몬이 필요하다. 불가하면 `qa-verification` 절차를 따른다.)
 - [ ] `migrate` 서비스가 성공 완료된 뒤에만 `backend`가 시작된다(`depends_on` 조건). `migrate`를 실패시켰을 때 `backend`가 시작되지 않는지도 확인한다.
 - [ ] 마이그레이션 왕복 테스트: tmpfs 테스트 DB(profile `test`)에서 upgrade → downgrade → upgrade가 성공한다. 정리는 `-v` 없는 `docker compose down`이다.
-- [ ] Superset 메타데이터 DB가 별도 데이터베이스이고, Superset의 업무 데이터 연결이 읽기 전용 계정이다. (Superset 서비스는 로컬 compose에만 있다. 미결정 4번 확인 전.)
+- [ ] Superset 메타데이터 DB가 별도 데이터베이스이고, Superset의 업무 데이터 연결이 읽기 전용 계정이다. (Superset은 `compose.yml`의 정식 서비스, 이미지 `6.1.0`.)
+- [ ] **하위 경로 + Embedded 동작:** 경로 값을 `/bi-wizard`, `/bi-wizard/superset`으로 두고 frontend nginx 프록시를 거쳐 다음을 확인한다. 포털 페이지와 정적 파일이 `${APP_BASE_PATH}/` 아래에서 열린다. `${APP_BASE_PATH}/api/health`가 응답한다. Superset 로그인 화면과 정적 파일이 `${SUPERSET_APP_ROOT}/` 아래에서 열린다(중복 접두 `/…/superset/superset/…`가 없다). Embedded 대시보드(`/embedded/<id>`)가 iframe으로 열린다. 포털의 접두 처리 설정값을 전환해도 동작한다. 재현되는 버그가 있으면 Superset 내부 코드를 수정하지 않고 대안과 영향을 보고한다.
+- [ ] 메모리: 모든 서비스에 `mem_limit`이 있고 합계가 8GB 안이다. `docker stats` 실측값과 5MB급 엑셀 샘플의 backend 사용량을 보고했다.
 - [ ] Frontend에서 FastAPI로 최소 통신이 된다.
 - [ ] Backend에서 PostgreSQL 연결 상태를 실제로 확인한다.
 - [ ] Azure OpenAI 검증 경로: **해당 없음** (브리프 5절 1번 결정: 제외. 변수와 Health 경로를 만들지 않았는지만 확인한다.)

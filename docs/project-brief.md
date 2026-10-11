@@ -80,7 +80,7 @@ BI-Wizard/
 - 시작: `docker compose up -d --build` / 종료: `docker compose down`
 - 서비스: 최소 `postgres / backend / frontend` + 이 프로젝트에 필요한 Superset 관련 서비스. DB Health Check 후 Backend가 시작되도록 의존성 정의.
 - Health Check: `/health`, `/health/db` 를 업무 API보다 먼저 만든다. Superset 컨테이너 상태도 같은 방식으로 확인할 수 있게 한다.
-- Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API 주소는 상대경로 `/api` + 프록시 방식.
+- Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다. API 주소는 호스트 없는 상대경로 + 프록시 방식이다. 하위 경로 배포(5절 4번 결정)에서는 `${APP_BASE_PATH}/api`다(`docs/decisions/03a-deploy-environment.md`).
 - Jenkinsfile 초기 Stage: Checkout → Env Validation → Backend Lint/Test → Frontend Lint/Test/Build → `docker compose config` → Docker Build. 실패 시 이후 단계 중단.
 - Windows BAT 5종(start / stop / restart / logs / health-check) + validate-env 제공.
   - 클라우드 Claude Code 세션은 Ubuntu 리눅스이므로 **BAT 파일은 작성만 가능하고 세션 안에서 실행 검증은 불가**하다. BAT 검증은 사용자의 Windows PC에서 한다.
@@ -156,7 +156,7 @@ Environment Ready 체크리스트(전부 통과 시 기능 개발 시작):
 | CI | Jenkins | MIT |
 
 주의:
-- **Redis**는 7.4부터 라이선스가 바뀌었다. 회사 정책상 문제가 되면 **Valkey**(BSD-3, Redis 호환)로 대체한다.
+- **Redis**는 7.4부터 라이선스가 바뀌었다. 회사 정책상 문제가 되면 **Valkey**(BSD-3, Redis 호환)로 대체한다. (이 프로젝트는 Redis/Valkey를 쓰지 않기로 했다. 5절 4번 참고.)
 - **Docker Desktop**은 일정 규모 이상 기업에서 유료. 서버의 Docker Engine은 무관하며, 개발 PC는 Podman 등으로 대체 가능.
 - DB 마이그레이션 도구는 운영 가이드("신규 프로젝트에서만 필요한 조합을 제안")에 따라 ENVIRONMENT BOOTSTRAP 단계에서 제안·확정한다. → **결정됨 (2026-10-11): Alembic.** 실행 방식과 규칙은 `docs/decisions/03-migration-tool.md` 참고.
 
@@ -172,7 +172,12 @@ Environment Ready 체크리스트(전부 통과 시 기능 개발 시작):
    - 운영 가이드의 기본 구성에서 벗어나는 의도적 차이다. 이후 LLM을 쓰게 되면 사용자 승인을 받아 다시 논의한다.
 2. **수식 범위의 첫 버전**: 같은 행 안의 계산만 / 다른 표 참조(VLOOKUP류)까지 / 집계(SUMIF·롤업)까지. 사용자는 "라이선스 문제없이 가능한지"를 먼저 확인했고, 난이도는 추후 검토하기로 했다.
 3. **새 데이터셋 생성 권한**: 편집자 전원 / 관리자(또는 팀별 담당자)로 제한.
-4. **팀 웹서버의 Superset 운영 조건**: Superset 사용은 확정됐다. 다만 운영 가이드의 기본 서비스 구성은 postgres/backend/frontend이므로, 팀 웹서버에서 Superset(및 캐시용 Redis/Valkey)을 추가 서비스로 띄울 수 있는지, 포트·도메인·리소스 조건은 어떤지 **웹서버 운영자 확인**이 필요하다. 확인 전까지는 로컬 `compose.yml`에 Superset 서비스를 포함해 개발한다.
+4. **팀 웹서버의 Superset 운영 조건**: Superset 사용은 확정됐다. 다만 운영 가이드의 기본 서비스 구성은 postgres/backend/frontend이므로, 팀 웹서버에서 Superset(및 캐시용 Redis/Valkey)을 추가 서비스로 띄울 수 있는지, 포트·도메인·리소스 조건은 어떤지 **웹서버 운영자 확인**이 필요하다. 확인 전까지는 로컬 `compose.yml`에 Superset 서비스를 포함해 개발한다. → **결정됨 (2026-10-11, 사용자 결정)**: `docs/decisions/03a-deploy-environment.md` 참고.
+   - 추가 컨테이너 운영은 허용된다. **Superset은 `compose.yml`의 정식 서비스**로 포함한다(로컬 한정이 아니다).
+   - **Redis/Valkey는 제외한다.** Superset 기본 캐시가 메타데이터 DB여서 필수가 아니고 메모리를 아낀다. 필요해지면 다시 논의한다.
+   - BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로**로 서비스된다(`APP_BASE_PATH`, `SUPERSET_APP_ROOT`).
+   - 메모리는 **프로젝트 전체 합계 8GB**로 시작하고, 부족하면 증설을 요청할 수 있다.
+   - 실제 경로 값, 프록시 접두 처리 방식 등 웹서버 배포 때 관리자와 맞출 항목은 `docs/deploy-coordination.md`에 모은다.
 5. **디자인 방향**: 운영 가이드 1단계(RESEARCH & DECIDE)에서 2~3안을 비교한 뒤 사용자가 선택. → **결정됨 (2026-10-11, Gate ①)**: `docs/decisions/01-design-direction.md` 참고.
 6. **수식 미리보기·자동완성을 위한 저장 전 수식 평가 경로** (Gate ① 조사에서 추가, **Gate ③에서 결정**): 수식 편집기의 라이브 결과 미리보기, 열 이름 자동완성, "예시 값" 후보는 저장 전에 수식을 평가하는 경로(예: 서버에서 샘플 행으로 평가)가 있어야 가능하다. 어떤 경로로 제공할지, 수식 범위(2번)와 어떻게 맞출지 정한다.
 7. **Superset 차트 작성 화면(Explore)을 포털에서 어떻게 제공할지** (Gate ① 조사에서 추가, **Gate ③에서 결정**): Embedded SDK로 가능한 범위를 Superset 공식 문서로 확인한 뒤 결정한다. 4번(팀 웹서버 Superset 운영 조건)과 관련된다.

@@ -14,6 +14,7 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 - **Health 우선:** `/health`, `/health/db`를 업무 API보다 먼저 만든다.
 - **SQL 문자열 금지:** 수식→SQL 변환을 포함해 SQL을 문자열로 조립하지 않는다. SQLAlchemy Core 또는 ORM 표현식을 쓴다.
 - **단일 통로:** 브라우저의 모든 데이터 요청은 FastAPI를 거친다.
+- **하위 경로:** FastAPI는 `APP_BASE_PATH`를 `root_path`로 읽는다. 프록시가 접두를 떼고 넘기는 방식과 그대로 넘기는 방식을 설정값만으로 전환할 수 있어야 한다(`docs/decisions/03a-deploy-environment.md`). 경로 접두를 코드에 하드코딩하지 않는다.
 - **Secret:** DB 비밀번호, 키는 환경변수에서만 읽는다. 로그와 응답에 넣지 않는다.
 - **환경변수:** `.env.example`의 canonical name만 쓴다.
 - **라이선스:** 허용형 패키지만 추가한다. 추가 전 `bi-review`의 라이선스 항목을 확인한다.
