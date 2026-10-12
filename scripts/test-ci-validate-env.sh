@@ -243,6 +243,30 @@ expect_fail "소스의 동적 import(ag-charts-enterprise)" "AG Grid Enterprise 
 expect_fail "소스의 옛 패키지 @ag-grid-enterprise/ import" "AG Grid Enterprise 패키지를 import" src_add "import '@ag-grid-enterprise/all-modules';"
 expect_fail "의존성에 ^ 범위 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "^1.2.3"'
 expect_fail "의존성에 latest 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "latest"'
+lock_raw() { # package-lock.json의 "packages": { 바로 다음 줄에 원문 줄을 넣는다
+  sed -i "s|^  \"packages\": {|  \"packages\": {\n    $1|" "$WORK/frontend/package-lock.json"
+}
+pkg_no_sections() { printf '{\n  "name": "x",\n  "version": "1.0.0"\n}\n' > "$WORK/frontend/package.json"; }
+pkg_tab_indent() { sed -i 's/^  /\t/' "$WORK/frontend/package.json"; }
+src_file() { mkdir -p "$WORK/frontend/src" && printf '%s\n' "$2" >> "$WORK/frontend/src/$1"; }
+src_multiline() { mkdir -p "$WORK/frontend/src" && printf 'import {\n  X,\n} from\n  "ag-grid-enterprise";\n' > "$WORK/frontend/src/multi.ts"; }
+expect_fail "package.json에 레거시 ag-grid-charts-enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"ag-grid-charts-enterprise": "34.0.0"'
+expect_fail "package.json의 npm 별칭으로 enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"alias-lib": "npm:ag-grid-enterprise@34.0.0"'
+expect_fail "package.json에 @ag-grid-enterprise/ 범위 패키지" "AG Grid Enterprise 패키지" fe_pkg_add '"@ag-grid-enterprise/all-modules": "31.0.0"'
+expect_fail "lock의 resolved URL에 enterprise(별칭 키)" "AG Grid Enterprise 패키지" lock_raw '"node_modules/innocent": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/ag-grid-enterprise/-/ag-grid-enterprise-34.0.0.tgz"},'
+expect_fail "lock의 name 필드에 enterprise" "AG Grid Enterprise 패키지" lock_raw '"node_modules/innocent": {"name": "ag-charts-enterprise", "version": "1.0.0"},'
+expect_fail "lock에 레거시 ag-grid-charts-enterprise 키" "AG Grid Enterprise 패키지" lock_raw '"node_modules/ag-grid-charts-enterprise": {"version": "1.0.0"},'
+expect_fail "의존성 섹션을 하나도 찾지 못함(fail-open 방지)" "의존성 섹션" pkg_no_sections
+expect_fail "탭 들여쓰기 package.json은 검사할 수 없어 실패" "의존성 섹션" pkg_tab_indent
+expect_fail ".mjs 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.mjs 'import "ag-grid-enterprise";'
+expect_fail ".cjs 소스의 require" "AG Grid Enterprise 패키지를 import" src_file mod.cjs 'const g = require("ag-grid-enterprise");'
+expect_fail ".mts 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.mts "import { A } from 'ag-charts-enterprise';"
+expect_fail ".cts 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.cts "import 'ag-grid-charts-enterprise';"
+expect_fail "블록 주석 뒤 같은 줄의 import" "AG Grid Enterprise 패키지를 import" src_file c.ts '/* x */ import "ag-grid-enterprise";'
+expect_fail "from 뒤 줄바꿈 import" "AG Grid Enterprise 패키지를 import" src_multiline
+expect_fail "소스의 레거시 이름 import" "AG Grid Enterprise 패키지를 import" src_file d.ts 'import "ag-grid-charts-enterprise/dist";'
+expect_pass "블록 주석 줄만의 언급" src_file e.ts '/* ag-grid-enterprise 금지 "ag-grid-enterprise" */'
+expect_pass "별표 주석 줄만의 언급" src_file f.ts ' * import "ag-grid-enterprise" 금지'
 expect_pass "소스 주석에만 ag-grid-enterprise 언급" src_add '// ag-grid-enterprise 는 금지(import "ag-grid-enterprise" 쓰지 말 것)'
 
 # --- 파괴적 명령 ---

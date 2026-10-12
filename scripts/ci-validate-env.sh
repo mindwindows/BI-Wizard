@@ -12,8 +12,9 @@
 #     guest token(EW-4, AP-1): backend와 migrate는 GUEST_TOKEN_JWT_SECRET을 받지 않고(직접 서명 금지) backend/app 코드에도 이
 #     이름이 없다. superset/superset_config.py는 GUEST_ROLE_NAME을 bi_guest로 두고 PUBLIC_ROLE_LIKE와
 #     GUEST_TOKEN_JWT_EXP_SECONDS(입장권 유효 시간, 기본 300초 유지, EW-5)를 설정하지 않는다.
-#  6) AG Grid Enterprise 혼입 방지(03b 15절): frontend/package.json과 package-lock.json에 ag-grid-enterprise, ag-charts-enterprise가
-#     없고 frontend/src에도 import하지 않으며, frontend 의존성은 정확한 버전으로 고정한다(^ ~ * latest 범위 금지).
+#  6) AG Grid Enterprise 혼입 방지(03b 15절): frontend/package.json과 package-lock.json에 ag-...enterprise 계열과
+#     @ag-grid-enterprise/*가 없고(key, name, resolved, 별칭 값 모두) frontend/src 코드에도 문자열로 나오지 않으며, frontend 의존성은
+#     정확한 버전으로 고정한다(^ ~ * latest 범위 금지, 의존성 섹션을 찾지 못하면 실패).
 #  7) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
 # 사용: sh scripts/ci-validate-env.sh [출력파일]
 # 이 검사의 네거티브 케이스 시험: sh scripts/test-ci-validate-env.sh
@@ -241,35 +242,50 @@ if service_code frontend | grep -Eq '^[[:space:]]+(-[[:space:]]*)?[A-Z_]*(POSTGR
 fi
 
 # AG Grid Enterprise 혼입 방지(03b 15절): 커뮤니티 에디션만 쓴다. 파일이나 frontend/src 가 아직 없으면 해당 검사는 건너뛴다.
-# 이름이 정확히 같은 키("이름") 또는 lock 파일의 "node_modules/이름" 키(중첩 경로 포함)만 막는다.
+# 이름 패턴: ag-...enterprise 계열 전체(ag-grid-enterprise, ag-charts-enterprise, ag-grid-charts-enterprise 등)와
+# @ag-grid-enterprise/*. package.json/package-lock.json 은 키뿐 아니라 "name", "resolved" URL, npm 별칭 값
+# ("x": "npm:ag-grid-enterprise@1") 등 어느 위치든 줄에 패턴이 나오면 실패시킨다(JSON에는 주석이 없다).
 FE_PKG=frontend/package.json
 FE_LOCK=frontend/package-lock.json
 FE_SRC=frontend/src
-ENTERPRISE_KEY='"([^"]*node_modules/)?(ag-grid-enterprise|ag-charts-enterprise|@ag-grid-enterprise/[^"]*)"'
+ENT_NAME='(ag-[A-Za-z0-9._-]*enterprise|@ag-grid-enterprise/)'
 for file in "$FE_PKG" "$FE_LOCK"; do
   [ -f "$file" ] || continue
-  if grep -Eq "$ENTERPRISE_KEY" "$file"; then
-    fail "$file 에 AG Grid Enterprise 패키지(ag-grid-enterprise, ag-charts-enterprise)가 있습니다(커뮤니티 에디션만 허용)."
+  if grep -Eq "$ENT_NAME" "$file"; then
+    fail "$file 에 AG Grid Enterprise 패키지(ag-...enterprise 계열, @ag-grid-enterprise/*)가 있습니다(커뮤니티 에디션만 허용)."
   fi
 done
 if [ -d "$FE_SRC" ]; then
-  # 주석 줄(// * /*)은 제외하고 import/require/동적 import 구문만 본다(문서의 금지 문구 오탐 방지).
-  find "$FE_SRC" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \) > "${TMPDIR:-/tmp}/ci-validate-fe-src.$$"
+  # 줄 단위로 검사한다. 순수 주석 줄(// * /* 로 시작하고 같은 줄에 코드가 없는 줄)은 제외한다(문서의 금지 문구 오탐 방지).
+  # 줄 앞의 `/* ... */` 는 떼고 남은 코드를 검사한다. 따옴표 문자열 "ag-...enterprise" 가 코드에 나오면
+  # import/require/동적 import/from 뒤 줄바꿈 import 모두 걸린다(문자열 자체를 본다).
+  fe_list="${TMPDIR:-/tmp}/ci-validate-fe-src.$$"
+  find "$FE_SRC" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
+    -o -name '*.mjs' -o -name '*.cjs' -o -name '*.mts' -o -name '*.cts' \) > "$fe_list"
   while IFS= read -r srcfile; do
-    if grep -Ev '^[[:space:]]*(//|\*|/\*)' "$srcfile" |
-      grep -Eq "(import|require|from)[[:space:]]*\(?[[:space:]]*[\"'](ag-grid-enterprise|ag-charts-enterprise|@ag-grid-enterprise/)"; then
+    if sed -E 's#^[[:space:]]*/\*.*\*/##' "$srcfile" | grep -Ev '^[[:space:]]*(//|\*|/\*)' |
+      grep -Eq "[\"'\`](ag-[A-Za-z0-9._-]*enterprise|@ag-grid-enterprise/)"; then
       fail "$srcfile 이(가) AG Grid Enterprise 패키지를 import 합니다(커뮤니티 에디션만 허용)."
     fi
-  done < "${TMPDIR:-/tmp}/ci-validate-fe-src.$$"
-  rm -f "${TMPDIR:-/tmp}/ci-validate-fe-src.$$"
+  done < "$fe_list"
+  rm -f "$fe_list"
 fi
 # frontend 의존성은 정확한 버전 고정이다(블록 스타일 JSON 전제: 섹션은 2칸 들여쓰기, 항목은 한 줄에 하나).
+# 의존성 섹션을 하나도 찾지 못하면 실패한다(탭 들여쓰기·한 줄 JSON 등 검사할 수 없는 형식이 통과하는 fail-open 방지).
 if [ -f "$FE_PKG" ]; then
-  unpinned="$(awk '
-    /^  "(dependencies|devDependencies|optionalDependencies|peerDependencies|overrides)"[[:space:]]*:[[:space:]]*\{/ { on = 1; next }
+  pkg_scan="$(awk '
+    /^  "(dependencies|devDependencies|optionalDependencies|peerDependencies|overrides)"[[:space:]]*:[[:space:]]*\{/ {
+      print "@@SECTION"
+      if ($0 !~ /\{[[:space:]]*\}/) on = 1
+      next
+    }
     on && /^  \}/ { on = 0 }
     on { print }
-  ' "$FE_PKG" | grep -E ':[[:space:]]*"' | grep -Ev ':[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?"' || true)"
+  ' "$FE_PKG")"
+  if ! printf '%s\n' "$pkg_scan" | grep -q '^@@SECTION$'; then
+    fail "$FE_PKG 에서 의존성 섹션(dependencies 등)을 찾지 못했습니다(2칸 들여쓰기 블록 스타일 JSON만 검사할 수 있습니다)."
+  fi
+  unpinned="$(printf '%s\n' "$pkg_scan" | grep -E ':[[:space:]]*"' | grep -Ev ':[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?"' || true)"
   if [ -n "$unpinned" ]; then
     fail "$FE_PKG 에 정확한 버전이 아닌 의존성이 있습니다(^ ~ * latest 범위 금지): $(printf '%s' "$unpinned" | tr -s '[:space:]' ' ')"
   fi
