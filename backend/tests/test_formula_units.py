@@ -434,6 +434,24 @@ def test_create_view_rejects_a_render_mismatch_before_touching_the_database():
         ddl.create_view(_NoDatabase(), "dv", 5, _plan_select(), render=tampered)  # type: ignore[arg-type]
 
 
+def test_create_view_requires_the_exact_definition_not_just_a_suffix_after_some_as():
+    from app.formula import render_literal_sql
+
+    def only_the_part_after_a_column_alias(statement, dialect):
+        full = render_literal_sql(statement, dialect)
+        assert " AS " in full  # 열 별칭의 ` AS `
+        return full.partition(" AS ")[2]  # 정의 중간 ` AS ` 뒤 일부뿐인 글자
+
+    with pytest.raises(ddl.DdlVerificationError):
+        ddl.create_view(
+            _NoDatabase(),  # type: ignore[arg-type]
+            "dv",
+            5,
+            _plan_select(),
+            render=only_the_part_after_a_column_alias,
+        )
+
+
 def test_create_view_rejects_a_function_outside_the_allow_list_before_touching_the_database():
     from app.formula import render_literal_sql
 

@@ -660,6 +660,51 @@ def errors_ds_for_timeout(api, db, world):
     return {"id": dataset["id"]}
 
 
+# --- 문장 시간 초과(57014): 수식과 무관한 읽기는 503, D3 미리보기만 422 ---
+
+
+def test_statement_timeout_is_503_for_plain_reads_but_422_for_the_preview(
+    api, db, errors_ds_for_timeout, monkeypatch, caplog
+):
+    from app.formula import service
+
+    monkeypatch.setattr(service, "READ_STATEMENT_TIMEOUT", "300ms")  # 실제 5초 대기를 피한다
+    dataset_id = errors_ds_for_timeout["id"]
+    column_id = next(
+        c["id"]
+        for c in api("viewer", "GET", f"/api/datasets/{dataset_id}").json()["columns"]
+        if c.get("kind") == "formula"
+    )
+    holder = db.writer.connect()
+    try:
+        holder.execute(sa.text("BEGIN"))
+        holder.execute(sa.text(f"LOCK TABLE bi_data.ds_{dataset_id} IN ACCESS EXCLUSIVE MODE"))
+        with caplog.at_level("WARNING"):
+            plain = {
+                "d6": api("viewer", "GET", f"/api/datasets/{dataset_id}/formulas/{column_id}"),
+                "d7": api("viewer", "GET", "/api/checks/formula-errors"),
+                "d8": api("viewer", "GET", f"/api/datasets/{dataset_id}/formula-errors"),
+            }
+        preview = api(
+            "definer",
+            "POST",
+            f"/api/datasets/{dataset_id}/formulas/preview",
+            json={"expression": "[값] + 1"},
+        )
+    finally:
+        holder.rollback()
+        holder.close()
+    for name, response in plain.items():
+        assert response.status_code == 503, (name, response.text)
+        assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+        for leaked in ("SELECT", "bi_data", "Traceback"):
+            assert leaked not in response.text
+    assert "sqlstate=57014" in caplog.text and f"dataset_id={dataset_id}" in caplog.text
+    assert "SELECT" not in caplog.text
+    assert preview.status_code == 422, preview.text
+    assert preview.json()["error"]["code"] == "FORMULA_RUNTIME_ERROR"
+
+
 # --- 시작 때 동기 대조가 서비스 시작을 막는 시간 (reviewer R5) ----
 
 FIFTY = 50

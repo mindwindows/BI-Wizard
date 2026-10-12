@@ -588,7 +588,10 @@ def create_view(
     for or_replace in (False, True):
         statement = _create_view_statement(kind, dataset_id, selectable, or_replace=or_replace)
         compiled = str(statement.compile(dialect=dialect))
-        if not (compiled.endswith(rendered) and compiled.removesuffix(rendered).endswith(" AS ")):
+        # 머리말(`CREATE [OR REPLACE] VIEW <schema>.<이름>`)은 검증된 식별자뿐이라 ` AS `가 없다.
+        # 그래서 첫 ` AS `가 정의의 시작이고, 그 뒤 전부가 렌더 글자와 **정확히** 같아야 한다.
+        head, separator, definition = compiled.partition(" AS ")
+        if not head or not separator or definition != rendered:
             raise DdlVerificationError("뷰 정의의 상수 렌더가 검증한 글자와 다르다.")
     existing = view_column_names(conn, kind, dataset_id)
     rebuilt = False

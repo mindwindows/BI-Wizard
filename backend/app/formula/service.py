@@ -29,6 +29,7 @@ from app.core.errors import (
     formula_invalid,
     formula_runtime_error,
     not_found,
+    service_unavailable,
 )
 from app.core.limits import HeavyReadLimiter
 from app.core.ports import DefinitionHooks
@@ -65,6 +66,23 @@ QUERY_CANCELED = "57014"
 
 
 # --- 공통 ----
+
+
+def raise_read_timeout(exc: DBAPIError, dataset_id: int) -> None:
+    """수식과 무관한 읽기(D6~D8)의 문장 시간 초과는 수식 오류가 아니라 DB 지연이다: 503.
+
+    D3 미리보기는 이 함수를 쓰지 않는다(07 §5: 문장 시간 초과 = 수식 계산 불가, 422).
+    57014가 아니면 아무것도 하지 않는다. 로그에는 클래스 이름·SQLSTATE·`dataset_id`만 남긴다.
+    """
+    if sqlstate(exc) != QUERY_CANCELED:
+        return
+    logger.warning(
+        "읽기 문장 시간 초과: %s (sqlstate=%s, dataset_id=%s)",
+        type(exc).__name__,
+        QUERY_CANCELED,
+        dataset_id,
+    )
+    raise service_unavailable() from None
 
 
 def harden_read(session: Session) -> None:
@@ -357,6 +375,7 @@ def _error_count(session: Session, dataset_id: int, column_id: int) -> int:
                 ).scalar_one()
             )
     except DBAPIError as exc:
+        raise_read_timeout(exc, dataset_id)
         logger.warning(
             "오류 칸 수를 읽지 못했다: %s (sqlstate=%s, dataset_id=%s)",
             type(exc).__name__,
@@ -406,8 +425,7 @@ def _error_counts(session: Session, dataset_id: int, column_ids_: Sequence[int])
         with session.begin_nested():
             row = session.execute(statement.select_from(view)).one()
     except DBAPIError as exc:
-        if sqlstate(exc) == QUERY_CANCELED:
-            raise formula_runtime_error() from None
+        raise_read_timeout(exc, dataset_id)
         logger.warning(
             "오류 칸 수를 읽지 못했다: %s (sqlstate=%s, dataset_id=%s)",
             type(exc).__name__,
@@ -506,6 +524,7 @@ def error_cells(
                 fetched = session.execute(statement).all()
             except DBAPIError as exc:
                 session.rollback()
+                raise_read_timeout(exc, dataset_id)
                 logger.warning(
                     "오류 칸 목록 조회 실패: %s (sqlstate=%s, dataset_id=%s)",
                     type(exc).__name__,
