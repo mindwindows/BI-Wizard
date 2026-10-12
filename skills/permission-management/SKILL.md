@@ -121,6 +121,16 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 | backend가 시작하지 않음 | 시작 자가 점검 거부(`bi_app`의 위험 속성, **`bi_app`에 `public` schema CREATE 권한이 있음** 등) 또는 스텁 설정 거부 | `docker compose logs backend`의 메시지(`시작하지 않는다: …`). 속성 이름만 나오고 비밀은 나오지 않는다 |
 | 응답 문제 추적 | | 오류 본문 `request_id`로 `docker compose logs backend`를 찾는다 |
 
+#### 화면 변경(03b 17-1 결정 반영)
+##### S1 (작업 팀 선택, 홈, 접근 안내)
+- `/me`(A1) 응답의 `memberships[].team_is_active`를 쓴다. **비활성 팀은 상단 "작업 팀" 선택에 "(비활성)"으로 보이지만 고를 수 없다(선택 불가 항목).** 저장된 선택(`sessionStorage` `bi-wizard.workTeamId`)이 비활성 팀이거나 소속에 없으면 **첫 활성 팀**을 쓴다. 소속은 있는데 활성 팀이 하나도 없으면 "활성 팀 없음"이 표시되고 작업 팀 선택은 없다.
+- 홈의 "소속 팀" 표에서 비활성 팀 이름 옆에 "비활성" 배지가 붙고 "선택됨"은 활성 팀에만 붙는다.
+- **503 `SERVICE_UNAVAILABLE`(DB 등 일시 장애)는 접근 안내("접근 권한이 없습니다")로 가지 않는다.** 로그아웃(401)과 구분되어 일반 오류 영역에 "서버가 일시적으로 응답하지 못합니다. 잠시 뒤 다시 시도하세요."와 "다시 시도" 버튼이 나온다(접근은 서버에서 닫혀 있다). 접근 안내 화면은 401·403(`USER_NOT_REGISTERED`·`USER_INACTIVE`)에만 쓴다.
+
+##### S6 권한 관리
+- **비활성 팀 또는 비활성 사용자 칸은 소속 추가·역할 변경이 막힌다.** 소속이 없는 칸은 선택 상자 전체가 비활성이고, 이미 소속이 있는 비활성 팀 칸은 "소속 없음"(해제)과 현재 역할만 고를 수 있다(해제 A9는 서버가 허용). 격자 위에 안내 문구가 있다. 서버는 그래도 최종 방어선이라 낡은 화면에서 보내면 409 `TARGET_INACTIVE`를 돌려주고 결과 창에 "비활성 팀에는 소속을 지정할 수 없습니다…" 또는 "비활성 사용자에게는…"(`details.field`가 `team_id`/`user_id`일 때)이 나온다.
+- 사용자 사전 등록·수정: 표시 이름 입력은 **100자**, 로그인 ID는 **200자**로 제한된다(`maxLength`, 붙여넣어 넘기면 "담기" 때 한 번 더 막는다).
+
 ### 화면에 나오는 오류 문구 (error.code 분기, 서버 message는 알 수 없는 4xx만 사용)
 | 코드 | 화면 문구 요지 |
 | --- | --- |
@@ -130,6 +140,10 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 | FORBIDDEN (403) | 이 작업을 할 권한이 없음 |
 | NOT_FOUND (404) | 대상을 찾을 수 없음, 새로 고친 뒤 재시도 |
 | NETWORK_ERROR / INTERNAL_ERROR | 서버 연결 실패 / 예기치 않은 오류 + 문의 번호(`request_id`) |
+| SERVICE_UNAVAILABLE (503) | 서버가 일시적으로 응답하지 못함, 잠시 뒤 다시 시도(로그아웃 아님). `/me`에서는 접근 안내가 아니라 일반 오류 + 다시 시도 |
+| TARGET_INACTIVE (409, details.field) | team_id: 비활성 팀에는 소속을 지정할 수 없음 / user_id: 비활성 사용자에게는 지정할 수 없음 / 그 밖: 둘을 함께 안내 |
+| METHOD_NOT_ALLOWED (405) | 허용되지 않는 요청, 새로 고친 뒤 다시 시도 |
+- `BAD_REQUEST`는 더 이상 오지 않는다. 형식 오류는 422 `VALIDATION_ERROR` 하나다.
 
 ## 8. 검증 방법
 - 자동(DB 없이, `docker build --target test backend`와 같다): `pytest`. API 시험은 SQLite로 돌고 `pg` 변형은 건너뛴다. **CI에서 건너뛰어 통과처럼 보이는 일을 막으려면 시험을 실행하는 환경에 `REQUIRE_PG=1`을 준다**: PostgreSQL 시험 환경(접속 정보·tmpfs 시험 DB)이 없을 때 `pg` 변형이 건너뛰지 않고 **실패**한다. 미설정이면 건너뛴다. `.env`·`.env.example`·compose에는 넣지 않는 시험 실행용 옵션이다.
@@ -149,6 +163,11 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
   - 시험 위치: `frontend/src/features/access/access.test.tsx`(`/me` 상태별 화면, 관리 메뉴, 작업 팀, 스텁 전환기 200/404), `frontend/src/features/access/permissions/permissions.test.tsx`(S6 격자, 변경 요약 확인창 호출 순서·본문, LAST_ADMIN, 입력 검증, 쪽 이동), `frontend/src/errors.test.ts`(오류 코드 문구). 시험은 fetch를 모의하며 실제 백엔드를 부르지 않는다.
   - 수동: 스텁이 켜진 로컬 환경에서 전환기로 관리자/일반/미등록 신원을 번갈아 선택해 위 화면을 확인한다.
+- 프런트 시험 추가(03b 17-1):
+  - `access.test.tsx`: 503 `/me`가 접근 안내가 아닌 일반 오류, 비활성 팀 선택 불가/첫 활성 팀 대체/활성 팀 없음, 홈 "비활성" 표시.
+  - `permissions.test.tsx`: 비활성 칸 컨트롤 막힘(소속 해제만 가능), 409 `TARGET_INACTIVE` 문구, maxLength 100/200과 제출 때 재검사.
+  - `errors.test.ts`: `SERVICE_UNAVAILABLE`·`TARGET_INACTIVE`·`METHOD_NOT_ALLOWED`.
+  - 기존 S6 시험은 비활성 사용자 칸에 소속을 추가하던 부분을 활성 사용자(입력자 박) 칸으로 바꿨다.
 - `/health` 새 필드(`views`, `views_failed_count`, `public_create`=false, `db_timezone`)가 본문에 있다(`skills/local-environment/SKILL.md`).
 
 ## 9. 연관 Skill

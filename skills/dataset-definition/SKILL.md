@@ -87,7 +87,25 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 
 ## 5. 실행 방법
 ### 사람(화면)
-화면(S2 데이터셋 목록, S3 데이터셋 만들기, S4 작업공간·Inspector의 열 추가·수정·데이터셋 설정, 오류 문구)은 프런트 단위(`frontend/src/features/dataset/`)에서 정리한다. 이 자리에 frontend-dev가 쓴 화면 절차를 합친다 — **합치기 대기**(`_workspace/fu1b-frontend-skill-notes.md`).
+#### S2 데이터셋 목록 (`/datasets`)
+1. 상단 메뉴 "데이터셋"을 연다. 표에 이름·팀·날짜 단위(일·월·연)·생성자·생성일이 나온다(`GET /api/datasets`). 내 소속 팀의 데이터셋이 위에 오는 정렬은 서버가 하며 화면은 받은 순서 그대로 보여 준다. 이름을 누르면 작업공간(S4)이 열린다.
+2. "팀 필터"에서 팀을 고르면 그 팀만(`team_id`), "전체 팀"이면 전부 보인다. 50개씩 쪽 이동("이전"/"다음", `limit`/`offset`)이고 필터를 바꾸면 첫 쪽으로 돌아간다.
+3. "새 데이터셋" 버튼은 **상단 "작업 팀"에서 내가 정의 담당자(`definer`)이고 그 팀이 활성일 때만** 보인다. 아니면 "데이터셋은 작업 팀의 정의 담당자만 만들 수 있습니다." 안내가 나온다. 이것은 편의이며 최종 방어선은 서버 권한 검사다.
+4. 동기 상태(Superset) 열은 아직 없다(단위 1e에서 `GET /api/superset/datasets`를 결합해 추가). 지금은 그 API를 호출하지 않는다.
+5. 비어 있으면 "등록된 데이터셋이 없습니다", 읽기 실패는 쉬운 문구와 "다시 불러오기".
+
+#### S3 데이터셋 만들기 (`/datasets/new`)
+1. S2의 "새 데이터셋"을 누른다. 팀 선택에는 내가 정의 담당자인 활성 팀만 나온다(기본은 작업 팀이 그 중 하나면 그 팀). 정의 담당자인 팀이 없으면 안내만 나온다.
+2. 이름(100자 이하, 앞뒤 공백 제거)과 날짜 단위(일·월·연)를 고르고 "만들기"를 누르면 `POST /api/datasets {team_id, name, date_unit}` 후 작업공간으로 이동한다. 열은 작업공간에서 추가한다.
+3. 같은 팀에 같은 이름이 있으면 409 `ALREADY_EXISTS`("같은 이름이 이미 있습니다"), 그 밖의 오류도 아래 표의 문구로 폼 안에 나온다.
+
+#### S4 작업공간 골격과 Inspector (`/datasets/<번호>`)
+- 왼쪽: "데이터셋 정보"(팀·날짜 단위·기준 날짜 열·생성자·생성일·정의 버전)와 "열 목록". 가운데: 열 헤더 미리보기 표(입력 그리드는 단위 1c에서 이 자리에 들어온다). 오른쪽: Inspector(접기 ▶/펼치기 ◀, "Inspector 폭" 슬라이더로 280~640px). 열 목록이나 헤더의 열 이름을 누르면 그 열이 Inspector에 열린다.
+- **열 추가(B5):** "열 추가" 버튼 -> 열 이름(100자 이하)·타입(글자·숫자·날짜·예/아니오·선택 목록)·필수 입력·규칙·위치 입력 -> "열 추가". 열 이름에 `[` `]` `"`나 줄바꿈 같은 제어 문자를 넣거나 예약어(`team`, `팀`, `row_id`, `행 번호`)를 쓰면 입력하는 즉시 이유가 나오고 저장 버튼이 막힌다. 규칙: 숫자는 최솟값·최댓값(십진수 그대로, 예 `0`, `100.50`)·소수 자릿수와 "구분 태그"(숫자 열만, 50자 이하, 같은 태그끼리 수식에서 합산), 글자는 최대 글자 수, 날짜는 가장 이른/늦은 날짜(`YYYY-MM-DD`), 선택 목록은 항목(한 줄에 하나, 중복 불가), 예/아니오는 규칙 없음. 위치를 비우면 맨 뒤. 숫자 값은 `"100.50"` 같은 **십진 문자열**로 서버에 간다(05 §1).
+- **열 수정(B6):** 목록에서 열을 고르면 "열 수정: <이름>"이 열린다. **타입과 종류는 바꿀 수 없다**고 표시되며 입력칸이 없다(다른 타입이 필요하면 새 열을 추가). 이름·필수·규칙·태그·위치만 바뀐 항목만 서버로 가고, 바뀐 것이 없으면 "저장"이 막혀 있다. 계산 열(수식)은 이 단계에서 읽기 전용이다(수식 편집은 1d).
+- **데이터셋 설정(B4):** "데이터셋 설정" 버튼 -> 이름, 날짜 단위, 기준 날짜 열(입력 열 중 날짜 열만, "없음"으로 해제). **행이 한 건이라도 있으면 날짜 단위와 기준 날짜 열은 바뀌지 않으며** 서버가 422 `DATASET_HAS_ROWS`를 주고 화면이 이유를 안내한다.
+- **동시 편집:** 정의를 읽은 시점의 `def_version`을 `expected_version`으로 보낸다. 다른 사람이 먼저 바꿔 409 `DEFINITION_VERSION_MISMATCH`가 나면 "다른 사람이 먼저 바꿨습니다. 최신 내용을 다시 읽었습니다…" 안내와 함께 화면이 최신 상태를 자동으로 다시 읽는다. 열 추가 폼에 입력하던 내용은 남고(수정 폼은 최신 값으로 다시 채워짐), 확인한 뒤 다시 저장하면 최신 버전으로 보낸다. 503 `DEFINITION_BUSY`는 "잠시 뒤 다시 시도"(`retry_after`가 있으면 "약 N초 뒤") 안내만 하고 같은 내용을 다시 저장하면 된다.
+- **읽기 전용:** 서버 응답의 `permissions.define`이 false(정의 담당자가 아닌 사용자)면 Inspector에 "읽기 전용" 안내가 나오고 열 추가 버튼·저장 버튼이 없으며 입력칸이 모두 막힌다. 열람과 열 정의 확인은 가능하다.
 
 ### AI·API (스텁 로그인 예, `permission-management` 참고)
 ```
@@ -112,7 +130,7 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 - 잘못 만든 열·데이터셋을 지우는 API는 FU-1에 없다. 관리자가 수동으로 정리한다: `skills/admin-cleanup`.
 
 ## 6. 관련 UI / API / command / DB
-- UI: S2 `/datasets`, S3 `/datasets/new`, S4 `/datasets/<번호>`(Inspector 포함). 구현 `frontend/src/features/dataset/` (화면 설명은 5절의 합치기 대기 부분).
+- UI: S2 `/datasets`, S3 `/datasets/new`, S4 `/datasets/<번호>`(Inspector 포함). 구현 `frontend/src/features/dataset/`.
 - API: B1~B6(05 §2-2). 코드 `backend/app/dataset/`(`router`·`service`·`repo`·`schemas`·`rules`·`definition`·`hashing`), 동적 DDL `backend/app/ddl/`(`names`·`dynamic`), 정의 변경 훅·동기화 포트 `backend/app/core/ports.py`.
 - command: 없음. 정리·점검은 `skills/admin-cleanup`(수동 절차)와 `python -m migrations.roundtrip`.
 - DB: `public.datasets`, `public.dataset_columns`(revision `0004_datasets_columns`), `bi_data.ds_<번호>`(런타임 DDL, `bi_app` 소유).
@@ -134,6 +152,21 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 | backend가 시작하지 않음 | 시작 자가 점검: `bi_data`에 허용 밖 객체(함수·독립 시퀀스·타입 등) | `docker compose logs backend`의 메시지. 누가 만들었는지 확인 후 `admin-cleanup` 방식으로 정리 |
 | `ds_*`에 행/열이 정의와 어긋남 | 수동 SQL로 바꿈 | 정의 변경은 API로만 한다. 어긋나면 `datasets`·`dataset_columns`와 `bi_data` 열 목록을 대조 |
 
+### 화면에 나오는 오류 문구
+| 코드 | 화면 문구 요지 |
+| --- | --- |
+| ALREADY_EXISTS (409, details.field) | name: 같은 이름이 이미 있음(데이터셋) / display_name: 같은 이름의 열이 이미 있음 |
+| VALIDATION_ERROR (422) | 입력 확인 + `(표시 이름: 사용할 수 없는 이름입니다, 검증 규칙: 형식이 맞지 않습니다)` 식 필드별 풀이(필드 이름 한글화: 팀·날짜 단위·기준 날짜 열·타입·필수 여부·검증 규칙·구분 태그·위치). 필드 코드 REQUIRED·TOO_LONG·BAD_FORMAT·RESERVED·OUT_OF_RANGE 등 |
+| DEFINITION_VERSION_MISMATCH (409) | 다른 사람이 먼저 바꿈, 최신 내용을 다시 읽었으니 확인 후 다시 시도(자동 재로딩) |
+| DEFINITION_BUSY (503) | 다른 작업 진행 중, 잠시 뒤 다시 시도(약 N초 뒤) |
+| DATASET_HAS_ROWS (422) | 이미 입력된 행이 있어 날짜 단위·기준 날짜 열을 바꿀 수 없음 |
+| COLUMN_LOCKED (422) | 열의 타입과 종류는 바꿀 수 없음, 새 열을 추가 |
+| FORMULA_CIRCULAR (422) | 이 변경으로 계산 열이 서로를 참조하는 순환이 생김(태그·수식 확인) |
+| FORBIDDEN (403) | 이 작업을 할 권한이 없음 |
+| NOT_FOUND (404) | 대상을 찾을 수 없음(없는 데이터셋 주소 포함) |
+| SERVICE_UNAVAILABLE (503) | 서버가 일시적으로 응답하지 못함, 잠시 뒤 다시 시도 |
+| NETWORK_ERROR / INTERNAL_ERROR | 서버 연결 실패 / 예기치 않은 오류 + 문의 번호(`request_id`) |
+
 ## 8. 검증 방법
 - DB 없이(SQLite, `docker build --target test backend`와 같다): `cd backend && pytest`. 데이터셋 API 시험은 SQLite에서 원본 표 생성·열 추가까지 실제로 실행하고 기준 날짜 열 규칙 DDL은 호출 기록으로 대신한다.
 - 실제 PostgreSQL(권장, `skills/permission-management/SKILL.md`의 "검증 방법" 절차로 tmpfs `postgres-test` 준비): 같은 `pytest`가 `pg` 변형을 포함해 돈다. 시험 실행 환경에 `REQUIRE_PG=1`을 주면 PostgreSQL 환경이 없을 때 건너뛰지 않고 실패한다.
@@ -147,6 +180,11 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
   - `test_migrations.py`, `test_roundtrip_tools.py` — 0004 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`)
 - 마이그레이션 왕복(**새** 빈 `postgres-test`에서): `python -m migrations.roundtrip`, `alembic check` (`skills/local-environment/SKILL.md`).
 - 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `\d bi_data.ds_<번호>`에서 `row_id`와 `c_<번호>` 열, 기준 날짜 열의 `NOT NULL`·`ck_ds_<번호>_period`·`ux_ds_<번호>_period`를 본다.
+
+- 프런트 자동 시험:
+  - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build` (fetch 모의, 실제 백엔드 없음)
+  - 시험 위치: `src/features/dataset/dataset.test.tsx`(S2 목록·필터·쪽 이동·정의 담당자 버튼 조건, S3 폼 검증·POST 본문·이동·오류), `src/features/dataset/workspace.test.tsx`(S4 골격, 열 추가/수정 본문과 `expected_version`, 이름 즉시 검사, 데이터셋 설정, 버전 충돌·BUSY, 읽기 전용), `src/features/dataset/rules.test.ts`(열 이름·태그 검사, 십진 문자열 비교, rules <-> 입력칸 변환), `src/errors.test.ts`(코드별 문구). 시험용 가짜 서버는 `src/features/dataset/test-server.ts`(계약대로 `expected_version`을 확인).
+  - 수동: 정의 담당자와 입력자 신원으로 번갈아 열어 버튼·읽기 전용 차이를 확인하고, 두 브라우저에서 같은 데이터셋에 열을 동시에 추가해 버전 충돌 안내와 자동 재로딩을 확인한다.
 
 ## 9. 연관 Skill
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
