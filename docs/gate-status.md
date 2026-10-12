@@ -16,7 +16,7 @@
 - **알려진 현상:** `superset` 컨테이너는 stop 때 약 10초 뒤 exit 137로 종료된다(변경하지 않음, `deploy-coordination.md` 40번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다.
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. **AP-15 의존성의 버전·라이선스를 확인해 사용자 승인을 요청한다(FU-1 착수의 첫 일, 승인 전에는 설치·도입하지 않는다):** backend `lark`, 프런트 라우터, AG Grid Community, Superset Embedded SDK(`@superset-ui/embedded-sdk`). 각각 버전, 라이선스(운영 런타임은 허용형 MIT·BSD·Apache·PSF만, GPL·AGPL·EUPL·비오픈소스·`ag-grid-enterprise` 금지), 사용 위치, 대안을 표로 올리고 멈춘다. `httpx`는 승인됐고(03b 3-3) 운영 의존성 승격은 FU-1e에서 한다. 근거 표는 `docs/decisions/04-modules.md` §9-1(AP-15)·`07` §10·`08` §7.
+1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.
 2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
 3. **FU-1 이월 항목(해당 단위에서 구현하고 검증):**
    - **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.

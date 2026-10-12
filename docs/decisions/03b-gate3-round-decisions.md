@@ -409,3 +409,19 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - **알려진 현상(변경 없음):** `superset` stop은 약 10.4초 걸리고 exit 137, `OOMKilled=false`(14-1 2번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다(지시 범위 밖, 속성 변조 후에도 `t`로 남는다). `bi_readonly`·`superset_meta`도 사람이 속성을 바꾸면 재차단되지 않는다(지시 범위 밖). `superset_meta`는 PUBLIC 기본 `CONNECT`로 앱 DB에 접속할 수 있다(기존 동작, 위반 아님).
 - **미시험:** `APP_PROXY_STRIP_PREFIX=true`(변경이 compose healthcheck·DB 계정에 한정되어 영향 없을 것으로 추정, EW-6에서 true/false 모두 확인된 상태), BAT 실행, Jenkins 실제 실행, 정적 표 권한(첫 실제 표 이후).
 
+
+## 15. AP-15 의존성 승인과 FU-1 계획 승인 (2026-10-12, 사용자)
+### 15-1. AP-15 승인(고정 표기로 설치, lock 파일 커밋)
+| 의존성 | 승인 버전 | 라이선스 | 설치 시점 |
+| --- | --- | --- | --- |
+| backend `lark` | 1.3.1 | MIT | 단위 1d |
+| 프런트 `react-router-dom` | 7.18.4 (`react-router` 8.4.0은 채택하지 않음) | MIT | 단위 0 |
+| 프런트 `ag-grid-community`, `ag-grid-react` | 36.2.0, 36.2.0 | MIT | 단위 1c |
+| 프런트 `@superset-ui/embedded-sdk` | 0.4.0 (Apache-2.0, 전이: `@superset-ui/switchboard` Apache-2.0, `jwt-decode` MIT) | Apache-2.0 | 단위 1e |
+- 각 의존성은 필요한 단위에서 설치한다. 버전은 `^`·`~` 없는 고정 표기이고 lock 파일을 같이 커밋한다. 승인 전 조회 기준일 2026-10-12(릴리스 2주 이상 경과 확인).
+- `ag-grid-enterprise`·`ag-charts-enterprise` 혼입을 막는 정적 검사를 `scripts/ci-validate-env.sh`에 추가하고 네거티브 시험을 `scripts/test-ci-validate-env.sh`에 넣는다(`bi-review`의 Enterprise 항목과 별개의 CI 방어선).
+- 미확인: Embedded SDK 0.4.0과 Superset 6.1.0의 호환은 단위 1e에서 실측한다.
+### 15-2. FU-1 계획 승인
+- 단위별 범위·담당·합격 기준·검증은 2026-10-12 제시안대로 승인. 순서는 구현 → 테스트 → 제품 Skill → QA → reviewer. 단위 0의 QA·reviewer를 마친 뒤 1a로 넘어가고, **1a를 마친 뒤 한 번 보고하고 멈춘다.**
+- 1a의 backend 시작 자가 점검은 슈퍼유저·`CREATEROLE`·`CREATEDB`와 함께 `REPLICATION`·`BYPASSRLS` 속성도 거부한다(EW-8 알려진 한계 대응).
+- 1a 뒤 정적 표 권한 매트릭스를 실제 표 기준(EW-1, 03c X-15)으로 재확인한다.
