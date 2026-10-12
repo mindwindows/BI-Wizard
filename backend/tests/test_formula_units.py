@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import threading
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -226,6 +227,107 @@ def test_view_select_gate_rejects_text_binds_with_forbidden_characters(value):
     ).select_from(own)
     with pytest.raises(ddl.DdlNotAllowedError):
         _check_view_select(select, 5)
+
+
+def _with_column(expression):
+    own = _own()
+    return sa.select(own.c.row_id.label("row_id"), expression.label("c_1")).select_from(own)
+
+
+def _part_cases():
+    own = _own()
+    return {
+        "custom-op": own.c.c_1.op("; DROP TABLE x; --")(own.c.row_id),
+        "custom-op-bind": own.c.c_1.op("@@")(
+            sa.cast(sa.bindparam("lit", "x", type_=sa.Text), sa.Text)
+        ),
+        "custom-unary-op": sa.sql.expression.UnaryExpression(
+            own.c.c_1, operator=sa.sql.operators.custom_op("!!")
+        ),
+        "extract-field": sa.extract("epoch from now()) --", own.c.c_1),
+        "extract-other-field": sa.extract("epoch", own.c.c_1),
+        "callable-bind": sa.cast(
+            sa.bindparam("lit", callable_=lambda: "x", type_=sa.Text), sa.Text
+        ),
+        "decimal-nan": sa.cast(sa.bindparam("lit", Decimal("NaN"), type_=sa.Numeric), sa.Numeric),
+        "decimal-inf": sa.cast(
+            sa.bindparam("lit", Decimal("Infinity"), type_=sa.Numeric), sa.Numeric
+        ),
+        "decimal-huge-exponent": sa.cast(
+            sa.bindparam("lit", Decimal("1E+999999"), type_=sa.Numeric), sa.Numeric
+        ),
+        "decimal-tiny-exponent": sa.cast(
+            sa.bindparam("lit", Decimal("1E-999999"), type_=sa.Numeric), sa.Numeric
+        ),
+        "decimal-39-digits": sa.cast(
+            sa.bindparam("lit", Decimal("1E+38"), type_=sa.Numeric), sa.Numeric
+        ),
+        "int-too-big": sa.cast(sa.bindparam("lit", 10**40, type_=sa.Numeric), sa.Numeric),
+    }
+
+
+@pytest.mark.parametrize("case", sorted(_part_cases()))
+def test_view_select_gate_rejects_sqlalchemy_parts_that_render_raw_text(case):
+    expression = _part_cases()[case]
+    with pytest.raises(ddl.DdlNotAllowedError):
+        _check_view_select(_with_column(expression), 5)
+
+
+@pytest.mark.parametrize("case", sorted(_part_cases()))
+def test_create_view_run_ddl_rejects_the_same_parts_before_any_statement(case):
+    from sqlalchemy.schema import CreateView
+
+    view = CreateView(_with_column(_part_cases()[case]), "dv_5", schema="bi_data")
+    with pytest.raises(ddl.DdlNotAllowedError):
+        ddl.run_ddl(None, view)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda own: sa.extract("year", own.c.c_1),
+        lambda own: sa.extract("month", own.c.c_1),
+        lambda own: sa.extract("day", own.c.c_1),
+        lambda own: own.c.c_1 + own.c.row_id,
+        lambda own: (
+            own.c.c_1 == sa.cast(sa.bindparam("lit", Decimal("1E+3"), type_=sa.Numeric), sa.Numeric)
+        ),
+        lambda own: sa.cast(
+            sa.bindparam("lit", Decimal("0.00000001"), type_=sa.Numeric), sa.Numeric
+        ),
+        lambda own: sa.cast(sa.bindparam("lit", Decimal("-12.50"), type_=sa.Numeric), sa.Numeric),
+        lambda own: sa.cast(sa.bindparam("lit", Decimal("1" * 38), type_=sa.Numeric), sa.Numeric),
+        lambda own: sa.cast(sa.bindparam("lit", 7, type_=sa.SmallInteger), sa.SmallInteger),
+        lambda own: sa.cast(sa.bindparam("lit", True, type_=sa.Boolean), sa.Boolean),
+    ],
+)
+def test_view_select_gate_still_accepts_what_formula_builds(build):
+    own = _own()
+    select = sa.select(own.c.row_id.label("row_id"), build(own).label("c_1")).select_from(own)
+    assert _check_view_select(select, 5) == ["row_id", "c_1"]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: sa.cast(sa.bindparam("lit", callable_=lambda: "x", type_=sa.Text), sa.Text),
+        lambda: sa.cast(sa.bindparam("lit", "a", callable_=lambda: "b", type_=sa.Text), sa.Text),
+        lambda: sa.cast(sa.column("a").op("||")("y"), sa.Text),
+        lambda: sa.extract("year", sa.cast(sa.bindparam("lit", "x", type_=sa.Text), sa.Text)),
+    ],
+)
+def test_echo_select_gate_rejects_the_same_parts(build):
+    from app.ddl.dynamic import _check_echo_select
+
+    with pytest.raises(ddl.DdlNotAllowedError):
+        _check_echo_select(sa.select(build().label("k0")))
+
+
+def test_echo_select_gate_accepts_a_plain_text_constant():
+    from app.ddl.dynamic import _check_echo_select
+
+    text = sa.cast(sa.bindparam("lit", "x", type_=sa.Text), sa.Text)
+    _check_echo_select(sa.select(text.label("k0")))
 
 
 def test_allowed_ddl_elements_include_views_only_through_the_gate():

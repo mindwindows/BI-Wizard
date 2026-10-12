@@ -84,10 +84,12 @@ from sqlalchemy.sql.elements import (
     Cast,
     ClauseElement,
     ColumnClause,
+    Extract,
     Label,
     TextClause,
 )
 from sqlalchemy.sql.functions import FunctionElement
+from sqlalchemy.sql.operators import custom_op
 from sqlalchemy.types import TypeEngine
 
 from app.core.db_errors import sqlstate
@@ -147,6 +149,15 @@ VIEW_ALLOWED_FUNCTIONS = frozenset(
     }
 )  # fmt: skip
 
+# `EXTRACT(<field> FROM …)`의 field는 SQL 글자 그대로 렌더되므로 고정 집합만 통과시킨다(formula는
+# year·month만 쓴다).
+VIEW_ALLOWED_EXTRACT_FIELDS = frozenset({"year", "month", "day"})
+# 숫자 상수의 자릿수 한도(formula의 `MAX_NUMBER_DIGITS`와 같은 값을 일부러 따로 둔 방어 중복).
+_MAX_NUMBER_DIGITS = 38
+# `str(Decimal)`이 만드는 형태: 평범한 숫자 또는 지수 표기(`1E+30`, `1E-8`; 10의 거듭제곱 상수가
+# 이렇게 렌더된다).
+_PLAIN_DECIMAL = re.compile(r"-?\d+(\.\d+)?(E[+-]\d+)?")
+
 # 글자 상수에서 게이트가 한 번 더 거르는 문자 범주(NUL은 Cc). formula 렌더러의 1차 방어와 같은
 # 규칙을 일부러 따로 둔 방어 중복이다(07 §4-2, reviewer M2).
 _REJECTED_TEXT_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
@@ -165,11 +176,45 @@ def _text_bind_problem(value: str) -> str | None:
     return None
 
 
+def _number_bind_problem(value: Decimal | int) -> bool:
+    """숫자 바인드가 렌더돼도 안전한 값인지(유한, 38자리 이내, 알려진 숫자 모양)."""
+    if isinstance(value, int):
+        return abs(value) >= 10**_MAX_NUMBER_DIGITS
+    if not value.is_finite() or not _PLAIN_DECIMAL.fullmatch(str(value)):
+        return True
+    _sign, digits, exponent = value.as_tuple()
+    if not isinstance(exponent, int) or exponent < -_MAX_NUMBER_DIGITS:
+        return True
+    return len(digits) > _MAX_NUMBER_DIGITS or len(digits) + exponent > _MAX_NUMBER_DIGITS
+
+
 def _check_bind_value(value: object) -> None:
     if value is not None and not isinstance(value, _ALLOWED_BIND_TYPES):
         raise DdlNotAllowedError("뷰 정의의 상수는 숫자·글자·참거짓·날짜여야 한다.")
     if isinstance(value, str) and _text_bind_problem(value) is not None:
         raise DdlNotAllowedError("뷰 정의의 글자 상수에 쓸 수 없는 문자가 있다.")
+    if (
+        isinstance(value, Decimal | int)
+        and not isinstance(value, bool)
+        and _number_bind_problem(value)
+    ):
+        raise DdlNotAllowedError("뷰 정의의 숫자 상수가 허용 범위·모양 밖이다.")
+
+
+def _check_node_parts(node: object) -> None:
+    """렌더러가 값을 그대로 글자로 옮기는 SQLAlchemy 부품을 거른다(뷰 정의·확인 질의 공통).
+
+    - 사용자 정의 연산자(`col.op("…")`): 연산자 글자가 그대로 렌더된다.
+    - `EXTRACT`의 field: 고정 집합만 허용한다.
+    - callable 바인드: `.value`는 None인데 렌더는 호출 결과(`effective_value`)를 쓴다.
+    """
+    for attribute in ("operator", "modifier"):
+        if isinstance(getattr(node, attribute, None), custom_op):
+            raise DdlNotAllowedError("뷰 정의에 사용자 정의 연산자를 쓸 수 없다.")
+    if isinstance(node, Extract) and node.field not in VIEW_ALLOWED_EXTRACT_FIELDS:
+        raise DdlNotAllowedError("뷰 정의의 EXTRACT 단위가 허용 목록 밖이다.")
+    if isinstance(node, BindParameter) and node.callable is not None:
+        raise DdlNotAllowedError("뷰 정의에 호출형(callable) 상수를 쓸 수 없다.")
 
 
 def _check_table(table: Table) -> None:
@@ -202,6 +247,7 @@ def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
         raise DdlNotAllowedError("뷰 정의는 SELECT여야 한다.")
     selects = 0
     for node in visitors.iterate(selectable):
+        _check_node_parts(node)
         if isinstance(node, Select):
             selects += 1
         elif isinstance(node, TextClause):
@@ -212,7 +258,7 @@ def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
             if node.packagenames or str(node.name).lower() not in VIEW_ALLOWED_FUNCTIONS:
                 raise DdlNotAllowedError("뷰 정의에 허용 목록 밖 SQL 함수를 쓸 수 없다.")
         elif isinstance(node, BindParameter):
-            _check_bind_value(node.value)
+            _check_bind_value(node.effective_value)
     if selects != 1:
         raise DdlNotAllowedError("뷰 정의에 서브쿼리를 쓸 수 없다.")
     froms = selectable.get_final_froms()
@@ -418,10 +464,11 @@ def _check_echo_select(statement: object) -> Select:
     if not isinstance(statement, Select) or statement.get_final_froms():
         raise DdlNotAllowedError("확인 질의는 FROM 없는 SELECT여야 한다.")
     for node in visitors.iterate(statement):
+        _check_node_parts(node)
         if isinstance(node, Select | Label | Cast):
             continue
-        if isinstance(node, BindParameter) and isinstance(node.value, str):
-            _check_bind_value(node.value)
+        if isinstance(node, BindParameter) and isinstance(node.effective_value, str):
+            _check_bind_value(node.effective_value)
             continue
         raise DdlNotAllowedError("확인 질의는 글자 상수만 담을 수 있다.")
     if not _echo_columns(statement):
