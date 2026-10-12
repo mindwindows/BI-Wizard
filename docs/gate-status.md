@@ -17,7 +17,7 @@
 
 ### FU-1 진행 상황 (2026-10-12)
 - **단위 0(공통 기반)·1a(권한 관리) 구현·QA·reviewer 완료, 사용자 보고 대기.** QA 실패 0, reviewer 차단 0(중요 지적 반영). 상세와 사용자 결정 대기 항목은 `docs/decisions/03b` 16절.
-- 다음: 1b(데이터셋·열 정의, revision `0004`, `ddl` 모듈). 사용자 승인 뒤 시작한다.
+- 1a 결정 7건 반영(`docs/decisions/03b` 17절): 405·503 `SERVICE_UNAVAILABLE`·409 `TARGET_INACTIVE`·422 통일, `team_is_active`, 길이 상한 계약화, `public_create` 시작 거부, nginx 루트 SPA fallback, `REQUIRE_PG`. 이어서 1b·1c 진행 중(1c 완료 후 보고).
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
 1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.

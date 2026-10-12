@@ -445,3 +445,16 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 6. 05 §1 상태 코드 표기 정리, `deploy-coordination.md`에 "운영 env에서 `APP_ENV`는 local·test가 아니고 `AUTH_STUB_ENABLED=false`" 확인 항목 추가, CI에서 `pg` 변형 skip을 실패로 바꾸는 옵션(`REQUIRE_PG`).
 ### 16-4. 미시험
 브라우저 화면(S1·S6)은 상태 코드·vitest까지만, Superset 연동, BAT 실행, HTTP 수동 동시 호출. nginx 접두를 떼는 프록시 뒤 SPA 딥링크 404(접두 밖 `/datasets/42`, STRIP true/false 동일)는 nginx fallback 변경 제안(NEEDS-APPROVAL)과 운영자 확인 항목으로 보류.
+
+## 17. 1a 결정 사항과 1b·1c 진행 (2026-10-12, 사용자)
+### 17-1. 16-3 결정
+1. **오류 코드·형식:** 05 §3에 `METHOD_NOT_ALLOWED`(405)를 추가한다. 형식 오류(깨진 JSON 포함)는 422 `VALIDATION_ERROR`로 통일하고 05 §1의 "400 형식 오류"를 고친다. `BAD_REQUEST` 같은 묶음 임시 코드는 쓰지 않는다. 409·429는 05의 구체 코드를 쓴다.
+2. **DB 장애:** 503 `SERVICE_UNAVAILABLE`로 응답해 로그아웃(401)과 구분한다. 접근은 계속 닫힌다(fail-closed 유지).
+3. **비활성 팀·사용자의 소속:** A8의 소속 추가·변경은 409로 거부한다(코드 이름 `TARGET_INACTIVE`는 구현 제안이며 05 §3에 반영). A1 응답의 `memberships`에 `team_is_active`를 넣는다.
+4. **상한:** 사용자 표시 이름 100자, 로그인 ID 200자를 05 계약에 넣는다. 한글 정렬과 로그인 ID 대소문자 구분은 이후에 정한다.
+5. **`public_create`:** true이면 backend 시작을 거부한다. 3라운드 "경고만" 결정(1a 구현)을 바꾼 것이다.
+6. **프런트 nginx:** `NGX_ROOT_TRY`를 루트 SPA fallback으로 바꾼다(새 변수 없음). `STRIP true/false` 딥링크를 다시 확인한다. `deploy-coordination.md` 42번에 "접두를 떼는 프록시의 SPA fallback" 확인 항목을 추가했다.
+7. **운영 설정:** `deploy-coordination.md` 41번에 "운영은 `APP_ENV`가 local·test가 아니고 `AUTH_STUB_ENABLED=false`"를 추가했다. CI 전용 옵션 `REQUIRE_PG`를 승인한다(`.env`·`.env.example`에는 넣지 않고 테스트 실행 환경에서만 쓴다).
+### 17-2. 이어서 진행
+- 1b(데이터셋·열 정의)와 1c(입력 그리드, AG Grid Community 36.2.0 설치)를 이어서 진행하고 **1c를 마친 뒤 보고하고 멈춘다.** 각 단위는 구현 → 테스트 → 제품 Skill → QA → reviewer.
+- 1a·1b·1c 주요 화면을 Playwright로 1920×1080 스크린샷을 찍어 `docs/screens/fu1/`에 PNG로 커밋한다(파일 이름에 화면과 상태, 비밀값 비노출 확인).

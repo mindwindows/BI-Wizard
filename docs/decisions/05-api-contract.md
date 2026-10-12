@@ -11,11 +11,11 @@
 | 경로 | 모든 경로는 `${APP_BASE_PATH}/api/…`이고 아래 표는 `/api` 뒤만 쓴다. 버전 접두어 없음. 프록시가 접두를 떼든 말든 같은 경로(STRIP true/false 모두). 프런트는 `config.ts`의 `apiUrl()` 한 곳에서 조립하고 경로를 하드코딩하지 않는다 | [미답], 04 §5 |
 | 경계 | 브라우저는 FastAPI만 호출한다. DB·Superset REST 직접 호출 없음(Superset은 Embedded iframe·새 창 링크만). 요청 본문의 `rls`·Superset 숫자 id는 받지 않는다 | 04 §5, 08 §4 |
 | 형식 | JSON UTF-8, 필드 snake_case, id는 정수. 날짜 `YYYY-MM-DD`(월·연 단위도 기간 첫날, 예 `2026-03-01`), 시각 ISO 8601 `+09:00`. 첫날이 아닌 날짜는 거부(`NOT_PERIOD_START`). **`number` 값은 십진 문자열 `"1234.50"`, 미입력은 `null`** [제안: `numeric` 38자리가 JS 숫자 정밀도를 넘을 수 있어 일반 JSON 숫자 기본값과 다름, 승인 03b 6-2]. 글자는 NFC로 정규화해 저장 | 03b 2-2 W3-2, 07 §3 |
-| 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
-| 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
+| 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·사용자 표시 이름 100·로그인 ID 200(03b 17-1 결정 4)·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
+| 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`, **사용자 조회 중 DB 장애는 503 `SERVICE_UNAVAILABLE`로 로그아웃(401)과 구분하며 접근은 닫혀 있다(03b 17-1 결정 2)**. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
 | 권한 표기 | `공개` 인증 불필요 / `읽기` 인증된 활성 사용자 전부(타 팀 포함) / `관리자` `users.is_admin` / `정의(팀)` 그 데이터셋 팀의 `definer`(관리자라도 팀 소속이 아니면 불가 [제안, 06 §4-1]) / `입력(팀)` 그 팀의 `entry` 또는 `definer` **[미답: 정의 담당자 입력 가부, 06 §4-1]** / `스텁` 스텁이 켜진 환경에서만 존재 | 03b 1-3, 5-2 K2, 06 §4 |
 | 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`. 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
-| 상태 코드 | 400 형식 오류 / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 502·503 Superset 불가 / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
+| 상태 코드 | 형식 오류(깨진 JSON·잘못된 쿼리·경로 형식 포함)와 규칙 위반은 모두 422 `VALIDATION_ERROR`로 통일(03b 17-1 결정 1, 400은 쓰지 않음) / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 405 `METHOD_NOT_ALLOWED` / 502·503 Superset 불가·DB 장애 `SERVICE_UNAVAILABLE` / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
 | 목록 | 쿼리 `limit`(기본 50, 최대 200)·`offset`, 응답 `{items, total, limit, offset}`. 그리드의 부분 로딩은 AG Grid Community 지원 확인 뒤 적용(Enterprise 방식 금지) | [미답] |
 | 동시성 | 정의를 바꾸거나 행을 쓰는 요청은 `expected_version`(읽은 `def_version`)을 싣는다. 기존 행의 칸 수정은 칸마다 `expected` 키가 **필수**다(값 `null` = 빈 칸이었음, 키 생략·`expected` 전체 `null`은 422로 가드 우회를 막는다). 이미 같은 값이면 200. 모든 쓰기 성공 응답에 새 `def_version` | 03b 3-4 Y8, 06 §5, 03c X-24 |
 | 충돌 | HTTP 409 + 코드: `CELL_CONFLICT`·`PASTE_CONFLICT`·`DEFINITION_VERSION_MISMATCH`(04 후보) + `PERIOD_CONFLICT` **[제안, 04 A-3에 반영됨]**. `details`는 §3 표 | [미답] |
@@ -33,14 +33,14 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ### 2-1. 권한 관리 — `access` · `permission-management`
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
 | --- | --- | --- | --- | --- | --- |
-| A1 | GET `/me` | 읽기 | - | 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, role}]}` | 403 미등록·비활성 |
+| A1 | GET `/me` | 읽기 | - | 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, team_is_active, role}]}` (비활성 팀 소속도 나오며 화면은 `team_is_active`로 작업 팀 선택에서 거른다) | 403 미등록·비활성, 503 `SERVICE_UNAVAILABLE` |
 | A2 | GET `/teams` | 읽기 | 목록 | 200 `{id, code, name, is_active}` 목록 | - |
 | A3 | POST `/teams` | 관리자 | `{code, name}` (`code` 불변, 형식 `^[a-z0-9_]{1,32}$` [제안: 뷰에 글자로 들어가므로 제한]) | 201 team | 409 `ALREADY_EXISTS`, 422 |
 | A4 | PATCH `/teams/{team_id}` | 관리자 | `{name?, is_active?}` (이름이 바뀌면 커밋 뒤 팀 단위 동기화 요청으로 그 팀의 가상 데이터셋 이름도 갱신, 08 §2-1) | 200 team | 409, 422 |
 | A5 | GET `/users` | 관리자 | `q, team_id, is_active` + 목록 | 200 `{id, login_id, display_name, is_admin, is_active, memberships[{team_id, role}]}` 목록 (S6 팀×사용자 격자는 이 응답으로 그림) | - |
 | A6 | POST `/users` | 관리자 | `{login_id, display_name, is_admin?}` (사전 등록) | 201 user | 409 `ALREADY_EXISTS` |
 | A7 | PATCH `/users/{user_id}` | 관리자 | `{display_name?, is_admin?, is_active?}` | 200 user | 409 `LAST_ADMIN`(마지막 활성 관리자 해제·비활성) [제안] |
-| A8 | PUT `/teams/{team_id}/members/{user_id}` | 관리자 | `{role: "definer"\|"entry"}` (없으면 추가, 있으면 역할 변경) | 200 `{team_id, user_id, role}` | 404 |
+| A8 | PUT `/teams/{team_id}/members/{user_id}` | 관리자 | `{role: "definer"\|"entry"}` (없으면 추가, 있으면 역할 변경. 비활성 팀·비활성 사용자에 대한 **추가·변경은 거부**) | 200 `{team_id, user_id, role}` | 404, 409 `TARGET_INACTIVE` |
 | A9 | DELETE `/teams/{team_id}/members/{user_id}` | 관리자 | - | 204 | 404 |
 
 ### 2-2. 데이터셋·열 정의 — `dataset` · `dataset-definition`
@@ -104,6 +104,9 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | 코드 | HTTP | `details` | 뜻 |
 | --- | --- | --- | --- |
 | `UNAUTHENTICATED` · `USER_NOT_REGISTERED` · `USER_INACTIVE` · `FORBIDDEN` | 401·403 | - | 신원 없음 / 미등록 / 비활성 / 권한 부족 |
+| `METHOD_NOT_ALLOWED` | 405 | - | 허용되지 않는 메서드(03b 17-1 결정 1) |
+| `SERVICE_UNAVAILABLE` | 503 | - | DB 등 내부 의존 장애(재시도 가능, 로그아웃과 구분, 접근은 닫힘, 03b 17-1 결정 2). Superset 불가는 `SUPERSET_UNAVAILABLE` |
+| `TARGET_INACTIVE` | 409 | `field` | 비활성 팀·사용자에 소속 추가·변경 시도(A8, 03b 17-1 결정 3. 코드 이름은 구현 제안) |
 | `NOT_FOUND` · `ROW_NOT_FOUND` | 404 | - | 대상 없음 / 행 없음(C3) |
 | `VALIDATION_ERROR` | 422 | `fields[]` | 필수·범위·형 등 입력 규칙 위반 |
 | `ALREADY_EXISTS` | 409 | `field` | 유일 값 중복(팀 코드·이름, 로그인 ID, 데이터셋·열 이름, uuid) |
