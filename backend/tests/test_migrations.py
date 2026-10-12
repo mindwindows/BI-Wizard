@@ -26,9 +26,11 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # 여기에 기록한다.
 DROP_APPROVED: dict[str, str] = {
     # 0003 downgrade()의 op.drop_table 3개(team_members, teams, users)는 06 §6의 표 역순 삭제다.
-    # 새 승인이 아니라 기존 D2 규칙의 적용이며, FU-1a 착수 승인(2026-10-12)에 포함된다.
+    # 새 승인이 아니라 기존 D2 규칙의 적용이며, Gate ③ 06 §6 승인(2026-10-11)과
+    # FU-1 계획 승인(03b 15-2, 2026-10-12)에 포함된다.
     "20261012_0003_users_teams_members.py": (
-        "DROP 확인: 사용자 승인 (2026-10-12, FU-1a 착수 승인, 06 §6 downgrade 표 역순 삭제 3개: "
+        "DROP 확인: 사용자 승인 (2026-10-11 Gate ③ 06 §6 승인, 2026-10-12 FU-1 계획 승인 "
+        "03b 15-2, 06 §6 downgrade 표 역순 삭제 3개: "
         "team_members, teams, users. 정적 표 대상, 동적 객체 아님)"
     ),
 }
