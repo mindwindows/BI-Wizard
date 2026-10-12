@@ -158,6 +158,11 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 | backend가 시작하지 않음 | 시작 자가 점검: `bi_data`에 허용 밖 객체(함수·독립 시퀀스·타입 등) | `docker compose logs backend`의 메시지. 누가 만들었는지 확인 후 `admin-cleanup` 방식으로 정리 |
 | `ds_*`에 행/열이 정의와 어긋남 | 수동 SQL로 바꿈 | 정의 변경은 API로만 한다. 어긋나면 `datasets`·`dataset_columns`와 `bi_data` 열 목록을 대조 |
 
+#### 화면 변경(03b 19-1 결정 반영)
+- S3: 팀 선택은 이미 정의 담당자인 활성 팀만. 서버 409 `TARGET_INACTIVE`(`details.field=team`)는 폼 위 오류 줄에 "비활성 팀에는 데이터셋을 만들 수 없습니다."(`DATASET_TEAM_INACTIVE_TEXT`, errors.ts). A8의 소속 지정 문구와 구분(B2 전용 분기는 DatasetCreatePage).
+- S3 폼 `.panel-form` 최대 폭 560px. `.panel > button`은 내용 폭(붙여넣기 확인·결과 버튼은 `.actions` 안으로 이동).
+- Inspector: `.inspector-form p`와 `.field > span` 여백 0(타입·종류 줄 사이, 오류 자리 공백 제거). 오류는 있을 때만 렌더(기존 그대로).
+
 ### 화면에 나오는 오류 문구
 | 코드 | 화면 문구 요지 |
 | --- | --- |

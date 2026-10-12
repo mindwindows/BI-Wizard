@@ -166,6 +166,13 @@ curl -b jar -X POST -H 'content-type: application/json' \
 | 500 `INTERNAL_ERROR` | 예기치 않은 오류 | 응답의 `request_id`로 `docker compose logs backend` |
 | 숫자 칸이 `"1234.5"`처럼 뒤 0이 사라짐 | PostgreSQL `numeric`은 저장한 자릿수를 그대로 돌려주므로 입력이 `"1234.5"`였을 것 | 입력 문자열 확인. (DB 없는 SQLite 시험은 자릿수를 보존하지 않는다) |
 
+#### 화면 변경(03b 19-1 결정 반영)
+- 잘림 안내: `errors.ts`의 `truncationOf`/`truncationText`가 `details.truncated===true`(+`total`)일 때만 "일부만 표시됨(전체 N건 중 일부)"를 만든다(total 없으면 "일부만 표시됨"). 적용처: VALIDATION_ERROR 문구(describeApiError), 붙여넣기 결과(422 검증·409 충돌, `data-testid=truncated-notice`), 행 저장 오류 줄(markFieldIssues). 서버가 잘랐으면 클라이언트의 "외 N건"(MAX_LISTED=20 표시 제한)은 숨기고 서버 값만 보인다. 안 잘렸으면 표시 없음.
+- 범위 문구: `describeFieldCode`가 number 열 min/max를 `formatNumber`(문자열 서식, 쉼표)로 표시. 예 `(0 ~ 1,000,000)`. 소수 자릿수 0 채움은 하지 않음.
+- 개발용 신원 전환기: `current`가 목록에 없으면 "(미등록) <값>" 항목을 추가해 선택 상태로 둔다.
+- S6: 화면은 서버 순서를 그대로 쓴다(재정렬 없음). `.grid-scroll` max-height `calc(100vh - 120px)`, 머리글 sticky, 사용자 열 260px(최대 320), 팀 열 최소 140px + 균등 분배.
+- 가로 스크롤바(⑦): Playwright headless Chromium은 기본 `--hide-scrollbars`로 모든 스크롤바를 숨긴다. 이 플래그를 빼고(`ignoreDefaultArgs: ['--hide-scrollbars']`) 열 16개 데이터셋을 1920x1080에서 열면 AG Grid 가로 스크롤바(`.ag-body-horizontal-scroll`, 높이 16px)가 그리드 아래쪽(고정 "새 행 입력" 줄 아래)에 정상 표시됨. 코드 결함 아님, CSS 변경 없음. 재촬영 때 이 플래그를 빼야 한다.
+
 ### 화면에 나오는 오류 문구
 | 코드 | 화면 문구 요지 |
 | --- | --- |
