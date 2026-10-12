@@ -193,6 +193,7 @@ docker compose --profile test down                    # 프로젝트 전체 종�
   - `GET ${APP_BASE_PATH}/api/health` — FastAPI 상태 (`{"status":"ok"}`)
   - `GET ${APP_BASE_PATH}/api/health/db` — PostgreSQL `SELECT 1` (정상 200, 실패 503)
   - `GET ${SUPERSET_APP_ROOT}/health` — Superset (`OK`)
+  - 공통: 모든 `/api` 응답에 `X-Request-ID` 헤더가 붙는다. 이 두 health 경로만 인증 없이 열려 있고, 그 밖의 `/api` 경로는 `current_user`를 거쳐 신원 어댑터가 없으면 401 `UNAUTHENTICATED`다(신원 방식은 미결정 8번이라 어댑터는 FU-1a에서 스텁으로 연결). 오류는 `{"error": {"code", "message", "details", "request_id"}}` 형식이고 `request_id`는 헤더와 같다. 장애 때 이 id로 `docker compose logs backend`를 찾는다.
 - command: `scripts\*.bat`, `docker compose …`, `alembic …`(migrate 서비스 안)
 - DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`, 빈 schema `bi_data`), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
 
