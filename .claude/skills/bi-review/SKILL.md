@@ -67,8 +67,14 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
 - 마이그레이션 도구는 Alembic이다. 다른 도구(Flyway, Atlas 등)나 앱 시작 시 `create_all`로 스키마를 만드는 코드가 새로 들어오면 사용자 승인 여부를 확인한다.
 
 ### 7-2. Superset Embedded guest 역할 (차단, 2026-10-11 결정)
-- 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 이 금지는 **임베딩 대시보드를 보는 guest 역할에만 적용**된다(2026-10-11 사용자 확정). 운영 guest 역할은 최소 권한 커스텀 역할이어야 한다(권한 목록은 Gate ③ 4라운드 G에서 정의). 포털 작성자 역할은 내장 `Gamma`를 사용자에게 직접 부여하지 않고 **`Gamma`를 복사한 커스텀 역할 + schema 단위 데이터 접근 보조 역할**로 만든다(내장 `Gamma` 직접 부여는 차단). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
+- 운영 설정(`superset/superset_config.py`, `compose.yml`, `.env.example`, 초기화 스크립트)에서 `GUEST_ROLE_NAME`을 `Gamma`나 `Public`으로 지정하거나, `PUBLIC_ROLE_LIKE`를 설정하면 차단이다. 이 금지는 **임베딩 대시보드를 보는 guest 역할에만 적용**된다(2026-10-11 사용자 확정). 운영 guest 역할은 최소 권한 커스텀 역할 `bi_guest`여야 한다(권한 4개, `superset/bi_roles.py`, EW-4 구현). 포털 작성자 역할은 내장 `Gamma`를 사용자에게 직접 부여하지 않고 **`Gamma`를 복사한 커스텀 역할 + schema 단위 데이터 접근 보조 역할**로 만든다(내장 `Gamma` 직접 부여는 차단). 시험 전용 override 파일(`_workspace/`)의 Gamma 대조 실험은 운영 설정이 아니므로 대상이 아니다.
 - **guest 권한 목록 파일(AP-1, 2026-10-11 승인):** `bi_guest` 권한 목록은 저장소의 파일 한 곳에 있고(필수 3 + 기간 필터 1, 조건부 2는 기본 제외), `Public` 권한은 0개여야 하며 `GUEST_ROLE_NAME`은 `bi_guest`다. 목록에 없는 권한이 역할에 있거나, 목록의 권한이 Superset에 없는데 시작이 막히지 않으면 차단이다. **서버 코드(backend)가 guest token을 직접 서명하거나 `GUEST_TOKEN_JWT_SECRET`을 backend에 전달하면 차단**이다(검증 훅 우회, 03c X-28). `rls`는 서버 코드가 항상 빈 목록으로 고정한다.
+- **EW-4 구현 점검(AP-1의 구체화, 새 규칙 아님):**
+  - 역할 이름 단일 출처: `bi_roles.GUEST_ROLE`이 정본이고 `superset_config.py`의 `GUEST_ROLE_NAME`과 같으며, `ensure_roles.py`가 실제 적용된 설정(`app.config`)과 비교해 어긋나면 실패한다. `ci-validate-env.sh`가 `GUEST_ROLE_NAME = "bi_guest"`와 `PUBLIC_ROLE_LIKE` 미설정을 정적으로 확인한다.
+  - 목록 밖·금지 권한 가드: `bi_guest` 목록은 4개(`can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`, `can_time_range Api`)이고, 조건부 2개와 `can_csv`·내보내기·쓰기·Explore·SQL Lab·데이터 접근 계열이 목록에 들어가면 `superset-init`이 실패하는 가드가 있다. 목록의 권한이 Superset에 없으면 전체가 실패한다(새 권한은 자동 추가하지 않는다). 목록 변경 자체는 사전 승인 대상이다.
+  - `Public` 역할 권한 0개와 `PUBLIC_ROLE_LIKE` 미설정을 `superset-init`이 확인하고 어기면 **고치지 않고 실패**하며, 그 시험(Public에 권한을 임시로 붙이면 실패)이 있다.
+  - `GUEST_TOKEN_VALIDATOR_HOOK` 거부 조건 5가지(`rls`가 비어 있지 않음, 리소스가 정확히 1개가 아님, 유형이 `dashboard`가 아님, 리소스 id가 uuid 형식이 아님, `user` 누락)가 구현돼 있고 거부는 Superset의 400으로 나타난다(함수가 거짓을 돌려줌, 예외를 내지 않음). 훅이 포털 DB·backend 코드를 읽지 않고, 요청 본문·토큰·사용자 이름을 로그에 남기지 않는다. "포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e로 이월된 상태(훅의 확장 지점과 이월 주석)인지 확인한다.
+  - backend에 `GUEST_TOKEN_JWT_SECRET`이 없다: `compose.yml`의 `backend`·`migrate` 환경, `backend/app` 코드(JWT 서명 라이브러리 import와 토큰 직접 생성 흔적 포함), `ci-validate-env.sh` 검사와 네거티브 시험을 확인한다.
 - Scarf 호스트가 CSP에 다시 들어갔는지, 효과 없는 `SCARF_ANALYTICS` 변수가 다시 생겼는지 확인한다(중요).
 
 ### 7-3. 사실 확인 교차 검증 (Gate ③, 요청 시)

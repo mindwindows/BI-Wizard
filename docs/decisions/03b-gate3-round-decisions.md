@@ -326,3 +326,38 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - `schema_access` 항목 이름은 `[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`. `can_grant_guest_token`은 `ADMIN_ONLY_PERMISSIONS`에 들어 있다. 새 비밀번호 2개는 해시로만 저장되어 `%` 금지가 필요 없다.
 - 작성자 계정이 `public` 가상 데이터셋 위에 차트를 만들 때 201인 현상은 08 §5에 기록된 Gamma 동작과 같다(FU-1에서는 수용).
 
+## 10. EW-3 확인 사항 결정과 EW-4 착수 (2026-10-12, 사용자)
+### 10-1. 9-3 확인 사항 결정
+1. **허용 밖 역할이 붙은 서비스·발급 계정:** 우리 시스템이 만든 표식(전용 이메일 `<이름>@localhost`·이름 `BI-Wizard`)이 있는 계정에 한해 허용 밖 역할(Admin 포함)을 제거하고 정해진 역할 하나로 **강제 복구**한다. 권한을 줄이는 방향이므로 **적용 후 보고**로 처리한다. 복구했을 때는 경고 로그를 남기고 `/health` 또는 점검용 출력에서 확인할 수 있게 한다. **표식이 없는 계정과 이름이 충돌하면 지금처럼 실패로 중단한다.**
+2. **`superset-init` 소요 시간(약 70초):** 허용한다.
+### 10-2. EW-4 착수(4라운드 Z1 ㄱ·ㄴ, Z2, Z3, Z4, Z5와 X-25 결과를 따른다)
+- `GUEST_ROLE_NAME=bi_guest`. 권한: X-25 필수 3개(`can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`) + `can_time_range Api`. 조건부 2개(`can_explore_json`, 퍼머링크 읽기)와 내보내기 권한은 넣지 않는다. 권한 목록은 `superset/bi_roles.py`에 모으고, 목록의 권한이 없으면 `superset-init`이 실패한다. `Public` 역할 권한 0개를 유지하고 시험한다. `PUBLIC_ROLE_LIKE`는 설정하지 않는다.
+- `GUEST_TOKEN_VALIDATOR_HOOK`: `rls`가 비어 있지 않으면 거부, 리소스 유형이 `dashboard`가 아니면 거부. **"포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅에 확장 지점만 두고 FU-1e로 이월**한다(`gate-status.md`에 기록).
+- backend는 `GUEST_TOKEN_JWT_SECRET`을 받지 않는다(직접 서명 금지, reviewer가 확인). `bi-review` 7-2를 AP-1·AP-2 범위로 확장한다.
+- 검증(qa-engineer): 승인된 6가지 차트(선, 막대, 표, 큰 숫자, 원형, 혼합)가 `bi_guest` 입장권으로 임베딩 화면에서 정상 표시되는지(추가 권한이 필요하면 권한을 추가하지 않고 보고), X-25 부정 시험 재현, 훅 거부 시험, `APP_PROXY_STRIP_PREFIX` true/false, 10-1의 1번 강제 복구 시험, EW-3 2차 수정분 4가지 재확인, 로그·`ps`·`docker inspect`의 비밀번호·토큰 0건.
+
+## 11. EW-4 결과 (2026-10-12, env-engineer 구현, qa-engineer·reviewer 검증)
+### 11-1. 구현 요약(승인 범위: 03b 4-2 Z1~Z5, 10-2)
+- `GUEST_ROLE_NAME=bi_guest`, 권한 4개(`can_read CurrentUserRestApi`·`Dashboard`·`Chart`, `can_time_range Api`), 목록은 `superset/bi_roles.py`. 목록의 권한이 Superset에 없으면 `superset-init` 실패. `Public` 권한 0개·`PUBLIC_ROLE_LIKE` 미설정·`GUEST_ROLE_NAME` 일치를 매 기동 확인하고 어기면 고치지 않고 실패. 입장권 유효 시간 기본 300초(변경 없음).
+- `GUEST_TOKEN_VALIDATOR_HOOK`(`superset_config.py`): 시그니처 `hook(body) -> bool`, 거짓이면 Superset이 400(`Guest token validation failed`). 거부 5가지: `rls`가 비어 있지 않음, 리소스가 정확히 1개가 아님, 유형이 `dashboard`가 아님, 리소스 id가 uuid 형식이 아님, `user` 누락. 예외는 삼키고 거부, 로그에는 사유 코드만. "포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e 이월(확장 지점 `_EXTRA_GUEST_TOKEN_CHECKS`).
+- backend에는 `GUEST_TOKEN_JWT_SECRET`을 주지 않는다(compose, `ci-validate-env.sh` 검사와 네거티브 시험, backend 코드에 JWT 흔적 0건: 직접 서명 금지).
+- 03b 10-1 강제 복구: 표식 있는 서비스·발급 계정의 허용 밖 역할을 제거하고 정해진 역할 하나로 복구, `경고:`와 `점검 요약: 강제 복구 N건` 로그. 표식 없는 계정과의 이름 충돌은 실패 중단.
+### 11-2. 적용 후 보고 항목(승인 목록 밖, 거부·검사 강화 방향, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 표식 있는 계정 강제 복구와 경고·점검 요약(03b 10-1 사용자 결정) | `superset/ensure_accounts.py` | 중단하면 권한 상승이 남고 다른 계정 복구도 건너뜀 | 복구 분기를 지우고 허용 밖 역할이면 `fail()` |
+| 훅의 리소스 id uuid 형식 검사(거부 방향) | `superset/superset_config.py` | Superset 기본 검사가 숫자 id·slug를 통과시킴(임베드 안 한 대시보드의 입장권 발급 가능) | `_is_uuid` 블록 삭제 |
+| `bi_guest` 금지 가드의 이름 조각 검사(내보내기·쓰기·Explore·SQL Lab·데이터 접근 계열) | `bi_roles.py`, `ensure_roles.py` | 정확한 쌍 목록으로 못 막는 계열 차단 | `GUEST_FORBIDDEN_*`와 `forbidden_reason` 분기 삭제 |
+| `Public` 0개·`PUBLIC_ROLE_LIKE`·`GUEST_ROLE_NAME` 불일치 시작 실패 | `ensure_roles.py` | 승인된 불변식의 코드화 | 0단계 블록 삭제 |
+| `ci-validate-env.sh` 검사 4종과 네거티브 시험(97→108개) | `scripts/` | backend·migrate에 JWT 비밀 없음, `GUEST_ROLE_NAME` 값, `PUBLIC_ROLE_LIKE` 미설정 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 39번 신설·37번 정정, 업그레이드 점검 절·권한 표 갱신, 08 §3·§4·§7, `bi-review` 7-2의 AP-1 구체화 항목 | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화 | - |
+- **reviewer O1 처리:** `bi-review` 7-2에 들어갔던 두 항목(`GUEST_TOKEN_JWT_EXP_SECONDS` 재정의 지적, 강제 복구 표식 규칙)은 AP-1·AP-2 범위를 넘어 **제거**했다. 리뷰 규칙으로 올릴지는 11-3의 승인 대상이다.
+### 11-3. 사용자 확인 대기(3건)
+1. **`bi-review` 7-2 확장 범위:** 위 두 항목(입장권 유효 시간 재정의 지적, 강제 복구는 표식 계정에 한정)을 리뷰 규칙으로 추가할지. 추가한다면 `CLAUDE.md` 변경 이력에도 기록한다. 현재는 AP-1 구체화(역할 이름 단일 출처, 금지 권한 가드, Public 0개, 훅 거부 5가지, backend에 JWT 비밀 없음)만 들어 있다.
+2. **`GUEST_TOKEN_JWT_EXP_SECONDS` 재정의 가드:** 현재 `ci-validate-env.sh`와 `ensure_roles.py` 모두 이 값을 막지 않는다(3600으로 바꿔도 `superset-init` 통과). 입장권 5분(Z5) 불변을 코드로 고정할지(정적 검사 또는 실제 적용값 300 확인 후 실패).
+3. **표식 없는 계정이 허용 역할 하나만 가진 경우:** 거부되지 않고 비밀번호가 재설정된다(EW-3부터의 동작, 03b 10-1의 "지금처럼"). "사람 계정 보호"와 어긋나므로 허용할지, 표식 없는 기존 계정은 역할과 무관하게 거부할지 정한다(`deploy-coordination.md` 37번에 한계로 기록).
+### 11-4. 확인된 사실
+- 훅은 발급 API(`POST /api/v1/security/guest_token/`)에서 `validate_guest_token_resources` 뒤 토큰 생성 전에 불린다. 유형이 `dashboard`가 아닌 요청은 Superset 스키마가 먼저 400으로 걸러 REST로는 훅에 닿지 않는다(훅 단독 호출로 확인).
+- 지원 차트 6가지는 `bi_guest` 4권한만으로 정상 표시된다(`can_explore_json`·퍼머링크 읽기 불필요). 그래도 `rose` 같은 레거시 유형은 지원 차트가 아니다(08 §3-1).
+- guest 요청마다 Superset 로그에 `Failed to add user to db session: Class 'werkzeug.local.LocalProxy' is not mapped` 경고가 남지만 기능 영향은 없다.
+

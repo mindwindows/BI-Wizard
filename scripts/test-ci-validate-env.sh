@@ -18,6 +18,9 @@ reset_work() {
   cp -f "$ROOT/compose.yml" "$WORK/compose.yml"
   cp -f "$ROOT/Jenkinsfile" "$WORK/Jenkinsfile"
   cp -f "$ROOT/backend/bootstrap/roles.sql" "$WORK/backend/bootstrap/roles.sql"
+  mkdir -p "$WORK/superset" "$WORK/backend/app"
+  cp -f "$ROOT/superset/superset_config.py" "$WORK/superset/superset_config.py"
+  printf '# 시험용 빈 모듈\n' > "$WORK/backend/app/__init__.py"
   cp -f "$ROOT/scripts/"*.bat "$WORK/scripts/" 2>/dev/null || true
 }
 
@@ -197,6 +200,17 @@ expect_fail "db-bootstrap에 서비스 계정 비밀번호" "db-bootstrap 서비
 expect_fail "db-bootstrap에 발급 계정 이름" "db-bootstrap 서비스에 SUPERSET_GUEST_ISSUER_USER" add_after_service db-bootstrap '      SUPERSET_GUEST_ISSUER_USER: ${SUPERSET_GUEST_ISSUER_USER}'
 expect_fail "postgres에 발급 계정 비밀번호" "postgres 서비스에 SUPERSET_GUEST_ISSUER_PASSWORD" add_after_service postgres '      SUPERSET_GUEST_ISSUER_PASSWORD: ${SUPERSET_GUEST_ISSUER_PASSWORD}'
 expect_fail "postgres에 서비스 계정 이름" "postgres 서비스에 SUPERSET_SERVICE_USER" add_after_service postgres '      SUPERSET_SERVICE_USER: ${SUPERSET_SERVICE_USER}'
+expect_fail "backend에 GUEST_TOKEN_JWT_SECRET(직접 서명 금지)" "backend 서비스에 GUEST_TOKEN_JWT_SECRET" add_after_service backend '      GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET}'
+expect_fail "backend 리스트 문법 GUEST_TOKEN_JWT_SECRET" "backend 서비스에 리스트 문법으로 GUEST_TOKEN_JWT_SECRET" add_after_service backend '      - GUEST_TOKEN_JWT_SECRET'
+expect_fail "backend가 다른 키에서 GUEST_TOKEN_JWT_SECRET 참조" "backend 서비스가 \${GUEST_TOKEN_JWT_SECRET} 을(를) 참조" add_after_service backend '      LOG_LEVEL: ${GUEST_TOKEN_JWT_SECRET}'
+expect_fail "migrate에 GUEST_TOKEN_JWT_SECRET" "migrate 서비스에 GUEST_TOKEN_JWT_SECRET" add_after_service migrate '      GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET}'
+expect_fail "backend env_file로 전체 전달(GUEST_TOKEN_JWT_SECRET 포함 가능)" "backend 서비스에 env_file" add_after_service backend '    env_file: .env'
+expect_fail "backend/app 코드가 GUEST_TOKEN_JWT_SECRET 참조" "backend/app 코드가 GUEST_TOKEN_JWT_SECRET" sh -c "printf 'x = \"GUEST_TOKEN_JWT_SECRET\"\n' >> '$WORK/backend/app/__init__.py'"
+expect_fail "superset_config GUEST_ROLE_NAME 변경" "GUEST_ROLE_NAME 은" sh -c "sed -i 's/^GUEST_ROLE_NAME = .*/GUEST_ROLE_NAME = \"Public\"/' '$WORK/superset/superset_config.py'"
+expect_fail "superset_config GUEST_ROLE_NAME 삭제" "GUEST_ROLE_NAME 은" sh -c "sed -i '/^GUEST_ROLE_NAME = /d' '$WORK/superset/superset_config.py'"
+expect_fail "superset_config 훅 설정 삭제" "GUEST_TOKEN_VALIDATOR_HOOK 설정이 없습니다" sh -c "sed -i '/^GUEST_TOKEN_VALIDATOR_HOOK = /d' '$WORK/superset/superset_config.py'"
+expect_fail "superset_config에 PUBLIC_ROLE_LIKE" "PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다" sh -c "printf 'PUBLIC_ROLE_LIKE = \"Gamma\"\n' >> '$WORK/superset/superset_config.py'"
+expect_fail "superset_config에 PUBLIC_ROLE_LIKE(타입 주석)" "PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다" sh -c "printf 'PUBLIC_ROLE_LIKE: str = \"Public\"\n' >> '$WORK/superset/superset_config.py'"
 expect_fail "compose가 .env.example에 없는 변수 사용" "에 없는 변수" add_after_service backend '      NEW_THING: ${NEW_THING}'
 expect_fail "compose에 latest 태그" ":latest 태그" sh -c "printf '    image: foo:latest\n' >> '$WORK/compose.yml'"
 

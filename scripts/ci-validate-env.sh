@@ -9,6 +9,8 @@
 #     기본 false이며 true이면 APP_ENV가 local 또는 test여야 한다.
 #     Superset 계정(EW-3): 관리자·서비스·발급 전용 계정 이름은 비어 있지 않고 서로 달라야 하며, superset-init은 migrate
 #     완료를 기다리고, 서비스·발급 비밀번호는 backend와 superset-init에만 전달한다.
+#     guest token(EW-4, AP-1): backend와 migrate는 GUEST_TOKEN_JWT_SECRET을 받지 않고(직접 서명 금지) backend/app 코드에도 이
+#     이름이 없다. superset/superset_config.py는 GUEST_ROLE_NAME을 bi_guest로 두고 PUBLIC_ROLE_LIKE를 설정하지 않는다.
 #  6) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
 # 사용: sh scripts/ci-validate-env.sh [출력파일]
 # 이 검사의 네거티브 케이스 시험: sh scripts/test-ci-validate-env.sh
@@ -20,6 +22,7 @@ cd "$(dirname "$0")/.."
 EXAMPLE=.env.example
 COMPOSE=compose.yml
 ROLES=backend/bootstrap/roles.sql
+SUPERSET_CONFIG=superset/superset_config.py
 OUT="${1:-.env.ci}"
 
 REQUIRED="APP_NAME APP_ENV APP_DEBUG AUTH_STUB_ENABLED APP_BASE_PATH APP_PROXY_STRIP_PREFIX \
@@ -167,6 +170,22 @@ check_forbidden_vars() { # 서비스 이름, 금지 변수 이름들, 설명
 }
 check_forbidden_vars backend "bi_app 전용" POSTGRES_USER POSTGRES_PASSWORD POSTGRES_OWNER_PASSWORD
 check_forbidden_vars migrate "bi_owner 전용" POSTGRES_USER POSTGRES_PASSWORD POSTGRES_APP_PASSWORD
+# guest token 직접 서명 금지(08 §4, AP-1): 훅은 발급 API 경로에서만 불리므로 서명 비밀을 가진 쪽이 토큰을 직접 만들면
+# 훅(rls·리소스 검사)을 우회한다. 비밀은 superset과 superset-init만 받는다.
+check_forbidden_vars backend "guest token 직접 서명 금지: 서명 비밀은 superset과 superset-init만 받습니다" GUEST_TOKEN_JWT_SECRET
+check_forbidden_vars migrate "guest token 직접 서명 금지: 서명 비밀은 superset과 superset-init만 받습니다" GUEST_TOKEN_JWT_SECRET
+if [ -d backend/app ] && grep -rIq 'GUEST_TOKEN_JWT_SECRET' backend/app; then
+  fail "backend/app 코드가 GUEST_TOKEN_JWT_SECRET 을(를) 참조합니다(guest token 직접 서명 금지)."
+fi
+if [ ! -f "$SUPERSET_CONFIG" ]; then
+  fail "$SUPERSET_CONFIG 가 없습니다."
+else
+  grep -Eq '^GUEST_ROLE_NAME = "bi_guest"[[:space:]]*$' "$SUPERSET_CONFIG" || fail "$SUPERSET_CONFIG 의 GUEST_ROLE_NAME 은 \"bi_guest\" 여야 합니다."
+  grep -Eq '^GUEST_TOKEN_VALIDATOR_HOOK = [A-Za-z_]' "$SUPERSET_CONFIG" || fail "$SUPERSET_CONFIG 에 GUEST_TOKEN_VALIDATOR_HOOK 설정이 없습니다."
+  if grep -Eq '^[[:space:]]*PUBLIC_ROLE_LIKE[[:space:]]*(:[^=]*)?=' "$SUPERSET_CONFIG"; then
+    fail "$SUPERSET_CONFIG 에 PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다(Public 권한 0개 유지)."
+  fi
+fi
 if ! service_block backend | grep -Eq '^[[:space:]]+POSTGRES_APP_PASSWORD:'; then
   fail "backend 서비스에 POSTGRES_APP_PASSWORD 가 없습니다."
 fi

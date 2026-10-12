@@ -7,7 +7,11 @@
 """
 
 import copy
+import logging
 import os
+import uuid
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import quote
 
 from sqlalchemy.engine import URL
@@ -40,6 +44,74 @@ SQLALCHEMY_DATABASE_URI = URL.create(
 
 # 포털이 Embedded SDK(guest token)로 대시보드를 넣는다.
 FEATURE_FLAGS = {"EMBEDDED_SUPERSET": True}
+
+# guest token 보유자의 역할(승인: 03b 4-2 Z2, 사용자 결정 2026-10-11). 기본값은 Public이다.
+# 이름 단일 출처는 bi_roles.py의 GUEST_ROLE이고 이 값은 같은 문자열을 따로 적는다(웹 프로세스는 bi_roles.py를 읽지 못한다).
+# 어긋나면 superset-init의 ensure_roles.py가 실제 적용된 설정과 비교해 실패한다. 역할은 superset-init이 매 기동 만든다
+# (권한 4개). PUBLIC_ROLE_LIKE는 설정하지 않는다(Public 권한 0개 유지, ensure_roles.py가 확인한다).
+# guest 토큰 유효 시간 GUEST_TOKEN_JWT_EXP_SECONDS는 Superset 기본값 300초(5분)를 그대로 쓴다(Z5, 설정하지 않는다).
+GUEST_ROLE_NAME = "bi_guest"
+
+_log = logging.getLogger("bi_wizard.guest_token")
+
+# FU-1e 이월: "포털 등록 표(superset_dashboards)의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 아직 없다.
+# 그때 이 목록에 검사 함수 `(body) -> bool`을 추가한다(False를 돌려주면 거부). 훅은 포털 DB를 읽지 않으므로
+# 포털 등록과의 일치는 backend가 발급 전에 보장한다(08 §4). 지금은 비어 있다.
+_EXTRA_GUEST_TOKEN_CHECKS: list[Callable[[dict[str, Any]], bool]] = []
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value.lower()
+    except ValueError:
+        return False
+
+
+def _reject(reason: str) -> bool:
+    # 사유 코드만 남긴다(요청 본문·사용자 이름·토큰은 남기지 않는다).
+    _log.warning("guest token 발급 거부: %s", reason)
+    return False
+
+
+def bi_wizard_guest_token_validator(body: dict[str, Any]) -> bool:
+    """POST /api/v1/security/guest_token/ 검증 훅(Superset 6.1.0 security/api.py).
+
+    Superset이 스키마 검증(`GuestTokenCreateSchema`)과 임베드 대시보드 존재 확인(`validate_guest_token_resources`)을
+    마친 뒤 `body`(`user`, `resources`, `rls`를 담은 dict)로 호출한다. 반환값이 거짓이면 Superset이 400
+    ("Guest token validation failed")으로 응답한다. 이 훅은 발급 API 경로에서만 불리므로 직접 서명한 토큰은 막지 못한다
+    (그래서 backend는 GUEST_TOKEN_JWT_SECRET을 받지 않는다).
+    거부 조건: rls가 비어 있지 않음, 리소스가 정확히 1개가 아니거나 type이 dashboard가 아니거나 id가 uuid 형식이 아님,
+    user(username) 누락.
+    예외를 내지 않는다(예외는 500이 된다): 알 수 없는 입력은 모두 거부한다.
+    """
+    try:
+        if not isinstance(body, dict):
+            return _reject("본문 형식")
+        if body.get("rls") != []:
+            return _reject("rls가 비어 있지 않음")
+        resources = body.get("resources")
+        if not isinstance(resources, list) or len(resources) != 1:
+            return _reject("리소스가 정확히 1개가 아님")
+        resource = resources[0]
+        if not isinstance(resource, dict) or resource.get("type") != "dashboard":
+            return _reject("리소스 유형이 dashboard가 아님")
+        # 리소스 id는 임베드 uuid 형식이어야 한다. Superset 기본 검사는 숫자 id·slug도 대시보드로 인정해(임베드를 켜지 않은
+        # 대시보드도 통과, 03c X-28) 그것만으로는 임베드 안 한 대시보드의 입장권이 발급된다. 등록 여부는 확인하지 않는다(FU-1e).
+        resource_id = resource.get("id")
+        if not isinstance(resource_id, str) or not _is_uuid(resource_id):
+            return _reject("리소스 id가 uuid 형식이 아님")
+        user = body.get("user")
+        if not isinstance(user, dict) or not user.get("username"):
+            return _reject("user(username) 누락")
+        for check in _EXTRA_GUEST_TOKEN_CHECKS:
+            if not check(body):
+                return _reject("추가 검사 실패")
+    except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
+        return _reject(f"검증 중 오류({type(exc).__name__})")
+    return True
+
+
+GUEST_TOKEN_VALIDATOR_HOOK = bi_wizard_guest_token_validator
 
 # 프록시(frontend nginx 또는 메인 플랫폼) 뒤에서 동작한다.
 # x_prefix=0: 접두는 SUPERSET_APP_ROOT로 직접 처리하므로 X-Forwarded-Prefix로 다시 붙이지 않는다.

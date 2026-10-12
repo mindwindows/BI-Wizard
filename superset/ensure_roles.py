@@ -1,9 +1,13 @@
-"""역할 4개(bi_service, bi_guest_issuer, bi_author, bi_author_schema)를 멱등으로 맞춘다.
+"""역할 5개(bi_service, bi_guest_issuer, bi_author, bi_author_schema, bi_guest)를 멱등으로 맞춘다.
 
 - 권한 목록은 bi_roles.py 한 곳에 있다. 비밀번호는 다루지 않는다.
-- bi_service, bi_guest_issuer, bi_author_schema: 매 기동 `없으면 생성 -> 권한 목록 통째 교체 -> 커밋 -> 재읽기 비교`.
+- bi_service, bi_guest_issuer, bi_author_schema, bi_guest: 매 기동 `없으면 생성 -> 권한 목록 통째 교체 -> 커밋 -> 재읽기 비교`.
   목록의 권한(PermissionView)이 하나라도 Superset에 없으면 아무것도 바꾸지 않고 전체 실패한다.
   (schema_access 항목은 sync_permissions.py가 먼저 만든다. 항목 이름은 DATABASE_NAME과 POSTGRES_DB로 조립한다.)
+  새 권한은 자동으로 추가하지 않는다(목록에 없는 권한은 통째 교체로 제거된다).
+- guest 불변식(고치지 않고 실패한다, 아무것도 바꾸기 전에 확인한다): 실제 적용된 설정 `GUEST_ROLE_NAME`이 bi_roles.GUEST_ROLE과
+  같다(이름 단일 출처 확인), `PUBLIC_ROLE_LIKE` 미설정, `Public` 역할의 권한 0개. bi_guest 목록에 금지 권한(내보내기·쓰기·
+  Explore·SQL Lab·데이터 접근 계열, bi_roles.forbidden_reason)이 있으면 실패한다.
 - bi_author(Gamma 복사본): **처음 만들 때만** 내장 Gamma의 권한을 복사한다(add_role로 역할과 권한을 한 번에 넣는다).
   그 뒤에는 Gamma와의 차이를 로그로 알리기만 하고 권한은 바꾸지 않는다(권한이 0개여도 되살리지 않는다.
   사람이 비워 둔 역할일 수 있어 다시 복사하면 권한 확대가 된다. 0개이면 "점검 필요" 로그만 남긴다)(superset init은 Gamma에만 새 권한을 더하고 복사본은 갱신하지 않는다).
@@ -16,9 +20,10 @@ import sys
 
 from bi_roles import (
     AUTHOR_ROLE,
-    FORBIDDEN_PERMISSIONS,
     GAMMA_ROLE,
+    GUEST_ROLE,
     ROLE_PERMISSIONS,
+    forbidden_reason,
     resolve,
 )
 from superset.app import create_app
@@ -46,14 +51,34 @@ app = create_app()
 with app.app_context():
     sm = app.appbuilder.sm
 
+    # 0) guest 불변식. 설정은 superset_config.py가 아니라 실제 적용된 app.config로 확인한다.
+    #    하나라도 어긋나면 아무것도 바꾸지 않고 실패한다(자동으로 고치지 않는다).
+    applied_guest_role = app.config.get("GUEST_ROLE_NAME")
+    if applied_guest_role != GUEST_ROLE:
+        fail(
+            f"설정 GUEST_ROLE_NAME이 {GUEST_ROLE}이(가) 아닙니다(superset_config.py와 bi_roles.GUEST_ROLE이 어긋남). "
+            "guest 입장권이 다른 역할로 동작하게 되므로 중단합니다."
+        )
+    if app.config.get("PUBLIC_ROLE_LIKE"):
+        fail("설정 PUBLIC_ROLE_LIKE가 설정되어 있습니다. Public 역할이 권한을 갖게 되므로 설정하지 마세요.")
+    public_role = sm.find_role(sm.auth_role_public)
+    if public_role is None:
+        fail(f"{sm.auth_role_public} 역할이 없어 권한 0개를 확인할 수 없습니다(superset init 뒤에 실행해야 합니다).")
+    if len(public_role.permissions) != 0:
+        fail(
+            f"{sm.auth_role_public} 역할의 권한이 {len(public_role.permissions)}개입니다(0개여야 합니다). "
+            "자동으로 고치지 않으므로 원인을 확인하고 관리자가 비운 뒤 다시 실행하세요."
+        )
+
     # 1) 모든 목록의 권한을 먼저 찾는다. 하나라도 없으면 아무것도 바꾸지 않고 실패한다.
     resolved = {}
     missing = []
     for role_name, entries in ROLE_PERMISSIONS.items():
         wanted = resolve(entries, postgres_db)
-        for forbidden in resolve(FORBIDDEN_PERMISSIONS.get(role_name, []), postgres_db):
-            if forbidden in wanted:
-                fail(f"{role_name}의 권한 목록에 금지된 권한이 있습니다: {label(forbidden)}")
+        for pair in wanted:
+            reason = forbidden_reason(role_name, pair)
+            if reason is not None:
+                fail(f"{role_name}의 권한 목록에 금지된 권한이 있습니다: {label(pair)} ({reason})")
         views = []
         for pair in wanted:
             pvm = sm.find_permission_view_menu(*pair)
@@ -70,7 +95,7 @@ with app.app_context():
             "(schema_access라면 sync_permissions 단계와 업무 데이터 연결 이름을 확인하세요)."
         )
 
-    # 2) 역할 3개: 목록으로 통째 교체하고 재읽기로 비교한다.
+    # 2) 목록 역할: 목록으로 통째 교체하고 재읽기로 비교한다.
     for role_name, (wanted, views) in resolved.items():
         role = sm.find_role(role_name) or sm.add_role(role_name, views)
         if role is None:

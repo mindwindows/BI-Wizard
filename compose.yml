@@ -166,7 +166,7 @@ services:
     logging: *default-logging
 
   # Superset 초기화(일회성, 멱등): db upgrade -> 관리자 -> init -> 업무 데이터 연결(bi_readonly) 등록
-  #   -> schema 권한 동기화 -> 역할 4개 -> 서비스·발급 전용 계정 2개
+  #   -> schema 권한 동기화 -> 역할 5개(bi_guest 포함) -> 서비스·발급 전용 계정 2개
   superset-init:
     build:
       context: ./superset

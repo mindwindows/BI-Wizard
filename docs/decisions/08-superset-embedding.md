@@ -42,12 +42,12 @@
 ## 3. guest 역할 `bi_guest`
 | 항목 | 내용 | 출처·상태 |
 | --- | --- | --- |
-| 생성 | `superset-init`이 매 기동 멱등으로: 조회 → 없으면 생성 → 권한 목록 통째 교체 → 재읽기 비교. 목록은 저장소 고정 파일(`superset/bi_roles.py`). 구현 방법은 EW-3에서 정했다(앱 컨텍스트 파이썬 스크립트, §2-1 0행). `bi_guest`는 EW-4에서 같은 방식으로 추가할 예정이다 | `03b` 4-2 Z2, X-20(통째 교체 확인됨) |
+| 생성 | `superset-init`이 매 기동 멱등으로: 조회 → 없으면 생성 → 권한 목록 통째 교체 → 재읽기 비교. 목록은 저장소 고정 파일(`superset/bi_roles.py`). 구현 방법은 EW-3에서 정했다(앱 컨텍스트 파이썬 스크립트, §2-1 0행). `bi_guest`는 EW-4에서 같은 방식으로 추가했다(2026-10-12 구현, 새 설치·재실행 멱등 확인, QA 대기). 목록은 `bi_roles.py`의 `ROLE_PERMISSIONS`에 있고 실제 확인한 항목은 `can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`, `can_time_range Api` 4개다 | `03b` 4-2 Z2, X-20(통째 교체 확인됨) |
 | 필수 3개 | `can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart` | X-25 확인됨 |
 | 기간 필터 1개 | `can_time_range Api`(없으면 `/api/v1/time_range/` 403으로 기간 팝업 APPLY 비활성). 안내문이 시간 필터를 요구하므로 FU-1 목록에 넣는다 [제안] | X-25 확인됨 |
 | 조건부 2개 | `can_explore_json Superset`(레거시 차트 유형), `can_read DashboardPermalinkRestApi`(permalink 필터 복원). **FU-1 기본은 미포함**: 지원 차트 6가지(§3-1)에 필요하지 않을 때만 제외를 유지하고(`rose` 같은 레거시 유형은 지원 차트가 아님), 필요해지면 보고하고 멈춘다(`03b` 6-1). `native_filters`는 추가 권한 없이 동작 | X-25 확인됨 |
 | 비포함 | 쓰기 권한 전부, Explore, SQL Lab, 목록 API, 내보내기(`can_csv Superset`을 넣으면 CSV/XLSX가 열려 넣지 않음). 시작 21개 중 14개 불필요 | `03b` 4-2 Z1, X-25 |
-| 불변·시작 실패 | `Public` 권한 0개, `PUBLIC_ROLE_LIKE` 미설정, `Gamma` 미사용(guest 역할에만 적용). 목록의 권한 이름이 Superset에 없으면 `superset-init` 실패(`can_read AnnotationLayerRestApi`는 없는 이름이었음). 역할이 없으면 guest의 모든 API가 500 | `03b` 3-1, 4-5, X-25 |
+| 불변·시작 실패 | `Public` 권한 0개, `PUBLIC_ROLE_LIKE` 미설정, `Gamma` 미사용(guest 역할에만 적용). 목록의 권한 이름이 Superset에 없으면 `superset-init` 실패(`can_read AnnotationLayerRestApi`는 없는 이름이었음). 역할이 없으면 guest의 모든 API가 500. **구현(EW-4, 2026-10-12):** `ensure_roles.py`가 아무것도 바꾸기 전에 실제 적용된 `GUEST_ROLE_NAME`이 `bi_roles.GUEST_ROLE`(`bi_guest`, 이름 정본)과 같은지, `PUBLIC_ROLE_LIKE` 미설정, `Public` 권한 0개를 확인하고 어기면 **고치지 않고 실패**한다. `bi_guest` 목록에 금지 권한(조건부 2개, 내보내기·쓰기·Explore·SQL Lab·데이터 접근 계열)이 있어도 실패한다(`bi_service`의 `can_grant_guest_token` 가드와 같은 방식, 이름 조각 검사 포함). 시험: 없는 권한 이름 → 실패·불변, 금지 권한 8종 → 실패, `Public`에 권한 임시 부여 → 실패, `PUBLIC_ROLE_LIKE`·`GUEST_ROLE_NAME` 변조 → 실패 | `03b` 3-1, 4-5, X-25 |
 | 반영·업그레이드 | 권한 변경은 재시작 없이 즉시, `GUEST_ROLE_NAME` 변경은 재시작 필요. `superset`은 `superset-init` 성공 뒤 시작(현 compose)하므로 역할이 먼저 생긴다. 새 권한은 자동 추가하지 않고 업그레이드 때 스모크 시험 + 권한 목록 차이 보고 | `03b` 4-5, X-25 |
 ### 3-1. 지원 차트 6가지와 스모크 (guest 4개 권한 구성, 관리자 화면과 비교)
 - **지원 차트(`03b` 6-1): 선, 막대, 표, 큰 숫자(추세 포함), 원형, 혼합(막대+선).** 6가지 모두 임베딩 화면에서 `bi_guest` 최소 권한(필수 3개 + 기간 필터 1개)으로 정상 표시되어야 FU-1 합격이다(P5). 추가 권한이 필요한 차트가 나오면 보고하고 멈춘다. X-25가 "핵심 시나리오 차트 6개"를 시험했으나 원문에 이름이 없어 이 6가지와 같은지는 확인하지 못했으므로 FU-1e에서 6가지를 직접 시험한다.
@@ -64,10 +64,10 @@
 | 흐름 | Embedded SDK `fetchGuestToken` → backend(경로는 05) → 인증된 활성 사용자·활성 `superset_dashboards`의 `embedded_uuid` 확인 → 발급 전용 계정으로 `POST /api/v1/security/guest_token/` → 토큰 반환(`Cache-Control: no-store`, 로그 금지) | `03b` 4-2 Z3, 4-5 |
 | 본문 | `user`는 **항상** 보낸다(`username`=`users.id` 문자열 [제안]; 생략하면 500). `resources`는 `[{type: dashboard, id: <embedded uuid>}]` 하나. `rls`는 **항상 빈 목록**(클라이언트 입력 없음) | X-28 확인됨, `03b` 4-2 Z4 |
 | 대시보드 식별 | 포털 등록 표의 embedded uuid만 쓴다. `Dashboard.uuid`는 사용 시 거부되고 숫자 id는 임베드 안 한 대시보드도 API로 읽힌다 → 클라이언트가 보낸 id·`rls`는 받지 않는다. uuid는 관리자가 Superset에서 임베드를 켠 뒤 수동 입력 | X-28 확인됨, `03b` 4-2 Z3 ㄴ |
-| 검증 훅 | `GUEST_TOKEN_VALIDATOR_HOOK`(승인됨; 인자 `{user, resources, rls}`, 거부 시 400). 확인: `rls` 비어 있음, resource 1개·type dashboard, id가 **Superset에 임베드로 등록된 uuid**. 훅은 포털 DB를 못 읽으므로 Superset 쪽 임베드 설정 조회로 확인하고 포털 등록과의 일치는 backend가 보장한다 [제안, 조회 방법 확인 대기] | X-28 확인됨 / 조회 방법은 추정 |
-| **직접 서명 금지** | 훅은 **발급 API 경로에서만** 호출된다. 직접 서명한 토큰은 훅을 우회해 비어 있지 않은 `rls`·만료 없는 토큰도 통과한다. 그래서 backend는 `GUEST_TOKEN_JWT_SECRET`을 받지 않고(현 compose도 아님) 토큰을 직접 만들지 않는다. 시험과 `bi-review` 규칙으로 고정(AP-1 승인) | X-28 확인됨 |
+| 검증 훅 | `GUEST_TOKEN_VALIDATOR_HOOK`(승인됨). **시그니처·호출 위치(6.1.0 소스 확인, EW-4):** `hook(body: dict) -> bool`, `body`는 `{user, resources, rls}`(`GuestTokenCreateSchema` 검증 뒤)이며 `security/api.py`의 `guest_token()`이 `validate_guest_token_resources`(id가 임베드 uuid 또는 대시보드 id·slug인지 확인) **다음**, 토큰 생성 전에 부른다. 반환이 거짓이면 `ValidationError`로 **400**(`Guest token validation failed`)이고 호출 불가 객체면 오류, 훅이 예외를 내면 500이다(그래서 훅은 예외를 삼키고 거부한다). **구현(`superset_config.py`):** 거부 = `rls`가 `[]`가 아님, 리소스가 정확히 1개가 아님, 유형이 `dashboard`가 아님(스키마가 먼저 400으로 거르므로 방어선), 리소스 id가 uuid 형식이 아님(**추가:** Superset 기본 검사가 숫자 id·slug를 대시보드로 인정해 임베드 안 한 대시보드도 통과함을 확인했다, 아래 시험), `user.username` 없음. 포털 DB를 읽지 않으며 로그에는 사유 코드만 남긴다. **"포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e로 이월**(훅의 `_EXTRA_GUEST_TOKEN_CHECKS` 확장 지점, 포털 등록과의 일치는 backend가 발급 전에 보장). 임베드로 등록된 uuid인지는 Superset 기본 검사가 이미 확인한다(없는 uuid → 400 `EmbeddedDashboard not found`) | X-28 확인됨, EW-4 시험(발급 계정 REST: 정상 200, `rls` 비어 있지 않음 400, 리소스 0·2개 400, 숫자 id 400, `user` 누락·빈 이름 400, 없는 uuid 400) |
+| **직접 서명 금지** | 훅은 **발급 API 경로에서만** 호출된다. 직접 서명한 토큰은 훅을 우회해 비어 있지 않은 `rls`·만료 없는 토큰도 통과한다. 그래서 backend는 `GUEST_TOKEN_JWT_SECRET`을 받지 않고(현 compose도 아님) 토큰을 직접 만들지 않는다. 시험과 `bi-review` 규칙으로 고정(AP-1 승인). **EW-4:** `ci-validate-env.sh`가 backend·migrate 환경과 `backend/app` 코드에 `GUEST_TOKEN_JWT_SECRET`이 없음을 검사하고(네거티브 시험 포함) backend 코드와 의존성에 JWT 서명 라이브러리·토큰 직접 생성 흔적이 없음을 확인했다 | X-28 확인됨 |
 | 발급 전용 계정 | 최소 권한: 세션 로그인 + 폼 CSRF면 `can_grant_guest_token SecurityRestApi` 1개, REST(JWT) 로그인이면 `can_read SecurityRestApi` 포함 2개. 서비스 계정과 같은 클라이언트를 재사용하도록 JWT·2개를 제안한다 [제안]. 지연은 세션 재사용 약 26ms, 로그인 포함 약 240ms. `GUEST_TOKEN_JWT_AUDIENCE`는 불필요해 만들지 않는다 | X-28 확인됨, `03b` 4-7 |
-| 유효·갱신 | 5분(설정 변경 없음). SDK가 만료 5초 전 재호출하므로 보는 중에는 대시보드당 5분에 1회. 실패 시 10초마다 재시도, 만료 뒤 401과 차트 "Data error"(영문)가 보이다 성공하면 복구. 포털이 401이면 로그인으로(8번 후 재확인) | X-28 확인됨, `03b` 4-5 |
+| 유효·갱신 | 5분(설정 변경 없음, EW-4에서 6.1.0 기본 `GUEST_TOKEN_JWT_EXP_SECONDS=300`과 실제 적용값 확인). SDK가 만료 5초 전 재호출하므로 보는 중에는 대시보드당 5분에 1회. 실패 시 10초마다 재시도, 만료 뒤 401과 차트 "Data error"(영문)가 보이다 성공하면 복구. 포털이 401이면 로그인으로(8번 후 재확인) | X-28 확인됨, `03b` 4-5 |
 | 제한·실패 | 발급 API는 사용자별 429(`Retry-After`, 승인됨), 한도 값은 정상 갱신 빈도 위에서 구현 때 제안 **[미답]**, 저장은 프로세스 메모리 [제안](Redis 제외, `03a`; 워커를 늘리면 재설계). Superset 불가·거부는 502/503 + 한국어 메시지(05) [제안] | `03b` 4-4 Z9, 4-5 |
 
 ## 5. 작성자 역할과 대시보드 연결
@@ -99,7 +99,7 @@
 | AP-2 | 가상 데이터셋 SQL 고정 | `SELECT * FROM bi_data.<뷰>` 고정, 서비스 계정만 등록 | 승인됨 |
 | AP-9 | `bi_readonly` `statement_timeout` | 30초 확정(06), EW-1에서 효과 확인 | 승인됨 |
 | AP-12 | backend → Superset 주소 | 내부 주소는 compose 서비스 이름 기반 코드 상수(새 변수 없음), `SUPERSET_APP_ROOT`를 backend에 전달 | 승인됨, 적용 완료(EW-3, 2026-10-12) |
-| - | 이름 확정·구현 시점 | 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 승인으로 확정). `GUEST_ROLE_NAME=bi_guest`·`GUEST_TOKEN_VALIDATOR_HOOK`은 승인됨이며 적용 시점(EW-4)에 보고, `superset-init` 확장도 AP-16으로 승인(적용 시점에 보고) | EW-3 적용 완료(2026-10-12, 계정·역할 생성 포함), EW-4 대기 |
+| - | 이름 확정·구현 시점 | 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 승인으로 확정). `GUEST_ROLE_NAME=bi_guest`·`GUEST_TOKEN_VALIDATOR_HOOK`은 승인됨이며 적용 시점(EW-4)에 보고, `superset-init` 확장도 AP-16으로 승인(적용 시점에 보고) | EW-3 적용 완료(2026-10-12, 계정·역할 생성 포함), **EW-4 적용 완료(2026-10-12, `bi_guest` 4권한·훅·`Public` 0개 검사·계정 강제 복구, 구현자 시험 통과, QA 대기)** |
 | - | 의존성·값 | frontend Embedded SDK는 FU-1 착수 때 버전·라이선스 확인 후 요청(AP-15, 04 §9-1), `httpx`는 승인됨. 속도 제한 한도 값 | FU-1e |
 
 ## 8. 후속 기능 단위에서 결정
