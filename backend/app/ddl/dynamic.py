@@ -14,11 +14,24 @@
   롤백해 등록 행까지 되돌린다. 이 모듈은 커밋하지 않는다.
 - 기간 규칙(기준 날짜 열): `NOT NULL` + CHECK(기간 첫날) + 유일 인덱스. CHECK 식의 단위 글자는 고정
   집합(`day`·`month`·`year`)에서만 온다.
-- 생성 뒤 재읽기 비교(글자 상수가 들어가는 `dv_` 뷰의 완화책 ③)는 1d 몫이다. 여기서는 만든 표·열이
-  실제로 있는지만 다시 읽어 확인한다.
+- 뷰(`dv_`·`de_`)는 `create_view`/`drop_view`로만 만든다. 만들기 전에 뷰 정의(SELECT)를 허용
+  목록 규칙으로 확인한다(자기 `ds_<번호>` 한 표만 읽음, `text()`·`literal_column` 없음, 서브쿼리
+  없음, 바인드 값은 숫자·글자·참거짓·날짜뿐). 상수의 SQL 글자 렌더는 호출한 쪽이 넘기는
+  `render`(formula의 `render_literal_sql` 접점)만 쓰므로 이 모듈은 `literal_binds`를 직접 쓰지
+  않는다(`CreateView`가 내부에서 같은 렌더러로 그린다).
+- 완화책 ③(07 §4-3): 뷰를 만든 뒤 같은 트랜잭션에서 (가) 뷰를 `LIMIT 0`으로 읽어 열 이름·개수가
+  기대와 같은지, (나) 호출한 쪽이 넘긴 글자 상수 확인 SELECT를 같은 렌더러로 실행해 입력과 같은지
+  비교한다. 어긋나면 `DdlVerificationError`를 올리고 호출한 쪽이 트랜잭션을 롤백한다.
+- 표·열 생성 뒤에는 만든 표·열이 실제로 있는지 다시 읽어 확인한다.
 """
 
 from __future__ import annotations
+
+import datetime
+from collections.abc import Callable
+from collections.abc import Sequence as SequenceABC
+from decimal import Decimal
+from typing import Any
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -35,6 +48,7 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     PrimaryKeyConstraint,
+    Select,
     Sequence,
     Table,
     Text,
@@ -42,27 +56,48 @@ from sqlalchemy import (
     func,
     inspect,
     literal,
+    select,
 )
+from sqlalchemy.engine.interfaces import Dialect
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.schema import (
     AddConstraint,
     CreateIndex,
     CreateTable,
+    CreateView,
     DropConstraint,
     DropIndex,
+    DropView,
     ExecutableDDLElement,
+)
+from sqlalchemy.sql import visitors
+from sqlalchemy.sql.base import Executable
+from sqlalchemy.sql.elements import (
+    BindParameter,
+    Cast,
+    ClauseElement,
+    ColumnClause,
+    Label,
+    TextClause,
 )
 from sqlalchemy.types import TypeEngine
 
+from app.core.db_errors import sqlstate
 from app.db_metadata import COLUMN_TYPES, DATE_UNITS
 from app.ddl.names import (
     DYNAMIC_SCHEMA,
+    DdlExecutionError,
+    DdlNameError,
     DdlNotAllowedError,
     DdlVerificationError,
     check_dynamic_name,
     column_name,
     dataset_table_name,
+    error_view_name,
     period_check_name,
     period_index_name,
+    view_name,
 )
 
 # 원본 열 형 -> PostgreSQL 형(06 §3-1). choice는 선택 목록 값 자체를 text로 저장한다.
@@ -75,8 +110,24 @@ _COLUMN_SQL_TYPES: dict[str, type[TypeEngine]] = {
 }
 assert set(_COLUMN_SQL_TYPES) == set(COLUMN_TYPES)  # noqa: S101 - 형 목록이 어긋나면 import에서 실패
 
-# 실행을 허용하는 SQLAlchemy DDL 구문. 뷰(`CreateView`)는 1d에서 formula 단위와 함께 더한다.
-ALLOWED_DDL_ELEMENTS = (CreateTable, CreateIndex, DropIndex, AddConstraint, DropConstraint)
+# 실행을 허용하는 SQLAlchemy DDL 구문. 뷰는 `create_view`/`drop_view`가 정의를 확인한 뒤에만
+# 실행한다.
+ALLOWED_DDL_ELEMENTS = (
+    CreateTable,
+    CreateIndex,
+    DropIndex,
+    AddConstraint,
+    DropConstraint,
+    CreateView,
+    DropView,
+)
+
+# 뷰 종류 -> (이름 규칙 함수). `dv`는 값 뷰, `de`는 오류 판정 보조 뷰(07 §3-1).
+VIEW_KINDS = {"dv": view_name, "de": error_view_name}
+# 뷰 정의 안 바인드 값으로 허용하는 파이썬 형(상수는 모두 formula의 리터럴 렌더러가 만든다).
+_ALLOWED_BIND_TYPES = (Decimal, str, bool, int, datetime.date)
+
+Renderer = Callable[[ClauseElement, Dialect], str]
 
 
 # --- 허용 목록 게이트 ----
@@ -106,9 +157,63 @@ def _check_table(table: Table) -> None:
             check_dynamic_name(constraint.name)
 
 
+def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
+    """뷰 정의 SELECT를 확인하고 출력 열 이름 목록을 돌려준다(허용 목록 밖이면 거부)."""
+    if not isinstance(selectable, Select):
+        raise DdlNotAllowedError("뷰 정의는 SELECT여야 한다.")
+    selects = 0
+    for node in visitors.iterate(selectable):
+        if isinstance(node, Select):
+            selects += 1
+        elif isinstance(node, TextClause):
+            raise DdlNotAllowedError("뷰 정의에 text()를 쓸 수 없다.")
+        elif isinstance(node, ColumnClause) and node.is_literal:
+            raise DdlNotAllowedError("뷰 정의에 literal_column을 쓸 수 없다.")
+        elif isinstance(node, BindParameter):
+            value = node.value
+            if value is not None and not isinstance(value, _ALLOWED_BIND_TYPES):
+                raise DdlNotAllowedError("뷰 정의의 상수는 숫자·글자·참거짓·날짜여야 한다.")
+    if selects != 1:
+        raise DdlNotAllowedError("뷰 정의에 서브쿼리를 쓸 수 없다.")
+    froms = selectable.get_final_froms()
+    if len(froms) != 1:
+        raise DdlNotAllowedError("뷰는 자기 원본 표 하나만 읽는다.")
+    source = froms[0]
+    expected_table = dataset_table_name(dataset_id)
+    if getattr(source, "schema", None) != DYNAMIC_SCHEMA or getattr(source, "name", "") != (
+        expected_table
+    ):
+        raise DdlNotAllowedError("뷰는 자기 원본 표(bi_data.ds_<번호>)만 읽는다.")
+    names = [str(c.name) for c in selectable.selected_columns]
+    if len(set(names)) != len(names):
+        raise DdlNameError("뷰 출력 열 이름이 겹친다.")
+    for name in names:
+        check_dynamic_name(name, "column")
+    return names
+
+
+def _check_view_target(view: Table, kind: str | None = None) -> None:
+    if view.schema != DYNAMIC_SCHEMA:
+        raise DdlNotAllowedError("동적 DDL은 bi_data schema에서만 실행한다.")
+    check_dynamic_name(view.name, "view")
+    if kind is not None and view.name[: len(kind)] != kind:
+        raise DdlNameError("뷰 종류와 이름이 맞지 않는다.")
+
+
 def _check_element(element: ExecutableDDLElement) -> None:
     if not isinstance(element, ALLOWED_DDL_ELEMENTS):
         raise DdlNotAllowedError(f"허용되지 않는 DDL 구문: {type(element).__name__}")
+    if isinstance(element, CreateView):
+        if element.temporary or element.materialized:
+            raise DdlNotAllowedError("임시·구체화 뷰는 만들지 않는다.")
+        _check_view_target(element.table)
+        _check_view_select(element.selectable, int(element.table.name.split("_", 1)[1]))
+        return
+    if isinstance(element, DropView):
+        if element.materialized:
+            raise DdlNotAllowedError("구체화 뷰는 다루지 않는다.")
+        _check_view_target(element.element)
+        return
     target = element.element  # type: ignore[attr-defined]
     if isinstance(element, CreateTable):
         _check_table(target)
@@ -238,3 +343,176 @@ def drop_period_rules(conn: Connection, dataset_id: int, column_id: int) -> None
     operations.alter_column(
         table.name, name, existing_type=Date(), nullable=True, schema=DYNAMIC_SCHEMA
     )
+
+
+# --- 뷰 (07 §8, 06 §3-4) ----
+
+
+def _check_echo_select(statement: object) -> Select:
+    """완화책 ③ 확인 질의 모양 확인: FROM 없이 `CAST(글자 상수 AS TEXT)` 열만 있는 SELECT."""
+    if not isinstance(statement, Select) or statement.get_final_froms():
+        raise DdlNotAllowedError("확인 질의는 FROM 없는 SELECT여야 한다.")
+    for node in visitors.iterate(statement):
+        if isinstance(node, Select | Label | Cast):
+            continue
+        if isinstance(node, BindParameter) and isinstance(node.value, str):
+            continue
+        raise DdlNotAllowedError("확인 질의는 글자 상수만 담을 수 있다.")
+    return statement
+
+
+class RenderedSelect(Executable, ClauseElement):
+    """SELECT를 호출한 쪽의 렌더러(`render_literal_sql`)로 그린 글자로 실행하는 확인 질의.
+
+    완화책 ③의 확인 질의(글자 상수만 담은 SELECT)를 뷰 정의와 **같은 렌더러**로 실행해, 렌더된
+    글자가 입력과 같은지 비교한다. 이 모듈은 상수를 직접 렌더하지 않고 넘겨받은 렌더러만 부른다.
+    """
+
+    inherit_cache = False
+    is_dml = False
+
+    def __init__(self, selectable: Select, render: Renderer) -> None:
+        self.selectable = _check_echo_select(selectable)
+        self.render = render
+
+
+@compiles(RenderedSelect)
+def _compile_rendered_select(element: RenderedSelect, compiler: Any, **_kw: Any) -> str:
+    return element.render(element.selectable, compiler.dialect)
+
+
+def _execute_view_statement(conn: Connection, statement: Any) -> Any:
+    """뷰 정의·확인 질의를 실행한다. 문장에 사용자 상수가 들어 있으므로 DB 오류는 SQL 없이 올린다.
+
+    잠금 대기 초과·교착(재시도 가능)과 열 형 변경 거부(42P16, 지우고 다시 만들기로 처리)는
+    호출한 쪽이 원래 오류로 판단해야 하므로 그대로 올린다. 그 오류는 호출한 쪽이 업무 오류로
+    바꾸거나 SQLSTATE만 기록한다.
+    """
+    try:
+        if isinstance(statement, ExecutableDDLElement):
+            run_ddl(conn, statement)
+            return None
+        return conn.execute(statement)
+    except DBAPIError as error:
+        code = sqlstate(error)
+        if code in _PASS_THROUGH_SQLSTATES:
+            raise
+        raise DdlExecutionError(code) from None
+
+
+_PASS_THROUGH_SQLSTATES = frozenset({"55P03", "40P01", "42P16"})
+
+
+def view_column_names(conn: Connection, kind: str, dataset_id: int) -> list[str] | None:
+    """뷰의 출력 열 이름(순서대로). 뷰가 없으면 None."""
+    name = check_dynamic_name(VIEW_KINDS[kind](dataset_id), "view")
+    inspector = inspect(conn)  # 새 Inspector라 같은 트랜잭션의 미커밋 DDL도 보인다.
+    if name not in inspector.get_view_names(schema=DYNAMIC_SCHEMA):
+        return None
+    return [c["name"] for c in inspector.get_columns(name, schema=DYNAMIC_SCHEMA)]
+
+
+def _view_table(kind: str, dataset_id: int, names: SequenceABC[str] = ()) -> Table:
+    view = Table(
+        check_dynamic_name(VIEW_KINDS[kind](dataset_id), "view"),
+        MetaData(),
+        *[Column(check_dynamic_name(n, "column"), Text) for n in names],
+        schema=DYNAMIC_SCHEMA,
+    )
+    return view
+
+
+def drop_view(conn: Connection, kind: str, dataset_id: int) -> None:
+    """뷰를 지운다(`CASCADE` 없음: 이 뷰에 의존하는 객체가 있으면 실패한다)."""
+    _execute_view_statement(conn, DropView(_view_table(kind, dataset_id)))
+
+
+def _create_view_statement(
+    kind: str, dataset_id: int, selectable: Select, *, or_replace: bool
+) -> CreateView:
+    name = check_dynamic_name(VIEW_KINDS[kind](dataset_id), "view")
+    return CreateView(selectable, name, schema=DYNAMIC_SCHEMA, or_replace=or_replace)
+
+
+def create_view(
+    conn: Connection,
+    kind: str,
+    dataset_id: int,
+    selectable: Select,
+    *,
+    render: Renderer,
+    echo: SequenceABC[tuple[Select, tuple[Any, ...]]] = (),
+) -> bool:
+    """`dv_<번호>`/`de_<번호>`를 만들거나 바꾼다. 방식을 바꿨으면(지우고 다시 만듦) True.
+
+    - 뷰가 없으면 `CREATE VIEW`. 있고 기존 열이 새 열의 앞부분(이름·순서 같음)이면
+      `CREATE OR REPLACE VIEW`(끝에 열 추가만 가능, X-11), 열 제거·순서·이름·형 변경이면
+      `DROP VIEW` + `CREATE VIEW`(의존 객체가 있으면 실패하고, `CASCADE`는 쓰지 않는다).
+    - 정의 SELECT는 먼저 `render`로 렌더해 상수 값을 검증한다(규칙 위반이면 렌더러의 예외가
+      올라간다).
+    - 만든 뒤 완화책 ③: 열 이름·개수와 `echo`(확인 SELECT, 기대 값)를 확인한다. 어긋나면
+      `DdlVerificationError`이며 호출한 쪽이 롤백한다.
+    """
+    if kind not in VIEW_KINDS:
+        raise DdlNotAllowedError(f"허용되지 않는 뷰 종류: {kind!r}")
+    expected = _check_view_select(selectable, dataset_id)
+    dialect = conn.dialect
+    rendered = render(selectable, dialect)  # 상수 검증 + 같은 렌더러로 그린 정의 글자
+    existing = view_column_names(conn, kind, dataset_id)
+    rebuilt = False
+    if existing is None:
+        _execute_view_statement(
+            conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+        )
+    elif expected[: len(existing)] == existing:
+        try:
+            with conn.begin_nested():
+                _execute_view_statement(
+                    conn, _create_view_statement(kind, dataset_id, selectable, or_replace=True)
+                )
+        except DBAPIError as error:
+            if sqlstate(error) != _INVALID_TABLE_DEFINITION:
+                raise
+            # 열 형이 바뀌었다(예: 계산 열의 결과 형). 지우고 다시 만든다.
+            drop_view(conn, kind, dataset_id)
+            _execute_view_statement(
+                conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+            )
+            rebuilt = True
+    else:
+        drop_view(conn, kind, dataset_id)
+        _execute_view_statement(
+            conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+        )
+        rebuilt = True
+    # 렌더러가 그린 정의 글자가 실제 `CREATE VIEW`에 그대로 들어갔는지 대조한다.
+    statement = _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+    if rendered not in str(statement.compile(dialect=dialect)):
+        raise DdlVerificationError("뷰 정의의 상수 렌더가 검증한 글자와 다르다.")
+    _verify_view(conn, kind, dataset_id, expected, render, echo)
+    return rebuilt
+
+
+_INVALID_TABLE_DEFINITION = "42P16"
+
+
+def _verify_view(
+    conn: Connection,
+    kind: str,
+    dataset_id: int,
+    expected: list[str],
+    render: Renderer,
+    echo: SequenceABC[tuple[Select, tuple[Any, ...]]],
+) -> None:
+    """완화책 ③ (가) 뷰를 LIMIT 0으로 읽어 열 이름·개수 확인 (나) 글자 상수 확인 SELECT."""
+    actual = view_column_names(conn, kind, dataset_id)  # 카탈로그가 말하는 열(더 있어도 잡는다)
+    if actual != expected:
+        raise DdlVerificationError("만든 뷰의 열이 기대와 다르다.")
+    view = _view_table(kind, dataset_id, expected)
+    result = _execute_view_statement(conn, select(*view.c).limit(0))
+    if list(result.keys()) != expected:
+        raise DdlVerificationError("만든 뷰에서 읽은 열이 기대와 다르다.")
+    for statement, values in echo:
+        row = _execute_view_statement(conn, RenderedSelect(statement, render)).one()
+        if tuple(row) != tuple(values):
+            raise DdlVerificationError("뷰 정의의 글자 상수를 다시 읽은 값이 입력과 다르다.")

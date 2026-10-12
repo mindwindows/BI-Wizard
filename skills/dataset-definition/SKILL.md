@@ -31,7 +31,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 ### B4 `PATCH /api/datasets/{id}` (보낸 필드만 바꾼다)
 `expected_version`(필수, 읽은 `def_version`), `name?`, `date_unit?`, `base_date_column_id?`(열 번호 또는 `null`로 해제). 날짜 단위와 기준 날짜 열은 **행이 0개일 때만** 바꿀 수 있다(같은 값은 항상 가능). 기준 날짜 열은 같은 데이터셋의 **원본(`raw`) `date` 열**만 된다.
 
-### B5 `POST /api/datasets/{id}/columns` (원본 열만, 계산 열은 FU-1d)
+### B5 `POST /api/datasets/{id}/columns` (원본 열만, 계산 열은 D4 `POST /api/datasets/{id}/formulas`, `formula-column`)
 | 필드 | 규칙 |
 | --- | --- |
 | `expected_version` | 필수 정수 ≥ 1 |
@@ -81,11 +81,11 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - 부수 효과: 정의가 **실제로 바뀌고 커밋된 뒤에만** `DatasetSyncPort.request_dataset_sync`를 백그라운드로 요청한다(Superset 가상 데이터셋 동기화, 구현은 FU-1e이고 지금은 아무것도 하지 않는 기본 구현). 요청이 실패해도 응답은 그대로다. 아무것도 바뀌지 않은 PATCH(같은 값)는 버전을 올리지 않고 동기화도 요청하지 않는다.
 
 ### 정의 버전과 정의 변경 진입점 (동시 편집)
-- 정의를 바꾸는 모든 요청(B4~B6, 이후 D4·D5)은 한 함수(`backend/app/dataset/definition.py`)를 지난다: ① `lock_timeout 1초` ② `datasets` 행을 `FOR NO KEY UPDATE`로 잠금(읽기는 막지 않는다) ③ `expected_version` 확인 ④ 열 변경(정의 행 + 원본 표 DDL) ⑤ 정의 변경 훅(1b에는 등록된 훅 없음, FU-1d의 formula가 등록해 같은 트랜잭션에서 뷰를 만든다) ⑥ `def_version + 1`과 `def_hash` 기록 후 커밋. 중간에 실패하면 모두 롤백된다(원본 표 DDL 포함).
-- `def_hash`는 FU-1d 전에는 정의 구조(열 번호·종류·타입) 해시다. 표시 이름·필수·규칙·순서는 해시에 들어가지 않는다.
+- 정의를 바꾸는 모든 요청(B4~B6, D4·D5)은 한 함수(`backend/app/dataset/definition.py`)를 지난다: ① `lock_timeout 1초` ② `datasets` 행을 `FOR NO KEY UPDATE`로 잠금(읽기는 막지 않는다) ③ `expected_version` 확인 ④ 열 변경(정의 행 + 원본 표 DDL) ⑤ 정의 변경 훅(formula 모듈이 등록한다: 저장된 수식 전부를 현재 열 이름·태그로 다시 컴파일해 `formulas`·`formula_deps`를 쓰고 `dv_<번호>`·`de_<번호>` 뷰를 같은 트랜잭션에서 만든다. 수식이 깨지면 `FORMULA_INVALID`/`FORMULA_CIRCULAR`로 열 변경까지 전부 롤백) ⑥ `def_version + 1`과 `def_hash`(훅이 돌려준 뷰 정의 해시) 기록 후 커밋. 데이터셋 등록(B2)도 같은 훅을 불러 수식이 없어도 `dv_`(팀 열 포함)·`de_`를 만든다. 중간에 실패하면 모두 롤백된다(원본 표 DDL 포함).
+- `def_hash`는 **뷰 `dv_`·`de_` 정의(리터럴 렌더)의 sha256**이다(훅이 없는 환경에서만 정의 구조 해시를 쓴다). 열 표시 이름·필수·규칙·순서는 해시에 들어가지 않아 그것을 바꿔도 뷰를 다시 만들지 않는다. 시작할 때 현재 정의로 계산한 해시와 다르면 그 데이터셋의 뷰만 다시 만든다(`formula-column`).
 - 같은 `expected_version`으로 동시에 요청하면 하나만 성공하고 나머지는 `DEFINITION_VERSION_MISMATCH`다.
 - 행 쓰기(FU-1c, `data-entry`)는 같은 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다. **굶음은 일어날 수 있다(관찰, PostgreSQL 16.10)**: `FOR SHARE` 보유자가 쥔 동안 정의 변경이 기다리면, 뒤에 들어온 새 `FOR SHARE`(행 쓰기)가 정의 변경을 **앞질러** 잠금을 얻는다(공유 잠금끼리는 호환이라 줄을 서지 않는다). 그래서 행 입력이 끊이지 않으면 정의 변경(열 추가 등)이 계속 순서를 못 얻을 수 있다. 다만 무한 대기는 없다: 1초 뒤 `DEFINITION_BUSY`(503)로 끝나므로 입력이 잠잠할 때 다시 시도한다. 단정으로 고정한 시험: `test_dataset_concurrency.py`의 `test_continuous_for_share_holders_overtake_a_waiting_definition_change`(잠금 보유자만으로 재현)와 `test_entry_concurrency.py`의 `test_continuous_row_writes_overtake_a_waiting_definition_change`(실제 행 쓰기 경로).
-- **이름 변경(B4)은 FK 자식 INSERT를 기다리게 한다(관찰, PostgreSQL 16.10)**: `datasets.name`이 `UNIQUE(team_id, name)`에 들어 있어 이름을 바꾸는 UPDATE는 키 변경으로 취급돼 `FOR UPDATE` 수준의 행 잠금이 걸리고, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`가 커밋까지 기다린다. 열 추가는 `def_version`·`def_hash`만 바꾸므로 기다리게 하지 않는다. 06 §5에서 짧은 대기로 보고 **그대로 두기로 결정**했다. 이름 변경 트랜잭션이 짧으면 문제없고(`test_rename_in_progress_makes_fk_child_inserts_wait_until_commit`), 정의 변경 훅이 길어지는 FU-1d부터는 그 시간만큼 `superset_datasets` 같은 자식 INSERT가 기다릴 수 있다.
+- **이름 변경(B4)은 FK 자식 INSERT를 기다리게 한다(관찰, PostgreSQL 16.10)**: `datasets.name`이 `UNIQUE(team_id, name)`에 들어 있어 이름을 바꾸는 UPDATE는 키 변경으로 취급돼 `FOR UPDATE` 수준의 행 잠금이 걸리고, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`가 커밋까지 기다린다. 열 추가는 `def_version`·`def_hash`만 바꾸므로 기다리게 하지 않는다. 06 §5에서 짧은 대기로 보고 **그대로 두기로 결정**했다. 이름 변경 트랜잭션이 짧으면 문제없고(`test_rename_in_progress_makes_fk_child_inserts_wait_until_commit`), 정의 변경 훅이 뷰를 만드는 시간(FU-1d)만큼 `superset_datasets` 같은 자식 INSERT가 기다릴 수 있다.
 - **이름순 정렬(한글 가나다순, 03b 19-1 결정 2)**: 이 DB의 기본 정렬(`en_US.utf8`)은 한글을 가나다순으로 정렬하지 못한다. 이름순 목록(A1 소속, A2, A5, B1, DV1)의 `ORDER BY`에만 ICU collation `ko-KR-x-icu`를 붙인다(`app/core/sorting.py`의 `by_name()`, SQLAlchemy 구성요소이며 `text()`가 아니다). 저장 collation은 바꾸지 않아 마이그레이션이 없다. 선택 이유: 공식 `postgres:16.10-bookworm` 이미지에 `ko-KR-x-icu`가 있다(`pg_collation`로 확인). 'C' collation은 완성형 한글 가나다순과 같지만 라틴 대소문자가 한글 앞에 오고 한글·라틴 혼합 이름이 어색해서 쓰지 않았다. 한계: 숫자는 글자 순서(`10`이 `9`보다 앞), 라틴은 한글 뒤, 소문자가 대문자보다 앞(`abc`, `Abc`), 동명은 `id` 순. PostgreSQL이 아닌 방언(SQLite 시험)에서는 COLLATE를 붙이지 않는다. collation이 DB에 없으면 시작 자가 점검이 경고를 남기고(거부하지 않음) 이후 질의가 DB 기본 순서로 돌아간다.
 - **행이 0개 확인과 INSERT 경쟁**: 기준 날짜 열 지정·날짜 단위 변경의 "행이 0개" 확인은 `FOR NO KEY UPDATE`를 잡은 **뒤에** 실행되므로 진행 중인 행 INSERT가 끝난 뒤의 결과를 본다(`DATASET_HAS_ROWS`). 그래도 규칙 DDL이 기존 값 때문에 실패하면(NOT NULL·CHECK·유일 위반, 방어선) 500이 아니라 같은 422 `DATASET_HAS_ROWS`로, 표 잠금 대기 초과·교착이면 503 `DEFINITION_BUSY`로 답한다. 이름·번호 규칙 위반 같은 `DdlError`는 프로그램 오류라 500으로 둔다.
 
@@ -106,7 +106,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 #### S4 작업공간 골격과 Inspector (`/datasets/<번호>`)
 - 왼쪽: "데이터셋 정보"(팀·날짜 단위·기준 날짜 열·생성자·생성일·정의 버전)와 "열 목록". 가운데: 열 헤더 미리보기 표(입력 그리드는 단위 1c에서 이 자리에 들어온다). 오른쪽: Inspector(접기 ▶/펼치기 ◀, "Inspector 폭" 슬라이더로 280~640px). 열 목록이나 헤더의 열 이름을 누르면 그 열이 Inspector에 열린다.
 - **열 추가(B5):** "열 추가" 버튼 -> 열 이름(100자 이하)·타입(글자·숫자·날짜·예/아니오·선택 목록)·필수 입력·규칙·위치 입력 -> "열 추가". 열 이름에 `[` `]` `"`나 줄바꿈 같은 제어 문자를 넣거나 예약어(`team`, `팀`, `row_id`, `행 번호`)를 쓰면 입력하는 즉시 이유가 나오고 저장 버튼이 막힌다. 규칙: 숫자는 최솟값·최댓값(십진수 그대로, 예 `0`, `100.50`)·소수 자릿수와 "구분 태그"(숫자 열만, 50자 이하, 같은 태그끼리 수식에서 합산), 글자는 최대 글자 수, 날짜는 가장 이른/늦은 날짜(`YYYY-MM-DD`), 선택 목록은 항목(한 줄에 하나, 중복 불가), 예/아니오는 규칙 없음. 위치를 비우면 맨 뒤. 숫자 값은 `"100.50"` 같은 **십진 문자열**로 서버에 간다(05 §1).
-- **열 수정(B6):** 목록에서 열을 고르면 "열 수정: <이름>"이 열린다. **타입과 종류는 바꿀 수 없다**고 표시되며 입력칸이 없다(다른 타입이 필요하면 새 열을 추가). 이름·필수·규칙·태그·위치만 바뀐 항목만 서버로 가고, 바뀐 것이 없으면 "저장"이 막혀 있다. 계산 열(수식)은 이 단계에서 읽기 전용이다(수식 편집은 1d).
+- **열 수정(B6):** 목록에서 열을 고르면 "열 수정: <이름>"이 열린다. **타입과 종류는 바꿀 수 없다**고 표시되며 입력칸이 없다(다른 타입이 필요하면 새 열을 추가). 이름·필수·규칙·태그·위치만 바뀐 항목만 서버로 가고, 바뀐 것이 없으면 "저장"이 막혀 있다. 계산 열(수식)은 이 양식에서 읽기 전용이다(수식은 `formula-column`의 수식 편집기에서 고친다). 계산 열에도 이름·태그·위치는 B6로 바꿀 수 있고 태그를 바꾸면 `SUMTAG`를 쓰는 수식의 순환·`TAG_EMPTY`를 훅이 다시 검사해 어긋나면 변경 전체를 되돌린다(422 `FORMULA_CIRCULAR`/`FORMULA_INVALID`).
 - **데이터셋 설정(B4):** "데이터셋 설정" 버튼 -> 이름, 날짜 단위, 기준 날짜 열(입력 열 중 날짜 열만, "없음"으로 해제). **행이 한 건이라도 있으면 날짜 단위와 기준 날짜 열은 바뀌지 않으며** 서버가 422 `DATASET_HAS_ROWS`를 주고 화면이 이유를 안내한다.
 - **동시 편집:** 정의를 읽은 시점의 `def_version`을 `expected_version`으로 보낸다. 다른 사람이 먼저 바꿔 409 `DEFINITION_VERSION_MISMATCH`가 나면 "다른 사람이 먼저 바꿨습니다. 최신 내용을 다시 읽었습니다…" 안내와 함께 화면이 최신 상태를 자동으로 다시 읽는다. 열 추가 폼에 입력하던 내용은 남고(수정 폼은 최신 값으로 다시 채워짐), 확인한 뒤 다시 저장하면 최신 버전으로 보낸다. 503 `DEFINITION_BUSY`는 "잠시 뒤 다시 시도"(`retry_after`가 있으면 "약 N초 뒤") 안내만 하고 같은 내용을 다시 저장하면 된다.
 - **읽기 전용:** 서버 응답의 `permissions.define`이 false(정의 담당자가 아닌 사용자)면 Inspector에 "읽기 전용" 안내가 나오고 열 추가 버튼·저장 버튼이 없으며 입력칸이 모두 막힌다. 열람과 열 정의 확인은 가능하다.
@@ -188,7 +188,8 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
   - `test_ddl.py`, `test_ddl_names.py` — 이름 규칙, 허용 목록 밖 거부(실행 전; 표 생성의 외래키·유일 제약·계산 열 거부 포함, 모든 DDL 보조 함수가 이름 규칙을 거침), `text()`·`exec_driver_sql`·ddl 모듈 밖 DDL이 없음을 코드에서 검사, 실제 DB에서 표·열·기준 날짜 열 규칙, 롤백 시 표가 남지 않음, `bi_app`이 `public`에 만들 수 없음, 시작 자가 점검이 새 객체를 허용, `alembic check`, `downgrade 0004` 뒤 `ds_*` 보존
   - `test_dataset_concurrency.py` — 동시 정의 변경(`DEFINITION_VERSION_MISMATCH`), 락 대기 초과(`DEFINITION_BUSY`), `FOR NO KEY UPDATE`가 읽기·FK 자식 INSERT를 막지 않음, `FOR SHARE` 상호 대기와 굶음 관찰(앞지름을 단정으로 고정), 이름 변경 중 FK 자식 INSERT 대기 관찰, 같은 이름 동시 등록
   - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리(JSON 부동소수점·큰 정수 거부 회귀 포함), 구조 해시
-  - `test_migrations.py`, `test_roundtrip_tools.py` — 0004 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`)
+  - `test_migrations.py`, `test_roundtrip_tools.py` — 0004·0005 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`)
+  - `test_formula_api.py`, `test_formula_views_pg.py` — 정의 변경 훅이 뷰를 만들고 `def_hash`를 기록하는 동작(`formula-column` 8절)
 - 마이그레이션 왕복(**새** 빈 `postgres-test`에서): `python -m migrations.roundtrip`, `alembic check` (`skills/local-environment/SKILL.md`).
 - 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `\d bi_data.ds_<번호>`에서 `row_id`와 `c_<번호>` 열, 기준 날짜 열의 `NOT NULL`·`ck_ds_<번호>_period`·`ux_ds_<번호>_period`를 본다.
 
@@ -200,7 +201,7 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 ## 9. 연관 Skill
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
 - `data-entry`(FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
-- `formula-column`(예정, FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `dv_`·`de_` 뷰와 `def_hash`(뷰 DDL 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
+- `formula-column`(FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `formulas`·`formula_deps`, `dv_`·`de_` 뷰, `def_hash`(뷰 정의 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
 - `dashboard-link`(예정, FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검 대응

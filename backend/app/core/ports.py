@@ -17,24 +17,30 @@ class DefinitionChangeHook(Protocol):
 
     정의 변경 진입점이 **같은 트랜잭션 안에서**(행 잠금 → 버전 확인 → 열 변경 뒤, `def_hash` 기록
     전에) 부른다. 새 열 `id`가 이미 있는 상태이며, 예외를 올리면 열 변경과 동적 DDL까지
-    전부 롤백된다.
+    전부 롤백된다. 돌려주는 글자는 방금 만든 뷰 정의의 해시이고 진입점이 `datasets.def_hash`에
+    기록한다(없으면 `None`: 해시를 바꾸지 않는다, 06 §5).
     """
 
-    def __call__(self, session: Session, dataset_id: int) -> None: ...
+    def __call__(self, session: Session, dataset_id: int) -> str | None: ...
 
 
 class DefinitionHooks:
-    """정의 변경 훅 등록부. 등록 순서대로 부른다. 1b에는 등록된 훅이 없다(no-op 지점)."""
+    """정의 변경 훅 등록부. 등록 순서대로 부른다. 등록된 훅이 없으면 no-op 지점이다."""
 
     def __init__(self) -> None:
-        self._hooks: list[Callable[[Session, int], None]] = []
+        self._hooks: list[Callable[[Session, int], str | None]] = []
 
-    def register(self, hook: Callable[[Session, int], None]) -> None:
+    def register(self, hook: Callable[[Session, int], str | None]) -> None:
         self._hooks.append(hook)
 
-    def run(self, session: Session, dataset_id: int) -> None:
+    def run(self, session: Session, dataset_id: int) -> str | None:
+        """훅을 차례로 부르고 마지막으로 돌려받은 `def_hash` 값(없으면 None)을 돌려준다."""
+        def_hash: str | None = None
         for hook in self._hooks:
-            hook(session, dataset_id)
+            result = hook(session, dataset_id)
+            if result is not None:
+                def_hash = result
+        return def_hash
 
     def __len__(self) -> int:
         return len(self._hooks)

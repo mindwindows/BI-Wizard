@@ -53,6 +53,25 @@ def get_dataset(session: Session, dataset_id: int) -> RowMapping | None:
     return session.execute(stmt).mappings().first()
 
 
+def get_dataset_definition(session: Session, dataset_id: int) -> RowMapping | None:
+    """수식 엔진용 정의 읽기: 해시와 팀·기준 열까지(잠금 없음)."""
+    stmt = select(
+        datasets.c.id,
+        datasets.c.team_id,
+        datasets.c.name,
+        datasets.c.date_unit,
+        datasets.c.base_date_column_id,
+        datasets.c.def_version,
+        datasets.c.def_hash,
+    ).where(datasets.c.id == dataset_id)
+    return session.execute(stmt).mappings().first()
+
+
+def list_active_dataset_ids(session: Session) -> list[int]:
+    stmt = select(datasets.c.id).where(datasets.c.status == "active").order_by(datasets.c.id)
+    return [int(i) for i in session.execute(stmt).scalars()]
+
+
 def get_team(session: Session, team_id: int) -> RowMapping | None:
     stmt = select(teams.c.id, teams.c.code, teams.c.name, teams.c.is_active).where(
         teams.c.id == team_id
@@ -99,6 +118,30 @@ def get_column(session: Session, dataset_id: int, column_id: int) -> RowMapping 
         dataset_columns.c.dataset_id == dataset_id, dataset_columns.c.id == column_id
     )
     return session.execute(stmt).mappings().first()
+
+
+def list_formula_columns(session: Session) -> list[RowMapping]:
+    """모든 활성 데이터셋의 계산 열(오류 칸 점검용): 팀 이름, 데이터셋 이름, 열 순서."""
+    stmt = (
+        select(
+            datasets.c.id.label("dataset_id"),
+            datasets.c.name.label("dataset_name"),
+            teams.c.name.label("team_name"),
+            dataset_columns.c.id.label("column_id"),
+            dataset_columns.c.display_name.label("column_name"),
+        )
+        .join(dataset_columns, dataset_columns.c.dataset_id == datasets.c.id)
+        .join(teams, teams.c.id == datasets.c.team_id)
+        .where(dataset_columns.c.kind == "formula", datasets.c.status == "active")
+        .order_by(
+            by_name(teams.c.name),
+            by_name(datasets.c.name),
+            datasets.c.id,
+            dataset_columns.c.position,
+            dataset_columns.c.id,
+        )
+    )
+    return list(session.execute(stmt).mappings().all())
 
 
 def max_position(session: Session, dataset_id: int) -> int | None:
@@ -213,6 +256,7 @@ def insert_column(
     rules: dict[str, Any] | None,
     tag: str | None,
     position: int,
+    kind: str = "raw",
 ) -> int:
     return session.execute(
         insert(dataset_columns)
@@ -220,7 +264,7 @@ def insert_column(
             dataset_id=dataset_id,
             display_name=display_name,
             type=column_type,
-            kind="raw",
+            kind=kind,
             required=required,
             rules=rules if rules is not None else null(),  # JSON null이 아니라 SQL NULL
             tag=tag,

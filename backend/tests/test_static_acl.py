@@ -1,6 +1,6 @@
 """정적 표 DB 권한·제약 시험(06 §2 매트릭스, 03b 3-6 BY4). 실제 PostgreSQL(tmpfs 시험 DB) 필요.
 
-0003·0004 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
+0003·0004·0005 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
 없음을 확인한다.
 권한 판정은 `has_table_privilege`/`has_column_privilege`로 전부 대조하고, 대표 동작은 실제로 실행해
 거부 코드(42501)와 제약 위반 코드(23xxx)를 확인한다.
@@ -16,7 +16,15 @@ from sqlalchemy.orm import Session
 
 from app.access import repo, service
 from app.core.errors import AppError
-from app.db_metadata import dataset_columns, datasets, team_members, teams, users
+from app.db_metadata import (
+    dataset_columns,
+    datasets,
+    formula_deps,
+    formulas,
+    team_members,
+    teams,
+    users,
+)
 
 INSUFFICIENT_PRIVILEGE = "42501"
 CHECK_VIOLATION = "23514"
@@ -29,6 +37,8 @@ TABLES = {
     "team_members": team_members,
     "datasets": datasets,
     "dataset_columns": dataset_columns,
+    "formulas": formulas,
+    "formula_deps": formula_deps,
 }
 # bi_app의 표 단위 권한(has_table_privilege). UPDATE는 열 단위라 표 단위로는 없다.
 TABLE_PRIVILEGES = {
@@ -38,6 +48,9 @@ TABLE_PRIVILEGES = {
     # 0004: 삭제는 FU-1에 없다(DELETE 없음). UPDATE는 열 단위다.
     "datasets": {"SELECT", "INSERT"},
     "dataset_columns": {"SELECT", "INSERT"},
+    # 0005: formulas는 DELETE 없음, formula_deps는 의존 목록을 다시 쓰므로 DELETE가 있다.
+    "formulas": {"SELECT", "INSERT"},
+    "formula_deps": {"SELECT", "INSERT", "DELETE"},
 }
 ALL_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
 # bi_app이 UPDATE할 수 있는 열(06 §2). 나머지 열은 불변이다.
@@ -49,6 +62,9 @@ UPDATABLE = {
     # dataset_columns.type은 계산 열 결과 형이 바뀔 때 갱신해야 해서 허용한다(원본 열은 앱 규칙).
     "datasets": {"name", "date_unit", "base_date_column_id", "status", "def_version", "def_hash"},
     "dataset_columns": {"display_name", "type", "required", "rules", "tag", "position"},
+    # column_id는 불변(수식은 열에 붙박이). formula_deps는 행을 지우고 다시 넣는다(UPDATE 없음).
+    "formulas": {"expression", "ast", "ast_hash"},
+    "formula_deps": set(),
 }
 
 
@@ -105,6 +121,8 @@ def test_immutable_columns_are_exactly_the_ones_without_update_privilege():
     assert immutable["users"] == {"id", "login_id", "created_at"}
     assert immutable["teams"] == {"id", "code", "created_at"}
     assert immutable["team_members"] == {"team_id", "user_id"}
+    assert immutable["formulas"] == {"column_id"}
+    assert immutable["formula_deps"] == {"column_id", "depends_on_column_id"}
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -395,8 +413,126 @@ def test_bi_app_denied_dataset_operations(pg_owner_engine, pg_app_engine, clean_
     assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
 
 
+def _prepare_formulas(owner: Engine) -> dict[str, int]:
+    """계산 열 둘(수식 하나)과 원본 열 둘을 가진 데이터셋을 만든다."""
+    ids = _prepare_datasets(owner)
+    with owner.begin() as c:
+        calc = c.execute(
+            insert(dataset_columns)
+            .values(
+                dataset_id=ids["ds"],
+                display_name="계산",
+                type="number",
+                kind="formula",
+                position=1,
+            )
+            .returning(dataset_columns.c.id)
+        ).scalar_one()
+        c.execute(
+            insert(formulas).values(
+                column_id=calc, expression="[C2]", ast={"t": "col", "id": ids["col2"]}, ast_hash="h"
+            )
+        )
+        c.execute(insert(formula_deps).values(column_id=calc, depends_on_column_id=ids["col2"]))
+    return {**ids, "calc": calc}
+
+
+DENIED_FORMULAS = [
+    pytest.param(
+        lambda i: update(formulas).where(formulas.c.column_id == i["calc"]).values(column_id=999),
+        id="formulas.column_id",
+    ),
+    pytest.param(
+        lambda i: delete(formulas).where(formulas.c.column_id == i["calc"]), id="formulas.delete"
+    ),
+    pytest.param(
+        lambda i: update(formula_deps).values(depends_on_column_id=i["col"]),
+        id="formula_deps.update",
+    ),
+]
+
+
+@pytest.mark.parametrize("make_statement", DENIED_FORMULAS)
+def test_bi_app_denied_formula_operations(pg_owner_engine, pg_app_engine, clean_pg, make_statement):
+    ids = _prepare_formulas(pg_owner_engine)
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(make_statement(ids))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+
+
+def test_bi_app_allowed_formula_operations(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_formulas(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        other = c.execute(
+            insert(dataset_columns)
+            .values(
+                dataset_id=ids["ds2"], display_name="계산2", type="text", kind="formula", position=1
+            )
+            .returning(dataset_columns.c.id)
+        ).scalar_one()
+        c.execute(
+            insert(formulas).values(
+                column_id=other, expression='"a"', ast={"t": "text", "v": "a"}, ast_hash="h2"
+            )
+        )
+        c.execute(
+            update(formulas)
+            .where(formulas.c.column_id == ids["calc"])
+            .values(expression="[C2] + 1", ast={"t": "num", "v": "1"}, ast_hash="h3")
+        )
+        c.execute(delete(formula_deps).where(formula_deps.c.column_id == ids["calc"]))
+        c.execute(
+            insert(formula_deps).values(column_id=ids["calc"], depends_on_column_id=ids["col"])
+        )
+        # 잠금 읽기 없이 SELECT만으로 읽을 수 있다.
+        assert c.execute(select(func.count()).select_from(formulas)).scalar_one() == 2
+
+
+def test_formula_constraints(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_formulas(pg_owner_engine)
+    # 자기 자신을 가리키는 의존: CHECK
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(formula_deps).values(column_id=ids["calc"], depends_on_column_id=ids["calc"])
+        )
+    assert sqlstate(error.value) == CHECK_VIOLATION
+    # 열 하나에 수식 하나: 기본키
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(formulas).values(
+                column_id=ids["calc"], expression="x", ast={"t": "num", "v": "1"}, ast_hash="h"
+            )
+        )
+    assert sqlstate(error.value) == UNIQUE_VIOLATION
+    # 중복 의존: 기본키
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(formula_deps).values(column_id=ids["calc"], depends_on_column_id=ids["col2"])
+        )
+    assert sqlstate(error.value) == UNIQUE_VIOLATION
+    # 없는 열을 가리키는 수식·의존: 외래키
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(formulas).values(
+                column_id=999999, expression="x", ast={"t": "num", "v": "1"}, ast_hash="h"
+            )
+        )
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(insert(formula_deps).values(column_id=ids["calc"], depends_on_column_id=999999))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    # ast는 NOT NULL
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(formulas).values(
+                column_id=ids["col"], expression="x", ast=sa.null(), ast_hash="h"
+            )
+        )
+    assert sqlstate(error.value) == "23502"
+
+
 def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
-    for table in ("datasets", "dataset_columns"):
+    for table in ("datasets", "dataset_columns", "formulas", "formula_deps"):
         with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
             c.execute(sa.schema.DDL(f"TRUNCATE TABLE {table}"))
         assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
@@ -407,7 +543,7 @@ def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
 
 def test_bi_readonly_cannot_read_static_tables(pg_owner_engine, pg_readonly_engine, clean_pg):
     _prepare(pg_owner_engine)
-    for table in (users, teams, team_members):
+    for table in (users, teams, team_members, formulas, formula_deps):
         with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
             c.execute(select(table))
         assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE, table.name

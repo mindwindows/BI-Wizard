@@ -28,6 +28,7 @@ class World:
     dataset_id: int = 0
     column_id: int = 0
     row_id: int = 0  # 권한 매트릭스용 기존 행
+    formula_id: int = 0  # 권한 매트릭스용 기존 계산 열
 
 
 def build_world(db: Db) -> World:

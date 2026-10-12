@@ -278,6 +278,49 @@ def payload_too_large(limit: int, message: str) -> AppError:
     return AppError(ErrorCode.PAYLOAD_TOO_LARGE, message, status_code=413, details={"limit": limit})
 
 
+def formula_invalid(errors: list[dict[str, Any]]) -> AppError:
+    """수식 검사(C0) 실패(422 `FORMULA_INVALID`). `details.errors`는 D2와 같은 모양이다."""
+    return AppError(
+        ErrorCode.FORMULA_INVALID,
+        "수식에 고칠 곳이 있어 저장하지 않았습니다.",
+        status_code=422,
+        details={"errors": errors, **_cap(errors, len(errors))},
+    )
+
+
+def formula_circular(path: list[str]) -> AppError:
+    """순환 참조(422 `FORMULA_CIRCULAR`). `details.path`는 열 이름 경로다(A → B → A)."""
+    return AppError(
+        ErrorCode.FORMULA_CIRCULAR,
+        "계산 열이 서로를 참조하는 순환이 생겨 저장할 수 없습니다: " + " → ".join(path),
+        status_code=422,
+        details={"path": path},
+    )
+
+
+def formula_runtime_error() -> AppError:
+    """계산 불가(422 `FORMULA_RUNTIME_ERROR`): DB 예외·시간 초과는 이 하나로 정규화한다."""
+    return AppError(
+        ErrorCode.FORMULA_RUNTIME_ERROR,
+        "수식을 계산할 수 없습니다. 시간이 너무 오래 걸렸거나 계산이 불가능한 수식일 수 있습니다.",
+        status_code=422,
+    )
+
+
+# 미리보기·오류 칸 조회가 바쁠 때 화면이 다시 시도할 때까지의 초(05 §3 `retry_after`).
+PREVIEW_RETRY_AFTER_SECONDS = 2
+
+
+def preview_busy() -> AppError:
+    return AppError(
+        ErrorCode.PREVIEW_BUSY,
+        "지금 계산 요청이 많습니다. 잠시 후 다시 시도하세요.",
+        status_code=429,
+        details={"retry_after": PREVIEW_RETRY_AFTER_SECONDS},
+        headers={"Retry-After": str(PREVIEW_RETRY_AFTER_SECONDS)},
+    )
+
+
 def last_admin() -> AppError:
     return AppError(
         ErrorCode.LAST_ADMIN,

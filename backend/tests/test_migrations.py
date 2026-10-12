@@ -42,6 +42,14 @@ DROP_APPROVED: dict[str, str] = {
         "fk_datasets_id_dataset_columns 해제, dataset_columns, datasets. "
         "정적 표 대상, 동적 객체 아님)"
     ),
+    # 0005 downgrade()의 op.drop_table 2개(formula_deps, formulas)는 06 §6의 표 역순 삭제다. 새
+    # 승인이 아니라 기존 D2 규칙의 적용이며, Gate ③ 06 §6 승인(2026-10-11)과 FU-1 계획 승인(03b
+    # 15-2, 2026-10-12), 1d 진행 지시(03b 19-2)에 포함된다.
+    "20261012_0005_formulas.py": (
+        "DROP 확인: 사용자 승인 (2026-10-11 Gate ③ 06 §6 승인, 2026-10-12 FU-1 계획 승인 "
+        "03b 15-2, 1d 진행 03b 19-2, 06 §6 downgrade 표 역순 삭제: formula_deps, formulas. "
+        "정적 표 대상, 동적 객체 아님)"
+    ),
 }
 
 # D5: upgrade/downgrade가 비어 있는 revision은 원칙적으로 미구현으로 본다.
@@ -145,16 +153,23 @@ def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0004"]
+    assert heads == ["0005"]
 
 
 def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     script = ScriptDirectory.from_config(_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == [
+        "0005",
+        "0004",
+        "0003",
+        "0002",
+        "0001",
+    ]
     assert script.get_revision("0001").down_revision is None
     assert script.get_revision("0002").down_revision == "0001"
     assert script.get_revision("0003").down_revision == "0002"
     assert script.get_revision("0004").down_revision == "0003"
+    assert script.get_revision("0005").down_revision == "0004"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -358,8 +373,24 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
         "GRANT SELECT, INSERT, UPDATE (display_name, type, required, rules, tag, position) "
         "ON dataset_columns TO bi_app"
     ) in upgrade_sql
+    # 0005: 수식 표와 명시 GRANT(열 단위 UPDATE, formulas에 DELETE 없음).
+    for table in ("formulas", "formula_deps"):
+        assert f"CREATE TABLE {table} (" in upgrade_sql
+    assert "GRANT SELECT, INSERT, UPDATE (expression, ast, ast_hash) ON formulas TO bi_app" in (
+        upgrade_sql
+    )
+    assert "GRANT SELECT, INSERT, DELETE ON formula_deps TO bi_app" in upgrade_sql
+    assert "CONSTRAINT ck_formula_deps_not_self CHECK (column_id <> depends_on_column_id)" in (
+        upgrade_sql
+    )
     command.downgrade(config, "head:base", sql=True)
     downgrade_sql = capsys.readouterr().out
+    assert downgrade_sql.index("DROP TABLE formula_deps") < downgrade_sql.index(
+        "DROP TABLE formulas"
+    )
+    assert downgrade_sql.index("DROP TABLE formulas") < downgrade_sql.index(
+        "DROP CONSTRAINT fk_datasets_id_dataset_columns"
+    )
     assert downgrade_sql.index("DROP CONSTRAINT fk_datasets_id_dataset_columns") < (
         downgrade_sql.index("DROP TABLE dataset_columns")
     )
@@ -429,13 +460,17 @@ def _dataset_revision() -> Path:
     return next(p for p in _revision_files() if "_0004_" in p.name)
 
 
+def _formula_revision() -> Path:
+    return next(p for p in _revision_files() if "_0005_" in p.name)
+
+
 def test_revisions_create_exactly_the_static_metadata_tables():
     """revision들이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
     from app.db_metadata import metadata
 
     created = [
         n.args[0].value
-        for path in (_access_revision(), _dataset_revision())
+        for path in (_access_revision(), _dataset_revision(), _formula_revision())
         for n in ast.walk(_function(_parse(path), "upgrade"))
         if isinstance(n, ast.Call) and _call_name(n) == "create_table"
     ]
@@ -472,6 +507,26 @@ def test_dataset_revision_has_real_downgrade_explicit_grants_and_late_circular_f
         ("drop_table", "dataset_columns"),
         ("drop_table", "datasets"),
     ]
+
+
+def test_formula_revision_has_real_downgrade_and_minimal_grants():
+    """0005: 열 단위 UPDATE만 주고(`column_id` 불변) formulas에 DELETE를 주지 않는다."""
+    tree = _parse(_formula_revision())
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    grants = _execute_args(_formula_revision(), "upgrade")
+    assert grants == [
+        "GRANT SELECT, INSERT, UPDATE (expression, ast, ast_hash) ON formulas TO bi_app",
+        "GRANT SELECT, INSERT, DELETE ON formula_deps TO bi_app",
+    ]
+    joined = " ".join(grants).upper()
+    assert "PUBLIC" not in joined and "BI_READONLY" not in joined and "ALL" not in joined.split()
+    downgrade_calls = [
+        (_call_name(n), n.args[0].value if n.args and isinstance(n.args[0], ast.Constant) else None)
+        for n in ast.walk(_function(tree, "downgrade"))
+        if isinstance(n, ast.Call)
+    ]
+    assert downgrade_calls == [("drop_table", "formula_deps"), ("drop_table", "formulas")]
 
 
 def test_static_metadata_constraint_names_follow_convention():
@@ -512,6 +567,16 @@ def test_static_metadata_constraint_names_follow_convention():
     for name in ("type", "kind", "formula_shape"):
         assert f"CONSTRAINT ck_dataset_columns_{name} CHECK" in cols
     assert "rules JSONB" in cols
+    # 0005 표: 열 하나에 수식 하나(기본키 = 외래키), 의존은 자기 자신을 가리킬 수 없다.
+    formulas_ddl = ddl["formulas"]
+    assert "CONSTRAINT pk_formulas PRIMARY KEY (column_id)" in formulas_ddl
+    assert "CONSTRAINT fk_formulas_column_id_dataset_columns FOREIGN KEY" in formulas_ddl
+    assert "ast JSONB NOT NULL" in formulas_ddl
+    deps_ddl = ddl["formula_deps"]
+    assert "CONSTRAINT pk_formula_deps PRIMARY KEY (column_id, depends_on_column_id)" in deps_ddl
+    assert "CONSTRAINT ck_formula_deps_not_self CHECK" in deps_ddl
+    assert "CONSTRAINT fk_formula_deps_column_id_dataset_columns FOREIGN KEY" in deps_ddl
+    assert "CONSTRAINT fk_formula_deps_depends_on_column_id_dataset_columns FOREIGN KEY" in deps_ddl
 
 
 def test_team_code_check_matches_python_pattern():

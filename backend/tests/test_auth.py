@@ -364,12 +364,27 @@ ENTRY_PATHS = {
 }
 
 
-def test_real_app_routes_are_public_health_plus_access_dataset_and_entry(
+FORMULA_PATHS = {
+    "/api/formulas/functions",
+    "/api/datasets/{dataset_id}/formulas",
+    "/api/datasets/{dataset_id}/formulas/check",
+    "/api/datasets/{dataset_id}/formulas/preview",
+    "/api/datasets/{dataset_id}/formulas/{col_id}",
+    "/api/datasets/{dataset_id}/formula-errors",
+    "/api/checks/formula-errors",
+    "/api/checks/views",
+    "/api/checks/views/retry",
+}
+
+
+def test_real_app_routes_are_public_health_plus_access_dataset_entry_and_formula(
     make_settings, sqlite_engine
 ):
-    """경로는 공개 2개와 A1~A9·B1~B6·C1~C4뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
+    """경로는 공개 2개와 A1~A9·B1~B6·C1~C4·D1~D10뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
     app = create_app(make_settings(), engine=sqlite_engine)
-    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS | ENTRY_PATHS
+    assert set(app.openapi()["paths"]) == (
+        PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS | ENTRY_PATHS | FORMULA_PATHS
+    )
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []
 

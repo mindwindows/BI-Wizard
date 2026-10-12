@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
@@ -37,6 +37,7 @@ from app.core.errors import (
     validation_failed_items,
     write_busy,
 )
+from app.core.limits import HeavyReadLimiter
 from app.core.ports import ComputedRow, RowViewPort
 from app.dataset import service as dataset_service
 from app.dataset.service import RowColumn, RowContext
@@ -195,21 +196,28 @@ def list_rows(
     limit: int,
     offset: int,
     row_view: RowViewPort,
+    heavy_reads: HeavyReadLimiter | None = None,
 ) -> dict[str, Any]:
-    """C1: 행 조회. 잠금 없음. 정렬은 기준 날짜 열(없으면 `row_id`)."""
+    """C1: 행 조회. 잠금 없음. 정렬은 기준 날짜 열(없으면 `row_id`).
+
+    계산 열이 있으면 뷰를 읽는 무거운 읽기라 전역 동시 상한(2건)을 센다. 넘으면 429 `PREVIEW_BUSY`다
+    (05 C1, 07 §5).
+    """
     ctx = dataset_service.read_row_context(session, dataset_id)
-    tbl = repo.dynamic_table(ctx)
-    total = repo.count_rows(session, tbl)
-    db_rows = repo.select_rows(
-        session,
-        tbl,
-        order_column_id=ctx.base_date_column_id,
-        descending=order == "desc",
-        limit=limit,
-        offset=offset,
-    )
-    items = _rows_out(session, ctx, db_rows, row_view)
-    session.rollback()  # 읽기 전용: 트랜잭션을 바로 닫는다.
+    slot = heavy_reads.slot() if heavy_reads is not None and _formula_ids(ctx) else nullcontext()
+    with slot:
+        tbl = repo.dynamic_table(ctx)
+        total = repo.count_rows(session, tbl)
+        db_rows = repo.select_rows(
+            session,
+            tbl,
+            order_column_id=ctx.base_date_column_id,
+            descending=order == "desc",
+            limit=limit,
+            offset=offset,
+        )
+        items = _rows_out(session, ctx, db_rows, row_view)
+        session.rollback()  # 읽기 전용: 트랜잭션을 바로 닫는다.
     return {
         "def_version": ctx.def_version,
         "items": items,

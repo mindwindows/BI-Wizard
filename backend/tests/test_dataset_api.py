@@ -6,6 +6,7 @@ SQLite 변형은 `bi_data`를 메모리 DB로 붙여 원본 표 생성·열 추�
 """
 
 import logging
+import re
 from contextlib import contextmanager
 from typing import Any
 
@@ -17,7 +18,7 @@ from app import ddl
 from app.core.errors import AppError, ErrorCode
 from app.core.ports import DefinitionHooks
 from app.dataset.hashing import structure_hash
-from app.db_metadata import DYNAMIC_SCHEMA, dataset_columns, datasets
+from app.db_metadata import DYNAMIC_SCHEMA, dataset_columns, datasets, formulas
 from app.main import create_app
 from tests.api_helpers import World, make_caller
 from tests.conftest import Db, RecordingSync
@@ -124,7 +125,9 @@ def test_create_dataset_returns_detail_and_creates_the_source_table(api, db, wor
     # 같은 트랜잭션에서 원본 표(`ds_<번호>`: row_id만)가 만들어졌다.
     assert ds_columns(db, body["id"]) == {"row_id": ds_columns(db, body["id"])["row_id"]}
     row = dataset_row(db, body["id"])
-    assert row["def_hash"] == structure_hash([]) and row["created_by"] == world.ids["definer"]
+    # 1d부터 def_hash는 뷰 정의 해시(sha256 16진)다. 훅이 없을 때만 구조 해시를 쓴다.
+    assert re.fullmatch("[0-9a-f]{64}", row["def_hash"])
+    assert row["def_hash"] != structure_hash([]) and row["created_by"] == world.ids["definer"]
 
 
 def test_created_dataset_names_use_the_numbered_table_only(api, db, world):
@@ -512,13 +515,47 @@ def test_add_column_positions_default_to_the_end_and_versions_increase(api, worl
     assert dataset["def_version"] == 5
 
 
-def test_add_column_updates_the_structure_hash(api, db, world):
+def test_add_column_updates_the_definition_hash(api, db, world):
     dataset = make_dataset(api, world)
     before = dataset_row(db, dataset["id"])["def_hash"]
-    column = make_column(api, dataset, "매출", "number")
+    make_column(api, dataset, "매출", "number")
     after = dataset_row(db, dataset["id"])["def_hash"]
-    assert before == structure_hash([]) and after != before
-    assert after == structure_hash([{"id": column["id"], "kind": "raw", "type": "number"}])
+    assert re.fullmatch("[0-9a-f]{64}", before) and re.fullmatch("[0-9a-f]{64}", after)
+    assert after != before
+
+
+def test_definition_hook_hash_is_stored_as_def_hash(db, stub_settings, sync, world):
+    """훅이 돌려준 해시가 `def_hash`가 된다(등록 때와 정의 변경 때 모두)."""
+    hooks = DefinitionHooks()
+    hooks.register(lambda session, dataset_id: "h" * 64)
+    with custom_client(db, stub_settings, sync, hooks=hooks) as call:
+        created = call(
+            "definer",
+            "POST",
+            "/api/datasets",
+            json={"team_id": world.team_a, "name": "훅 해시", "date_unit": "day"},
+        ).json()
+        assert dataset_row(db, created["id"])["def_hash"] == "h" * 64
+        column = call(
+            "definer",
+            "POST",
+            f"/api/datasets/{created['id']}/columns",
+            json={"expected_version": 1, "display_name": "열", "type": "text"},
+        )
+        assert column.status_code == 201
+        assert dataset_row(db, created["id"])["def_hash"] == "h" * 64
+
+
+def test_without_a_hash_from_the_hooks_the_structure_hash_is_used(db, stub_settings, sync, world):
+    """훅이 없거나 해시를 주지 않으면 정의 구조 해시를 쓴다."""
+    with custom_client(db, stub_settings, sync, hooks=DefinitionHooks()) as call:
+        created = call(
+            "definer",
+            "POST",
+            "/api/datasets",
+            json={"team_id": world.team_a, "name": "훅 없음", "date_unit": "day"},
+        ).json()
+        assert dataset_row(db, created["id"])["def_hash"] == structure_hash([])
 
 
 @pytest.mark.parametrize(
@@ -1103,6 +1140,12 @@ def test_formula_columns_cannot_be_required_or_have_rules(api, db, world):
             )
             .returning(dataset_columns.c.id)
         ).scalar_one()
+        # 계산 열에는 저장된 수식이 있어야 한다(없으면 정의 변경 훅이 FORMULA_INVALID로 거부한다).
+        conn.execute(
+            sa.insert(formulas).values(
+                column_id=column_id, expression="1", ast={"t": "num", "v": "1"}, ast_hash="h"
+            )
+        )
     path = f"/api/datasets/{formula_id}/columns/{column_id}"
     assert dataset["id"] != formula_id
     assert field_codes(

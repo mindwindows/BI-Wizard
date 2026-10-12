@@ -23,6 +23,8 @@ from app.db_metadata import (
     DYNAMIC_SCHEMA,
     dataset_columns,
     datasets,
+    formula_deps,
+    formulas,
     metadata,
     team_members,
     teams,
@@ -246,9 +248,15 @@ def pg_readonly_engine(pg_env: PgEnv) -> Iterator[Engine]:
 
 
 def drop_dynamic_tables(engine: Engine) -> None:
-    """`bi_data`의 `ds_*` 표를 모두 지운다(시험 정리 전용: schema 소유자 `bi_owner`로 실행)."""
+    """`bi_data`의 `dv_*`·`de_*` 뷰와 `ds_*` 표를 모두 지운다(시험 정리 전용: schema 소유자로 실행).
+
+    뷰가 표에 의존하므로 뷰를 먼저 지운다.
+    """
     with engine.begin() as conn:
-        for name in sa.inspect(conn).get_table_names(schema=DYNAMIC_SCHEMA):
+        inspector = sa.inspect(conn)
+        for name in inspector.get_view_names(schema=DYNAMIC_SCHEMA):
+            conn.execute(sa.schema.DropView(sa.Table(name, sa.MetaData(), schema=DYNAMIC_SCHEMA)))
+        for name in inspector.get_table_names(schema=DYNAMIC_SCHEMA):
             sa.Table(name, sa.MetaData(), schema=DYNAMIC_SCHEMA).drop(conn)
 
 
@@ -256,6 +264,8 @@ def clear_static_tables(engine: Engine) -> None:
     drop_dynamic_tables(engine)
     with engine.begin() as conn:
         conn.execute(update(datasets).values(base_date_column_id=None))  # 순환 FK 해제
+        conn.execute(delete(formula_deps))
+        conn.execute(delete(formulas))
         conn.execute(delete(dataset_columns))
         conn.execute(delete(datasets))
         conn.execute(delete(team_members))
@@ -328,6 +338,43 @@ class Db:
             ).scalar_one()
         with self.engine.begin() as conn:
             ddl.add_raw_column(conn, dataset_id, column_id, column_type)
+        return column_id
+
+    def add_formula_column(
+        self,
+        dataset_id: int,
+        display_name: str,
+        ast: dict[str, Any],
+        *,
+        expression: str = "",
+        column_type: str = "number",
+        position: int = 0,
+        deps: tuple[int, ...] = (),
+        tag: str | None = None,
+    ) -> int:
+        """계산 열의 정의 행·수식·의존을 직접 만든다(훅을 거치지 않으므로 뷰는 없다)."""
+        with self.writer.begin() as conn:
+            column_id = conn.execute(
+                insert(dataset_columns)
+                .values(
+                    dataset_id=dataset_id,
+                    display_name=display_name,
+                    type=column_type,
+                    kind="formula",
+                    position=position,
+                    tag=tag,
+                )
+                .returning(dataset_columns.c.id)
+            ).scalar_one()
+            conn.execute(
+                insert(formulas).values(
+                    column_id=column_id, expression=expression, ast=ast, ast_hash="test"
+                )
+            )
+            for dep in deps:
+                conn.execute(
+                    insert(formula_deps).values(column_id=column_id, depends_on_column_id=dep)
+                )
         return column_id
 
     def add_rows(self, dataset_id: int, count: int = 1) -> None:
@@ -467,3 +514,22 @@ def api(db: Db, stub_settings: Settings, sync: RecordingSync) -> Iterator[Callab
 @pytest.fixture
 def world(db: Db) -> World:
     return build_world(db)
+
+
+def pytest_terminal_summary(terminalreporter) -> None:
+    """차분 시험(07 §6) 결과 요약을 항상 출력한다(`-q`에서도 보인다)."""
+    try:
+        from tests.test_formula_differential import SUMMARY
+    except Exception:  # pragma: no cover - 수집 실패는 다른 곳에서 드러난다
+        return
+    if not SUMMARY:
+        return
+    terminalreporter.section("수식 차분 시험 요약(미리보기 vs 뷰)")
+    for line in (
+        f"수식 {SUMMARY['formulas']}개(통과 {SUMMARY['accepted']}, C0 거부 {SUMMARY['rejected']} "
+        f"{SUMMARY['rejected_by_code']}), 데이터셋 {SUMMARY['datasets']}개",
+        f"비교한 칸 {SUMMARY['cells']}개(빈 값 {SUMMARY['blank_cells']}개, 오류 칸 "
+        f"{SUMMARY['error_cells']})",
+        f"불일치 {SUMMARY['mismatches']}건, DB 예외 {SUMMARY['exceptions']}건",
+    ):
+        terminalreporter.write_line(line)

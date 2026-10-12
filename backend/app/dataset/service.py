@@ -72,6 +72,33 @@ class RowContext:
 
 
 @dataclass(frozen=True)
+class DefinitionColumn:
+    """수식 엔진이 읽는 열 정의 한 줄(`dataset_columns`의 읽기 사본)."""
+
+    id: int
+    display_name: str
+    type: str
+    kind: str
+    tag: str | None
+    position: int
+
+
+@dataclass(frozen=True)
+class DefinitionView:
+    """수식·뷰 생성이 읽는 데이터셋 정의 한 장면(열은 번호 오름차순)."""
+
+    dataset_id: int
+    team_id: int
+    team_code: str
+    name: str
+    date_unit: str
+    base_date_column_id: int | None
+    def_version: int
+    def_hash: str
+    columns: tuple[DefinitionColumn, ...]
+
+
+@dataclass(frozen=True)
 class ColumnChange:
     """B5·B6 결과: 정의가 바뀌었는지, 응답용 열, 정의 버전."""
 
@@ -166,6 +193,65 @@ def read_row_context(session: Session, dataset_id: int) -> RowContext:
     return _row_context(session, row)
 
 
+def read_definition(session: Session, dataset_id: int) -> DefinitionView:
+    """수식 엔진용: 데이터셋 정의를 잠금 없이 읽는다(팀 코드 포함). 데이터셋이 없으면 404."""
+    row = repo.get_dataset_definition(session, dataset_id)
+    if row is None:
+        raise not_found()
+    team = repo.get_team(session, row["team_id"])
+    if team is None:  # FK가 보장하므로 일어나지 않는다.
+        raise not_found()
+    columns = sorted(
+        (
+            DefinitionColumn(
+                id=c["id"],
+                display_name=c["display_name"],
+                type=c["type"],
+                kind=c["kind"],
+                tag=c["tag"],
+                position=c["position"],
+            )
+            for c in repo.list_columns(session, dataset_id)
+        ),
+        key=lambda c: c.id,
+    )
+    return DefinitionView(
+        dataset_id=row["id"],
+        team_id=row["team_id"],
+        team_code=team["code"],
+        name=row["name"],
+        date_unit=row["date_unit"],
+        base_date_column_id=row["base_date_column_id"],
+        def_version=int(row["def_version"]),
+        def_hash=row["def_hash"],
+        columns=tuple(columns),
+    )
+
+
+def list_formula_columns(session: Session) -> list[RowMapping]:
+    """오류 칸 점검(D7)용: 활성 데이터셋의 모든 계산 열(팀·데이터셋·열 순서)."""
+    return repo.list_formula_columns(session)
+
+
+def get_column_dict(session: Session, dataset_id: int, column_id: int) -> dict[str, Any]:
+    """응답용 열 한 개. 없으면 404."""
+    column = repo.get_column(session, dataset_id, column_id)
+    if column is None:
+        raise not_found()
+    return _column_dict(column)
+
+
+def get_dataset_name(session: Session, dataset_id: int) -> str | None:
+    """표시용 데이터셋 이름(없으면 None)."""
+    row = repo.get_dataset(session, dataset_id)
+    return row["name"] if row is not None else None
+
+
+def list_active_dataset_ids(session: Session) -> list[int]:
+    """시작 시 뷰 대조 대상: 활성 데이터셋 번호(번호 오름차순)."""
+    return repo.list_active_dataset_ids(session)
+
+
 def lock_row_context(session: Session, dataset_id: int, expected_version: int) -> RowContext:
     """행 쓰기(C2~C4)의 첫 단계(04 §5, 06 §5): `datasets` 행을 `FOR SHARE`로 잠그고 버전을 확인한다.
 
@@ -220,7 +306,9 @@ def create_dataset(
             def_hash=structure_hash([]),
         )
         ddl.create_dataset_table(session.connection(), dataset_id)
-        hooks.run(session, dataset_id)
+        view_hash = hooks.run(session, dataset_id)
+        if view_hash is not None:
+            repo.update_dataset(session, dataset_id, {"def_hash": view_hash})
         session.commit()
     except DBAPIError as error:
         translated = translate_db_error(session, error)
@@ -429,3 +517,48 @@ def update_column(
     column = repo.get_column(session, dataset_id, column_id)
     assert column is not None  # noqa: S101 - 존재를 change에서 확인했다
     return ColumnChange(outcome.changed, _column_dict(column), outcome.def_version)
+
+
+# --- D4·D5 계산 열 (formula 모듈이 정의 변경 진입점 안에서 부르는 쓰기) ----
+
+
+def add_formula_column(
+    session: Session,
+    dataset_id: int,
+    *,
+    display_name: str,
+    result_type: str,
+    raw_tag: Any,
+    position: int | None,
+) -> int:
+    """계산 열의 정의 행을 만든다(`kind='formula'`). 열 번호를 돌려준다.
+
+    정의 변경 진입점 안에서 부른다. 표시 이름 유일성과 태그(숫자 열에만, 길이·금지 문자)를
+    검사한다. 원본 표에는 열이 없다(계산 열은 저장하지 않는다, 06 §3-1). 수식·의존·뷰는 formula
+    훅이 만든다.
+    """
+    _normalized, tag = _clean_rules_and_tag(result_type, None, raw_tag)
+    if repo.find_column_name_conflict(session, dataset_id, display_name):
+        raise already_exists("display_name", _COLUMN_NAME_TAKEN)
+    last = repo.max_position(session, dataset_id)
+    return repo.insert_column(
+        session,
+        dataset_id=dataset_id,
+        display_name=display_name,
+        column_type=result_type,
+        required=False,
+        rules=None,
+        tag=tag,
+        position=position if position is not None else (0 if last is None else last + 1),
+        kind="formula",
+    )
+
+
+def set_formula_result_type(session: Session, column_id: int, result_type: str) -> None:
+    """계산 열의 결과 형(`dataset_columns.type`)을 갱신한다. 원본 열의 형은 바꿀 수 없다(06 §2)."""
+    repo.update_column(session, column_id, {"type": result_type})
+
+
+def clear_column_tag(session: Session, column_id: int) -> None:
+    """열 구분 태그를 지운다(결과 형이 숫자가 아니게 된 계산 열)."""
+    repo.update_column(session, column_id, {"tag": None})

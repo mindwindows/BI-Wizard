@@ -7,13 +7,15 @@
 3. `expected_version`이 `def_version`과 다르면 `DEFINITION_VERSION_MISMATCH`(409).
 4. 호출한 쪽이 넘긴 `change`가 열 변경(`dataset_columns`, 동적 DDL)을 한다. 바뀐 것이 없으면 버전을
    올리지 않고 끝낸다.
-5. 정의 변경 훅(`core.ports.DefinitionHooks`): 1b에는 등록된 훅이 없는 no-op 지점이다.
-   formula 모듈이 1d에서 등록해 수식·의존·뷰를 같은 트랜잭션에서 만든다.
-6. `def_version + 1`과 `def_hash`(1d 전에는 구조 해시, `hashing.py`)를 기록하고 커밋한다.
+5. 정의 변경 훅(`core.ports.DefinitionHooks`): formula 모듈이 등록해 수식·의존·뷰를 같은
+   트랜잭션에서 만들고 뷰 정의 해시를 돌려준다. 등록된 훅이 없으면 no-op이다.
+6. `def_version + 1`과 `def_hash`(훅이 돌려준 뷰 정의 해시, 없으면 구조 해시 `hashing.py`)를
+   기록하고 커밋한다.
 중간에 실패하면(훅 포함) 전부 롤백된다(동적 DDL도 같은 트랜잭션이다).
 
 락 대기 초과(`55P03`)·교착(`40P01`)은 503 `DEFINITION_BUSY`(재시도 가능)다. 시작 시 재생성·재시도
-(05 D10)는 `expected_version=None`, `bump=False`로 같은 함수를 쓴다(1d).
+(05 D10)는 `expected_version=None`, `bump=False`로 같은 함수를 쓴다(정의는 그대로이고 버전은 올리지
+않으며 `lock_timeout`을 더 짧게 줄 수 있다).
 """
 
 from __future__ import annotations
@@ -108,6 +110,7 @@ def apply_definition_change(
     expected_version: int | None,
     change: Callable[[RowMapping], tuple[bool, dict[str, Any]]],
     bump: bool = True,
+    lock_timeout: str = DEFINITION_LOCK_TIMEOUT,
 ) -> DefinitionOutcome:
     """잠금 → 버전 확인 → 열 변경 → 훅 → `def_hash` 기록 → 커밋.
 
@@ -115,7 +118,7 @@ def apply_definition_change(
     건드리지 않고 롤백(잠금 해제)한다. 업무 오류(`AppError`)는 롤백하고 그대로 올린다.
     """
     try:
-        set_lock_timeout(session)
+        set_lock_timeout(session, lock_timeout)
         locked = repo.lock_dataset(session, dataset_id)
         if locked is None:
             session.rollback()
@@ -128,14 +131,14 @@ def apply_definition_change(
         if not changed:
             session.rollback()
             return DefinitionOutcome(False, current, result)
-        hooks.run(session, dataset_id)
+        view_hash = hooks.run(session, dataset_id)
         new_version = current + 1 if bump else current
         repo.update_dataset(
             session,
             dataset_id,
             {
                 "def_version": new_version,
-                "def_hash": structure_hash(repo.list_columns(session, dataset_id)),
+                "def_hash": view_hash or structure_hash(repo.list_columns(session, dataset_id)),
             },
         )
         session.commit()

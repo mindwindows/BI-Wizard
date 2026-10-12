@@ -1,7 +1,8 @@
 """정적 표의 `MetaData` 한 곳과 Alembic 비교 필터.
 
 - `metadata`: `public` schema의 **정적 표**(팀, 사용자, 데이터셋 정의 등)만 등록한다.
-  지금은 권한 관리 표 3개(`users`, `teams`, `team_members`, revision 0003)가 있다. 표를 추가하면
+  권한 관리 표(`users`, `teams`, `team_members`, revision 0003), 데이터셋·열 정의 표(0004),
+  수식 표(`formulas`, `formula_deps`, 0005)가 있다. 표를 추가하면
   revision(`backend/migrations/versions/`)과 함께 여기에 모델을 추가한다. 쓰기 책임은 소유
   모듈(04 §2-2)이 지고, 이 파일은 정의만 둔다(04 §2-1 core). 동적 객체(`bi_data` schema의
   `ds_<번호>` 표, `dv_<번호>`·`de_<번호>` 뷰)는 런타임 DDL 모듈이 만들며 이 `MetaData`에
@@ -150,6 +151,26 @@ dataset_columns = Table(
     CheckConstraint("kind IN ('raw', 'formula')", name="kind"),
     # 계산 열은 필수일 수 없고 선택 목록 형이 아니다. 원본 열은 제한 없음.
     CheckConstraint("kind = 'raw' OR (NOT required AND type <> 'choice')", name="formula_shape"),
+)
+
+# --- 수식 표(06 §2, revision 0005) ----
+# `column_id`는 `kind='formula'`인 열이어야 한다(앱이 확인). `ast`는 열 번호 참조 JSON이다.
+formulas = Table(
+    "formulas",
+    metadata,
+    Column("column_id", Integer, ForeignKey("dataset_columns.id"), primary_key=True),
+    Column("expression", Text, nullable=False),  # 보관용 원문(화면 표시에는 쓰지 않는다)
+    Column("ast", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    Column("ast_hash", Text, nullable=False),
+)
+
+formula_deps = Table(
+    "formula_deps",
+    metadata,
+    Column("column_id", Integer, ForeignKey("dataset_columns.id"), nullable=False),
+    Column("depends_on_column_id", Integer, ForeignKey("dataset_columns.id"), nullable=False),
+    PrimaryKeyConstraint("column_id", "depends_on_column_id"),
+    CheckConstraint("column_id <> depends_on_column_id", name="not_self"),
 )
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).

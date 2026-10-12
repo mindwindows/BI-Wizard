@@ -15,6 +15,7 @@ __all__ = [
     "ALLOWED_OBJECT_KINDS",
     "DYNAMIC_SCHEMA",
     "DdlError",
+    "DdlExecutionError",
     "DdlNameError",
     "DdlNotAllowedError",
     "DdlVerificationError",
@@ -55,6 +56,15 @@ class DdlNameError(DdlError, ValueError):
 
 class DdlNotAllowedError(DdlError):
     """허용 목록 밖의 객체 종류·DDL 구문·schema."""
+
+
+class DdlExecutionError(DdlError):
+    """뷰 정의 실행이 DB 오류로 실패했다. 오류 문장에 수식 상수(사용자 입력)가 들어 있을 수 있어
+    원인 예외를 붙이지 않고 SQLSTATE만 담는다(로그·응답에 SQL 금지)."""
+
+    def __init__(self, sqlstate: str | None) -> None:
+        super().__init__(f"뷰 정의를 실행하지 못했다(sqlstate={sqlstate or '?'}).")
+        self.sqlstate = sqlstate
 
 
 class DdlVerificationError(DdlError):

@@ -9,7 +9,8 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
     python -m migrations.roundtrip
 ```
 순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` ->
-downgrade 0003(0004 권한 단계: 0003 표·권한은 남고 0004 표·권한만 사라짐) ->
+downgrade 0004(수식 표만 사라짐) -> upgrade head(B와 같아야 함) ->
+downgrade 0003(0003 표·권한은 남고 0004·0005 표·권한이 사라짐) ->
 upgrade head(B와 같아야 함) -> downgrade base ->
 스냅샷 A'(A와 같아야 함) -> upgrade head -> 스냅샷 B'(B와 같아야 함).
 접속은 `bi_owner`(비밀번호 `POSTGRES_OWNER_PASSWORD`)이다.
@@ -282,7 +283,7 @@ def expect_privileges(snapshot: Snapshot, *, granted: bool) -> list[str]:
 
 # 정적 표가 `bi_app`에 주는 권한(06 §2). 표 단위 ACL 문자: a INSERT, r SELECT, d DELETE, w UPDATE.
 # UPDATE는 열 단위라 표 ACL에는 없고 열 ACL(`w`)에만 있다.
-# 0003(권한 관리 표)과 0004(데이터셋·열 정의 표)로 나눠 revision 단위 왕복을 확인한다.
+# 0003(권한 관리 표), 0004(데이터셋·열 정의 표), 0005(수식 표)로 나눠 revision 단위 왕복을 확인한다.
 ACCESS_TABLE_ACL = {
     "users": "bi_app=ar/bi_owner",
     "teams": "bi_app=ar/bi_owner",
@@ -314,8 +315,17 @@ DATASET_COLUMN_ACL = {
     ("dataset_columns", "tag"),
     ("dataset_columns", "position"),
 }
-STATIC_TABLE_ACL = {**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL}
-STATIC_COLUMN_ACL = ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL
+FORMULA_TABLE_ACL = {
+    "formulas": "bi_app=ar/bi_owner",
+    "formula_deps": "bi_app=ard/bi_owner",
+}
+FORMULA_COLUMN_ACL = {
+    ("formulas", "expression"),
+    ("formulas", "ast"),
+    ("formulas", "ast_hash"),
+}
+STATIC_TABLE_ACL = {**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL, **FORMULA_TABLE_ACL}
+STATIC_COLUMN_ACL = ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL
 
 
 def expect_static_privileges(
@@ -327,7 +337,8 @@ def expect_static_privileges(
 ) -> list[str]:
     """정적 표와 `bi_app` 권한(표·열 단위)이 head에는 정확히 있고 base에는 없는지 확인한다.
 
-    기본은 모든 정적 표(0003 + 0004)다. `table_acl`/`column_acl`로 revision 하나의 표만 볼 수 있다.
+    기본은 모든 정적 표(0003 + 0004 + 0005)다. `table_acl`/`column_acl`로 revision 하나의 표만
+    볼 수 있다.
     `bi_readonly`와 PUBLIC에는 아무 권한도 없어야 한다.
     """
     expected_tables = STATIC_TABLE_ACL if table_acl is None else table_acl
@@ -409,7 +420,30 @@ def main() -> int:
     except Exception as error:
         step("alembic check", [f"{type(error).__name__}: {error}"])
 
-    # 0004(데이터셋·열 정의 표) 한 단계만: 내리면 0003 상태(권한 관리 표만), 올리면 head와 같다.
+    # 0005(수식 표) 한 단계만: 내리면 0004 상태(수식 표만 사라짐), 올리면 head와 같다.
+    command.downgrade(config, "0004")
+    step5 = take_snapshot(engine)
+    step(
+        "0005 downgrade 후 0004 정적 표 권한 유지",
+        expect_static_privileges(
+            step5,
+            granted=True,
+            table_acl={**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL},
+            column_acl=ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL,
+        ),
+    )
+    step(
+        "0005 downgrade 후 수식 표 없음",
+        expect_static_privileges(
+            step5, granted=False, table_acl=FORMULA_TABLE_ACL, column_acl=FORMULA_COLUMN_ACL
+        ),
+    )
+    step("0005 downgrade 후 bi_data 권한 유지", expect_privileges(step5, granted=True))
+    command.upgrade(config, "head")
+    step("0005 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
+
+    # 0004(데이터셋·열 정의 표) 한 단계: 0003까지 내리면 0003 상태(권한 관리 표만), 올리면
+    # head와 같다.
     command.downgrade(config, "0003")
     mid = take_snapshot(engine)
     step(
@@ -421,7 +455,10 @@ def main() -> int:
     step(
         "0004 downgrade 후 데이터셋 표 없음",
         expect_static_privileges(
-            mid, granted=False, table_acl=DATASET_TABLE_ACL, column_acl=DATASET_COLUMN_ACL
+            mid,
+            granted=False,
+            table_acl={**DATASET_TABLE_ACL, **FORMULA_TABLE_ACL},
+            column_acl=DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL,
         ),
     )
     step("0004 downgrade 후 bi_data 권한 유지", expect_privileges(mid, granted=True))

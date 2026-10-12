@@ -54,7 +54,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
 - **상한(코드 상수, 새 환경변수 아님): 5,000행, 요청 본문 1MiB.** 넘으면 413 `PAYLOAD_TOO_LARGE`(`details.limit`: 행 수 초과면 5000, 크기 초과면 1048576, 문구로 구분)이고 아무것도 쓰지 않는다. 크기는 `Content-Length`와 실제 읽은 바이트로 센다.
 
 ## 4. 출력
-- 행(Row): `{row_id, cells{"<열 번호>": 값 또는 null}, errors{"<열 번호>": "E1"}}`. 값 표현(05 §1): number는 **십진 문자열**(`"1234.50"`, PostgreSQL이 저장한 자릿수 그대로), 미입력은 `null`, date는 `YYYY-MM-DD`(월·연 단위도 기간 첫날), boolean은 `true`/`false`, text·choice는 글자. 모든 열(계산 열 포함)이 `cells`에 있다. 계산 열 값과 `errors`는 `RowViewPort`(`backend/app/core/ports.py`)가 준다. **1c의 기본 구현은 계산 열 값이 없고 `errors`가 항상 `{}`**이며 FU-1d(`formula-column`)의 formula 모듈이 교체한다. 계산 열이 있을 때만 포트를 부르고 같은 트랜잭션으로 읽는다(방금 쓴 행도 보인다).
+- 행(Row): `{row_id, cells{"<열 번호>": 값 또는 null}, errors{"<열 번호>": "E1"}}`. 값 표현(05 §1): number는 **십진 문자열**(`"1234.50"`, PostgreSQL이 저장한 자릿수 그대로), 미입력은 `null`, date는 `YYYY-MM-DD`(월·연 단위도 기간 첫날), boolean은 `true`/`false`, text·choice는 글자. 모든 열(계산 열 포함)이 `cells`에 있다. 계산 열 값과 `errors`는 `RowViewPort`(`backend/app/core/ports.py`)가 준다. **앱 기본 구현은 formula 모듈의 `FormulaRowView`**(FU-1d: `dv_`·`de_` 뷰를 `row_id`로 결합, 오류 칸은 값 `null` + `errors["<열 번호>"] = "E1"`, 빈 값은 `errors` 없음)이고 계산 열 값을 주지 않는 `PlainRowView`는 시험·대체용이다. 계산 열이 있을 때만 포트를 부르고 같은 트랜잭션으로 읽는다(방금 쓴 행도 보인다). 계산 열이 있는 데이터셋의 행 조회(C1)는 전역 동시 2건 상한을 쓰고 넘으면 429 `PREVIEW_BUSY`다(`formula-column`). 뷰를 읽지 못하면 계산 열만 빈 값으로 돌아간다.
 - C1 200 `{def_version, items[Row], total, limit, offset}`.
 - C2 201 `{row, def_version}`. C3 200 `{row, def_version}`.
 - C4 200 `{updated, created, created_rows[{index, row_id}], def_version}` (`index`는 요청 `rows`의 순서, 0부터).
@@ -76,7 +76,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
 #### 그리드 보기 (S4 가운데, `/datasets/<번호>`)
 1. 데이터셋 목록에서 이름을 눌러 작업공간을 연다. 가운데 표가 입력 그리드다(AG Grid Community). 열은 Inspector가 읽은 열 정의 순서(위치 순)이고, 맨 앞의 고정 열 "기간 / 행 번호"에 `2026-03-01 · #12`(기준 날짜 열이 있으면 기간 + 행 번호, 없으면 `#12`)가 나온다. 기준 날짜 열의 머리글에는 "(기간)"이 붙는다. 머리글을 누르면 그 열이 Inspector에 열린다.
 2. 값 표시: 숫자는 쉼표 서식에 오른쪽 정렬이고, 소수 자릿수 규칙이 있으면 끝자리 0을 채워 보여 준다(`1234.5` -> `1,234.50`). 값은 문자열 그대로라 큰 수도 정밀도를 잃지 않는다. **빈 칸(아직 입력 안 함)은 빗금 배경의 빈 칸이고, 값 0은 `0`으로 보인다.**
-3. 계산 열(수식)은 이탤릭·회색 배경의 읽기 전용이다. 계산이 실패한 칸은 붉은 배경의 "오류"로 보이고 칸 위에 마우스를 올리면 이유가 나온다(E1 0으로 나눔, E2 글자 길이 범위, E3 날짜 범위). 오류 칸과 빈 칸은 다르게 보인다. (계산 열은 단위 1d부터 생긴다. 지금은 표시 규칙만 준비돼 있다.)
+3. 계산 열(수식)은 이탤릭·회색 배경의 읽기 전용이다. 계산이 실패한 칸은 붉은 배경의 "오류"로 보이고 칸 위에 마우스를 올리면 이유가 나온다(E1 0으로 나눔, E2 글자 길이 범위, E3 날짜 범위). 오류 칸과 빈 칸은 다르게 보인다. (계산 열 만들기와 화면은 `formula-column`)
 4. 위쪽 도구줄: "정렬"(최근 순이 기본, 과거 순), "한 쪽에"(50·100·200행), "이전 쪽/다음 쪽", 범위 표시(`1–50 / 전체 120행`), "새로 읽기", "새 행 추가". 쪽 이동은 서버에 `limit/offset`을 보내 다시 읽는 방식이다(서버 사이드 행 모델 없음).
 5. 상태: 불러오는 중 / 행이 없음("아직 입력된 행이 없습니다") / 읽기 실패(쉬운 문구 + "다시 불러오기").
 
@@ -215,7 +215,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 ## 9. 연관 Skill
 - `dataset-definition`: 열 타입·필수·범위 규칙·기준 날짜 열·날짜 단위의 정의. 행 쓰기가 같은 `datasets` 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다(`DEFINITION_BUSY`, `DATASET_HAS_ROWS`)
 - `permission-management`: 팀·소속·역할(`입력(팀)` 판정), 인증 스텁, 실제 DB 시험 방법
-- `formula-column`(예정, FU-1d): 계산 열 값과 오류 칸을 `RowViewPort`로 제공하고 이 Skill의 행 조회가 그것을 읽는다
+- `formula-column`(FU-1d): 계산 열 값과 오류 칸을 `RowViewPort`(`FormulaRowView`)로 제공하고 이 Skill의 행 조회가 그것을 읽는다. 계산 열 키로 쓰기(C2~C4)는 `READ_ONLY`다
 - `dashboard-link`(예정, FU-1e): 입력된 행이 `dv_` 뷰를 거쳐 Superset 차트에 보인다
 - `admin-cleanup`: 잘못 입력한 행·데이터셋의 수동 정리(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검, 실제 DB 시험 환경

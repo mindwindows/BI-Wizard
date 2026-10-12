@@ -9,7 +9,7 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 관리자가 팀을 만들고, 사용자를 사전 등록하고, 사용자를 팀에 정의 담당자(`definer`) 또는 입력자(`entry`)로 넣고 빼며, 비활성화한다. 모든 사용자는 자기 정보와 소속 팀을 본다. 인증된 모든 사용자는 모든 팀의 데이터를 열람할 수 있고(별도 역할 값 없음), 관리자는 팀 소속 역할이 없으면 데이터셋 정의·입력 권한이 없다(06 §4-1).
 
 ## 2. 사용 조건 / 사전 요구사항
-- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0004`로 데이터셋 표가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
+- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0005`로 데이터셋 표와 수식 표(`formulas`·`formula_deps`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
 - 로그인 방식(미결정 8번)이 정해지기 전에는 **인증 스텁**으로만 신원을 만든다. 스텁은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 켜진다(그 밖이면 backend가 시작하지 않는다).
 - 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`. **사용자를 조회하는 중에 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다**(로그아웃과 구분하며 접근은 계속 닫혀 있다. 모든 보호 경로가 같다). 신원 어댑터 자체의 예외는 기존대로 401이다.
 - 최초 관리자는 아래 서버 명령으로 만든다(화면·API로는 만들 수 없다: 관리자가 한 명도 없기 때문).
@@ -147,7 +147,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 
 ## 8. 검증 방법
 - 자동(DB 없이, `docker build --target test backend`와 같다): `pytest`. API 시험은 SQLite로 돌고 `pg` 변형은 건너뛴다. **CI에서 건너뛰어 통과처럼 보이는 일을 막으려면 시험을 실행하는 환경에 `REQUIRE_PG=1`을 준다**: PostgreSQL 시험 환경(접속 정보·tmpfs 시험 DB)이 없을 때 `pg` 변형이 건너뛰지 않고 **실패**한다. 미설정이면 건너뛴다. `.env`·`.env.example`·compose에는 넣지 않는 시험 실행용 옵션이다.
-- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501, `users`·`teams`·`team_members`·`datasets`·`dataset_columns`), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
+- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501, `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
 ```
 docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
@@ -156,8 +156,8 @@ docker run --rm --network bi-wizard_default --env-file .env -e POSTGRES_HOST=pos
 docker compose --profile test stop postgres-test && docker compose --profile test rm -f postgres-test
 ```
 (네트워크 이름은 compose 프로젝트 이름에 따른다: `docker network ls`. 이 시험은 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`*_PASSWORD`가 필요하다. 시험 DB는 새 DB여야 한다: 시험이 `users`·`teams`·`team_members`의 행을 지운다.)
-- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`·`0004`의 표·열 단위 권한 상태(0004 한 단계 내림 포함)를 확인한다.
-- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), DV1~DV3 × 역할(+ B2의 비활성 팀 행: 정의 담당자 409 `TARGET_INACTIVE`, 그 밖 역할은 403·401로 권한 판정이 먼저)(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
+- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`·`0004`·`0005`의 표·열 단위 권한 상태(0005·0004 한 단계 내림 포함)를 확인한다.
+- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), C1~C4(`skills/data-entry`), D1~D10(`skills/formula-column`: 읽기 D1·D6·D7·D8, 정의(팀) D2~D5, 관리자 D9·D10), DV1~DV3 × 역할(+ B2의 비활성 팀 행: 정의 담당자 409 `TARGET_INACTIVE`, 그 밖 역할은 403·401로 권한 판정이 먼저)(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
 - 수동: 위 스텁 curl로 관리자 로그인 후 팀 만들기 → 사용자 등록 → 소속 지정 → `/api/me`(해당 사용자)로 소속 확인, 마지막 관리자 해제 시 409.
 - 프런트:
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
@@ -179,4 +179,5 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - `local-environment`: 환경 기동·마이그레이션 왕복·`/health` 필드·스텁 스위치(`AUTH_STUB_ENABLED`) 설정, 시작 자가 점검 실패 대응
 - `dataset-definition`(FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
 - `data-entry`(FU-1c): `입력(팀)` = 그 팀의 `entry` 또는 `definer`(관리자도 소속 역할이 있어야 한다)로 행 입력(C2~C4)을 판정하고, 행 조회(C1)는 인증된 활성 사용자 누구나 한다
+- `formula-column`(FU-1d): 수식 검사·미리보기·계산 열 만들기·고치기는 정의(팀) 권한, 수식 보기·오류 칸 점검은 인증된 모두, 뷰 점검·다시 시도는 관리자(05 §4). 이 Skill의 인증 스텁·시험 절차를 쓴다
 - `dashboard-link`(예정, FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고, 대시보드 연결·입장권 발급에 이 모듈의 신원·권한을 쓴다

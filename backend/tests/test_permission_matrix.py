@@ -1,5 +1,5 @@
 """권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
-A1~A9, B1~B6, C1~C4, DV1~DV3.
+A1~A9, B1~B6, C1~C4, D1~D10, DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
@@ -22,6 +22,8 @@ from app.db_metadata import (
     DYNAMIC_SCHEMA,
     dataset_columns,
     datasets,
+    formula_deps,
+    formulas,
     team_members,
     teams,
     users,
@@ -195,6 +197,88 @@ ENDPOINTS: list[Endpoint] = [
         200,
         ENTER,
     ),
+    (
+        "D1",
+        "GET",
+        "/api/formulas/functions",
+        lambda w: "/api/formulas/functions",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "D2",
+        "POST",
+        "/api/datasets/{dataset_id}/formulas/check",
+        lambda w: f"/api/datasets/{w.dataset_id}/formulas/check",
+        lambda w: {"expression": "[기존 열] + 1"},
+        200,
+        DEFINER,
+    ),
+    (
+        "D3",
+        "POST",
+        "/api/datasets/{dataset_id}/formulas/preview",
+        lambda w: f"/api/datasets/{w.dataset_id}/formulas/preview",
+        lambda w: {"expression": "[기존 열] + 1"},
+        200,
+        DEFINER,
+    ),
+    (
+        "D4",
+        "POST",
+        "/api/datasets/{dataset_id}/formulas",
+        lambda w: f"/api/datasets/{w.dataset_id}/formulas",
+        lambda w: {"expected_version": 1, "display_name": "새 계산", "expression": "[기존 열] * 2"},
+        201,
+        DEFINER,
+    ),
+    (
+        "D5",
+        "PUT",
+        "/api/datasets/{dataset_id}/formulas/{col_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}/formulas/{w.formula_id}",
+        lambda w: {"expected_version": 1, "expression": "[기존 열] + 2"},
+        200,
+        DEFINER,
+    ),
+    (
+        "D6",
+        "GET",
+        "/api/datasets/{dataset_id}/formulas/{col_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}/formulas/{w.formula_id}",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "D7",
+        "GET",
+        "/api/checks/formula-errors",
+        lambda w: "/api/checks/formula-errors",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "D8",
+        "GET",
+        "/api/datasets/{dataset_id}/formula-errors",
+        lambda w: f"/api/datasets/{w.dataset_id}/formula-errors",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    ("D9", "GET", "/api/checks/views", lambda w: "/api/checks/views", lambda w: None, 200, ADMIN),
+    (
+        "D10",
+        "POST",
+        "/api/checks/views/retry",
+        lambda w: "/api/checks/views/retry",
+        lambda w: {},
+        200,
+        ADMIN,
+    ),
 ]
 
 
@@ -204,7 +288,18 @@ def mworld(db: Db, world: World) -> World:
     dataset_id = db.add_dataset(world.team_a, "기존 데이터셋", world.ids["definer"])
     column_id = db.add_column(dataset_id, "기존 열", "number")
     db.add_rows(dataset_id, 1)  # C3 대상 행 하나(row_id 1, 빈 칸)
-    return replace(world, dataset_id=dataset_id, column_id=column_id, row_id=1)
+    # D5·D6 대상 계산 열 하나(`[기존 열] + 1`을 저장된 AST로 직접 만든다. 뷰는 만들지 않는다).
+    ast = {
+        "t": "call",
+        "n": "+",
+        "a": [{"t": "col", "id": column_id}, {"t": "num", "v": "1"}],
+    }
+    formula_id = db.add_formula_column(
+        dataset_id, "계산 열", ast, expression="[기존 열] + 1", position=1, deps=(column_id,)
+    )
+    return replace(
+        world, dataset_id=dataset_id, column_id=column_id, row_id=1, formula_id=formula_id
+    )
 
 
 @pytest.mark.parametrize("role", ROLES, ids=lambda r: r or "anonymous")
@@ -235,6 +330,8 @@ def _snapshot(db: Db):
         db.rows(team_members),
         db.rows(datasets, datasets.c.id),
         db.rows(dataset_columns, dataset_columns.c.id),
+        db.rows(formulas, formulas.c.column_id),
+        db.rows(formula_deps, formula_deps.c.column_id, formula_deps.c.depends_on_column_id),
         dynamic,
     )
 

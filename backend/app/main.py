@@ -18,11 +18,11 @@ from app.auth.stub import build_stub_adapter
 from app.auth.stub import router as stub_router
 from app.config import Settings, get_settings
 from app.core.errors import register_error_handlers
+from app.core.limits import HeavyReadLimiter
 from app.core.ports import (
     DatasetSyncPort,
     DefinitionHooks,
     NoopDatasetSync,
-    PlainRowView,
     RowViewPort,
 )
 from app.core.request_id import RequestIdMiddleware
@@ -30,6 +30,11 @@ from app.core.startup_check import run_startup_checks
 from app.dataset.router import router as dataset_router
 from app.db import create_db_engine
 from app.entry.router import router as entry_router
+from app.formula.hook import FormulaDefinitionHook
+from app.formula.reconcile import reconcile_all
+from app.formula.router import router as formula_router
+from app.formula.rowview import FormulaRowView
+from app.formula.status import ViewStatus
 from app.health import router as health_router
 
 logger = logging.getLogger(__name__)
@@ -43,7 +48,12 @@ API_PREFIX = "/api"
 # - 개발: 인증 스텁이 켜진 설정에서만 붙는 `/dev/*`(DV1~DV3). `guard.DEV_STUB_PATHS` 밖의
 #   경로는 거부한다.
 PUBLIC_ROUTERS: tuple[APIRouter, ...] = (health_router,)
-PROTECTED_ROUTERS: tuple[APIRouter, ...] = (access_router, dataset_router, entry_router)
+PROTECTED_ROUTERS: tuple[APIRouter, ...] = (
+    access_router,
+    dataset_router,
+    entry_router,
+    formula_router,
+)
 DEV_ROUTERS: tuple[APIRouter, ...] = (stub_router,)
 
 
@@ -71,6 +81,13 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level)
+    # 뷰 대조 결과(프로세스 메모리)와 정의 변경 훅 등록부. 훅을 직접 받지 않으면 formula 훅을
+    # 등록하고 시작할 때 뷰를 대조한다(04 §3, 07 §8). 시험이 훅을 직접 넘기면 그 훅만 쓴다.
+    view_status = ViewStatus()
+    own_hooks = definition_hooks is None
+    hooks = definition_hooks if definition_hooks is not None else DefinitionHooks()
+    if own_hooks:
+        hooks.register(FormulaDefinitionHook(view_status))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -81,6 +98,11 @@ def create_app(
         except BaseException:
             app.state.engine.dispose()
             raise
+        view_status.bind(app.state.startup_report)
+        if own_hooks:
+            # 활성 데이터셋마다 정의 해시를 대조해 다른 뷰만 다시 만든다. 실패해도 시작을 막지
+            # 않는다.
+            await run_in_threadpool(reconcile_all, app.state.engine, hooks, view_status)
         logger.info(
             "backend 시작: env=%s, 하위 경로=%r, 프록시가 접두를 떼는가=%s, 받는 API 접두=%s",
             settings.app_env,
@@ -111,10 +133,12 @@ def create_app(
         build_stub_adapter(settings) if settings.auth_stub_enabled else None
     )
     app.state.dataset_sync = dataset_sync or NoopDatasetSync()
-    # 정의 변경 훅 등록부(04 §3). 1b에는 등록된 훅이 없다. formula 모듈이 1d에서 등록한다.
-    app.state.definition_hooks = definition_hooks or DefinitionHooks()
-    # 행 조회의 계산 열 값·오류 칸(04 §3 `RowViewPort`). 1c는 계산 열 없는 기본 구현, 1d가 교체한다.
-    app.state.row_view = row_view or PlainRowView()
+    app.state.definition_hooks = hooks
+    app.state.view_status = view_status
+    # 무거운 읽기(미리보기·오류 칸 조회·계산 열이 있는 행 조회)의 전역 동시 상한(07 §5).
+    app.state.heavy_reads = HeavyReadLimiter()
+    # 행 조회의 계산 열 값·오류 칸(04 §3 `RowViewPort`): formula가 `dv_`·`de_`를 읽어 준다.
+    app.state.row_view = row_view or FormulaRowView()
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
     register_routers(app, dev=DEV_ROUTERS if settings.auth_stub_enabled else ())

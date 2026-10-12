@@ -57,5 +57,8 @@ def create_db_engine(settings: Settings) -> Engine:
         hide_parameters=True,  # 오류 메시지·로그에 SQL 파라미터 값(login_id 등)을 넣지 않는다.
         pool_size=5,
         max_overflow=0,
-        connect_args={"timeout": 5},
+        # 수식 글자 상수 완화책 ①(07 §4-3): 세션의 `standard_conforming_strings`를 on으로
+        # 고정한다. 서버 설정이 바뀌어도 이 연결의 글자 리터럴 해석이 바뀌지 않는다(시작 자가
+        # 점검도 확인한다).
+        connect_args={"timeout": 5, "startup_params": {"standard_conforming_strings": "on"}},
     )

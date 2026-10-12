@@ -22,6 +22,7 @@ from app.auth import CurrentUserDep
 from app.auth.permissions import can_enter
 from app.core.deps import get_session
 from app.core.errors import forbidden, payload_too_large
+from app.core.limits import HeavyReadLimiter
 from app.core.pagination import LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX
 from app.core.ports import RowViewPort
 from app.dataset import service as dataset_service
@@ -46,7 +47,12 @@ def get_row_view(request: Request) -> RowViewPort:
     return request.app.state.row_view
 
 
+def get_heavy_reads(request: Request) -> HeavyReadLimiter:
+    return request.app.state.heavy_reads
+
+
 RowViewDep = Annotated[RowViewPort, Depends(get_row_view)]
+HeavyReadsDep = Annotated[HeavyReadLimiter, Depends(get_heavy_reads)]
 
 
 def require_dataset_entry(dataset_id: int, user: CurrentUserDep, session: SessionDep) -> int:
@@ -68,6 +74,7 @@ def list_rows(
     dataset_id: int,
     session: SessionDep,
     row_view: RowViewDep,
+    heavy_reads: HeavyReadsDep,
     order: Literal["asc", "desc"] = "asc",
     limit: LimitParam = LIST_LIMIT_DEFAULT,
     offset: OffsetParam = 0,
@@ -75,7 +82,13 @@ def list_rows(
     """C1: 행 조회. `order`는 기준 날짜 열(없으면 `row_id`) 기준이다."""
     return RowsPage(
         **service.list_rows(
-            session, dataset_id, order=order, limit=limit, offset=offset, row_view=row_view
+            session,
+            dataset_id,
+            order=order,
+            limit=limit,
+            offset=offset,
+            row_view=row_view,
+            heavy_reads=heavy_reads,
         )
     )
 
