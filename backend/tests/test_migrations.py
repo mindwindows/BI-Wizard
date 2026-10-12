@@ -24,7 +24,14 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # test_migrations_do_not_manage_bi_data_objects가 막는다.
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
 # 여기에 기록한다.
-DROP_APPROVED: dict[str, str] = {}
+DROP_APPROVED: dict[str, str] = {
+    # 0003 downgrade()의 op.drop_table 3개(team_members, teams, users)는 06 §6의 표 역순 삭제다.
+    # 새 승인이 아니라 기존 D2 규칙의 적용이며, FU-1a 착수 승인(2026-10-12)에 포함된다.
+    "20261012_0003_users_teams_members.py": (
+        "DROP 확인: 사용자 승인 (2026-10-12, FU-1a 착수 승인, 06 §6 downgrade 표 역순 삭제 3개: "
+        "team_members, teams, users. 정적 표 대상, 동적 객체 아님)"
+    ),
+}
 
 # D5: upgrade/downgrade가 비어 있는 revision은 원칙적으로 미구현으로 본다.
 # 만들 업무 객체가 없는 baseline처럼 의도적인 no-op만 revision id로 허용한다.
@@ -127,14 +134,15 @@ def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0002"]
+    assert heads == ["0003"]
 
 
-def test_revision_chain_starts_at_baseline_then_privileges():
+def test_revision_chain_baseline_privileges_then_access_tables():
     script = ScriptDirectory.from_config(_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0003", "0002", "0001"]
     assert script.get_revision("0001").down_revision is None
     assert script.get_revision("0002").down_revision == "0001"
+    assert script.get_revision("0003").down_revision == "0002"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -314,6 +322,15 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
         "ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data "
         "GRANT SELECT ON TABLES TO bi_readonly"
     ) in upgrade_sql
+    # 0003: 정적 표 3개와 명시 GRANT(열 단위 UPDATE 포함).
+    for table in ("users", "teams", "team_members"):
+        assert f"CREATE TABLE {table} (" in upgrade_sql
+    assert (
+        "GRANT SELECT, INSERT, UPDATE (display_name, is_admin, is_active) ON users TO bi_app"
+        in (upgrade_sql)
+    )
+    assert "GRANT SELECT, INSERT, UPDATE (name, is_active) ON teams TO bi_app" in upgrade_sql
+    assert "GRANT SELECT, INSERT, UPDATE (role), DELETE ON team_members TO bi_app" in upgrade_sql
     command.downgrade(config, "head:base", sql=True)
     downgrade_sql = capsys.readouterr().out
     assert "alembic_version" in downgrade_sql
@@ -341,3 +358,80 @@ def test_privilege_revision_downgrade_mirrors_upgrade():
     assert len(grants) == len(revokes) == 3
     assert all("GRANT" in g for g in grants)
     assert all("REVOKE" in r for r in revokes)
+
+
+def _execute_args(path: Path, function: str) -> list[str]:
+    return [
+        n.args[0].value
+        for n in ast.walk(_function(_parse(path), function))
+        if isinstance(n, ast.Call) and _call_name(n) == "execute"
+    ]
+
+
+def _access_revision() -> Path:
+    return next(p for p in _revision_files() if "_0003_" in p.name)
+
+
+def test_access_tables_revision_has_real_downgrade_and_explicit_grants():
+    """0003: upgrade가 표를 만들고 명시 GRANT를 주며, downgrade가 표를 외래키 역순으로 지운다."""
+    tree = _parse(_access_revision())
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    grants = _execute_args(_access_revision(), "upgrade")
+    assert len(grants) == 3 and all(g.startswith("GRANT ") for g in grants)
+    # 권한을 넓히는 문장 금지: PUBLIC·bi_readonly 부여, ALL.
+    joined = " ".join(grants).upper()
+    assert "PUBLIC" not in joined and "BI_READONLY" not in joined and "ALL" not in joined.split()
+    assert all(g.endswith(" TO bi_app") for g in grants)
+    drops = [
+        (n.args[0].value, node.lineno)
+        for node in ast.walk(_function(tree, "downgrade"))
+        if isinstance(node, ast.Call) and _call_name(node) == "drop_table"
+        for n in [node]
+    ]
+    assert [name for name, _ in drops] == ["team_members", "teams", "users"]
+
+
+def test_access_revision_matches_static_metadata():
+    """revision이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
+    from app.db_metadata import metadata
+
+    created = [
+        n.args[0].value
+        for n in ast.walk(_function(_parse(_access_revision()), "upgrade"))
+        if isinstance(n, ast.Call) and _call_name(n) == "create_table"
+    ]
+    assert sorted(created) == sorted(metadata.tables)
+
+
+def test_static_metadata_constraint_names_follow_convention():
+    """제약 이름 규칙(NAMING_CONVENTION): CHECK는 이름 있는 제약, FK·PK·UNIQUE·인덱스 이름 확정."""
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    from app.db_metadata import metadata
+
+    ddl = {
+        name: str(CreateTable(table).compile(dialect=postgresql.dialect()))
+        for name, table in metadata.tables.items()
+    }
+    assert "CONSTRAINT pk_users PRIMARY KEY (id)" in ddl["users"]
+    assert "CONSTRAINT uq_users_login_id UNIQUE (login_id)" in ddl["users"]
+    assert "CONSTRAINT uq_teams_code UNIQUE (code)" in ddl["teams"]
+    assert "CONSTRAINT uq_teams_name UNIQUE (name)" in ddl["teams"]
+    assert "CONSTRAINT ck_teams_code_format CHECK" in ddl["teams"]
+    assert "CONSTRAINT pk_team_members PRIMARY KEY (team_id, user_id)" in ddl["team_members"]
+    assert "CONSTRAINT ck_team_members_role CHECK" in ddl["team_members"]
+    assert "CONSTRAINT fk_team_members_team_id_teams FOREIGN KEY" in ddl["team_members"]
+    assert "CONSTRAINT fk_team_members_user_id_users FOREIGN KEY" in ddl["team_members"]
+    index_names = {i.name for t in metadata.tables.values() for i in t.indexes}
+    assert index_names == {"ix_team_members_user_id"}
+
+
+def test_team_code_check_matches_python_pattern():
+    """DB의 CHECK 식과 서비스의 형식 검사가 같은 정규식이다."""
+    from app.db_metadata import TEAM_CODE_PATTERN, teams
+
+    checks = [c for c in teams.constraints if getattr(c, "name", None) == "ck_teams_code_format"]
+    assert len(checks) == 1
+    assert TEAM_CODE_PATTERN in str(checks[0].sqltext)

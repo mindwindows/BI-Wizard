@@ -16,15 +16,22 @@ from fastapi.routing import APIRoute
 # 인증 없이 열려 있는 경로(`/api` 뒤까지 포함, 05 §2-6 H1·H2). 다른 경로를 공개하려면 계약 변경이다.
 PUBLIC_PATHS = frozenset({"/api/health", "/api/health/db"})
 
+# 인증 스텁이 켜진 설정에서만 존재하는 개발·시험 전용 경로(05 §2-6 DV1~DV3). 신원을 고르기
+# 전에 쓰므로 `current_user` 없이 열리지만, 꺼져 있으면 경로 자체가 없다(404). 이 목록 밖의
+# 경로는 스텁 라우터에 둘 수 없다.
+DEV_STUB_PATHS = frozenset({"/api/dev/stub-users", "/api/dev/stub-user"})
 
-def check_public_routers(routers: Iterable[APIRouter], prefix: str) -> None:
-    """공개 라우터의 모든 경로가 `PUBLIC_PATHS` 안인지 확인한다. 아니면 RuntimeError."""
+
+def check_public_routers(
+    routers: Iterable[APIRouter], prefix: str, allowed: frozenset[str] = PUBLIC_PATHS
+) -> None:
+    """공개 라우터의 모든 경로가 `allowed`(기본 `PUBLIC_PATHS`) 안인지 확인한다."""
     outside = []
     for router in routers:
         for route in router.routes:
             if isinstance(route, APIRoute):
                 full_path = f"{prefix}{route.path}"
-                if full_path not in PUBLIC_PATHS:
+                if full_path not in allowed:
                     outside.append(full_path)
             else:  # 중첩 포함 라우터 등 확인할 수 없는 항목도 공개로 둘 수 없다.
                 outside.append(repr(route))

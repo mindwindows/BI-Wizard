@@ -6,7 +6,7 @@
 - **실행 진입점은 루트 `compose.yml` 하나다.** 시작 `docker compose up -d --build`, 종료 `docker compose down`. 같은 동작의 Windows BAT는 `scripts/`에 있다. 사용법과 문제 해결은 `skills/local-environment/SKILL.md`를 읽고 추측하지 않는다.
 - 서비스: `postgres`, `db-bootstrap`(일회성), `migrate`(일회성), `backend`, `frontend`, `superset-init`(일회성), `superset`, 그리고 profile `test`의 `postgres-test`(tmpfs). 순서는 `postgres → db-bootstrap → migrate → backend`, `db-bootstrap + migrate → superset-init → superset`(`superset-init`이 `migrate`를 기다리는 것은 `bi_readonly`의 `bi_data` USAGE를 주는 마이그레이션 `0002`와의 순서 경쟁을 막기 위해서다. 순환은 없다).
 - 모든 서비스에 `mem_limit`이 있다(합계 8GB 안, `docs/decisions/03a-deploy-environment.md`). 한도는 `compose.yml`에 고정하고 변수화하지 않는다. Redis/Valkey/Celery는 두지 않는다(필요해지면 사용자와 재논의).
-- Health: `${APP_BASE_PATH}/api/health`, `${APP_BASE_PATH}/api/health/db`, `${SUPERSET_APP_ROOT}/health`. `/health/azure-openai`는 만들지 않는다.
+- Health: `${APP_BASE_PATH}/api/health`(본문 `status`, `app`, `views`, `views_failed_count`, `public_create`, `db_timezone`: 뒤 네 개는 backend 시작 자가 점검이 채운 메모리 값이라 DB 비접속, 공개 응답에는 개수·불리언·시간대만), `${APP_BASE_PATH}/api/health/db`, `${SUPERSET_APP_ROOT}/health`. `/health/azure-openai`는 만들지 않는다. **backend 시작 자가 점검(FU-1a):** `bi_app` 접속 역할에 SUPERUSER·CREATEROLE·CREATEDB·REPLICATION·BYPASSRLS 중 하나라도 있으면, `bi_data`에 표·뷰·인덱스·제약(과 열이 소유한 Identity 시퀀스) 밖의 객체가 있으면, `standard_conforming_strings`가 off이거나 정적 표·열이 DB에 없으면 시작을 거부한다.
 - **DB 계정 분리(EW-1, Gate ② 한정 구성 해소):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·`migrate` 계정으로 썼다(한정 구성). 이제 `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **이미지 슈퍼유저 전용**(postgres 이미지, healthcheck, `db-bootstrap`)이고 `backend`·`migrate`는 이 계정으로 접속하지 않는다. `migrate`=`bi_owner`(정적 표·`bi_data` 소유), `backend`=`bi_app`(정적 표는 명시 GRANT만, `bi_data`에만 `CREATE`)이며 계정 이름은 코드 상수(`backend/app/db.py`)다. 이것은 운영 가이드 기준선(`POSTGRES_USER`=앱 계정)과의 **의도적 차이**다(`docs/deploy-coordination.md` 29번). backend가 슈퍼유저로 접속하는 구성은 리뷰에서 차단된다.
 - 이 환경이 통과한 상태(Environment Ready)가 기능 개발의 전제다.
 - frontend의 nginx 마스터가 root로 실행되는 것은 **의도적 선택**(공식 nginx 이미지 기본)이다. 필요하면 `nginx-unprivileged` 이미지로 전환할 수 있다.
@@ -43,6 +43,7 @@
 - **`DROP`이 있는 마이그레이션(자동 생성 초안 포함)은 적용하지 않고 사용자 확인을 받는다**(D2 안전장치, `public` 정적 표 대상. `revision`의 `downgrade()`에 있는 `op.drop_table`도 해당). 확인했다면 변경 요약에 "DROP 확인: 사용자 승인"을 남기고 `backend/tests/test_migrations.py`의 `DROP_APPROVED`에 기록한다.
 - DB 계정(`bi_owner`, `bi_app`, `bi_readonly`, `superset_meta`), 빈 schema `bi_data`(소유자 `bi_owner`), Superset 메타 DB는 `db-bootstrap`(`backend/bootstrap/`)이 만든다. `initdb.d`를 쓰지 않는다. **D3 예외 2:** `roles.sql`의 psql `:'var'` 인용은 **비밀번호 리터럴(`PASSWORD :'var'`) 4곳**(`POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`)에만 허용하고 식별자 보간(`:"var"`, `format('%I')`)과 구문 보간은 금지다. 비밀번호는 `\getenv`로 읽고 비면 실패한다(fail closed). 역할·DB·schema 이름은 상수 리터럴이다. db-bootstrap 고정 SQL에는 승인된 `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`(마이그레이션이 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app`을 쓰려면 필요), `bi_owner`의 `public` `CREATE`, `bi_readonly`의 `statement_timeout = '30s'`가 들어 있다. 또한 매 기동 기존 `bi_owner`·`bi_app`의 속성을 재차단하는 고정 문장 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE`(03b 14-1, 권한 축소, 보간 없음)이 있다. `superset-init`은 일회성이라 `healthcheck: disable: true`로 종료 뒤 `unhealthy` 표시를 막는다. `backend/migrations/`와 `backend/bootstrap/`(승인된 예외) 밖의 raw SQL은 금지이고, SQL 문자열 조립은 어디서도 금지다(SQLAlchemy 표현식 사용). `roles.sql`의 정적 규칙은 `scripts/ci-validate-env.sh`가 검사하고 그 네거티브 케이스는 `scripts/test-ci-validate-env.sh`가 시험한다.
 - `bi_data`의 `USAGE/CREATE`(`bi_app`)와 `bi_readonly`의 읽기 권한(`USAGE`, 기본 권한 `SELECT`)은 마이그레이션 `0002_bi_data_privileges`가 `bi_owner`로 부여한다(고정 SQL). 동적 객체(`ds_*`, `dv_*`, `de_*`)는 마이그레이션 대상이 아니다: `target_metadata`는 정적 표 `MetaData`(`backend/app/db_metadata.py`) 하나이고 `include_name`/`include_object`가 `bi_data`와 동적 객체 이름을 제외한다(D2 안전장치는 `public` 정적 표의 `DROP` 대상). 왕복 테스트는 `python -m migrations.roundtrip`(테스트 DB), D5 의미는 "권한 상태 복원"이다.
+- `0003_users_teams_members`(FU-1a): 정적 표 `users`·`teams`·`team_members`와 `bi_app` 명시 GRANT(표 단위 SELECT/INSERT, `team_members`는 DELETE도, UPDATE는 열 단위: `users`의 `display_name`·`is_admin`·`is_active`, `teams`의 `name`·`is_active`, `team_members`의 `role`). `login_id`·`code`·`team_id`·`user_id`는 DB가 변경을 막는다. `bi_readonly`에는 아무 권한도 없다. `downgrade()`는 표를 외래키 역순으로 `DROP`하며 `tests/test_migrations.py`의 `DROP_APPROVED`에 기록이 있다. 최초 관리자는 서버 명령 `python -m app.cli create-admin`(`skills/permission-management/SKILL.md`)으로 만든다.
 
 ## 5. 라이선스
 - 허용형만 쓴다: MIT, BSD, Apache 2.0, PSF, PostgreSQL License. `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스는 금지다. 불분명하면 쓰지 말고 질문한다.
@@ -50,7 +51,7 @@
 - LGPL인 `psycopg2`/`psycopg`는 backend에 쓰지 않는다(backend는 pg8000, BSD-3). Superset 이미지(`superset/Dockerfile`)에만 `psycopg2-binary`를 둔다.
 
 ## 6. Skill 규칙
-- 사용자 관점의 주요 기능마다 `skills/<기능>/SKILL.md`를 둔다(형식: `.claude/skills/product-skill-authoring`). 현재는 `skills/local-environment/`뿐이다.
+- 사용자 관점의 주요 기능마다 `skills/<기능>/SKILL.md`를 둔다(형식: `.claude/skills/product-skill-authoring`). 현재는 `skills/local-environment/`와 `skills/permission-management/`(FU-1a)다.
 - **Feature Code ↔ Skill ↔ 연관 Skill ↔ 회귀 테스트는 함께 바뀐다.** 코드나 환경만 바꾸고 Skill을 갱신하지 않으면 완료로 보지 않는다. 환경을 바꾸면 `skills/local-environment/SKILL.md`, `README.md`를 같은 작업에서 고친다.
 - `.claude/`(개발 에이전트 정의)와 `skills/`(제품 사용설명서)는 다른 것이다.
 
@@ -58,7 +59,7 @@
 ```
 sh scripts/ci-validate-env.sh && sh scripts/test-ci-validate-env.sh   # 변수 목록·계정 분리·roles.sql 규칙·AG Grid Enterprise 혼입 방지와 frontend 의존성 정확한 버전 고정, 그 네거티브 케이스(Docker 불필요)
 docker compose config --quiet                       # 구성 (CI는 sh scripts/ci-validate-env.sh 로 만든 더미 env 사용)
-docker build --target test backend                  # ruff check/format, pytest
+docker build --target test backend                  # ruff check/format, pytest (PostgreSQL 필요한 pg 변형은 건너뜀)
 docker build --target test frontend                 # eslint, tsc, vitest
 docker compose up -d --build && docker compose ps   # 기동 (Windows: scripts\start-local.bat, scripts\health-check.bat)
 ```

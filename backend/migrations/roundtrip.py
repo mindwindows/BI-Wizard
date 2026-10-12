@@ -63,6 +63,7 @@ _PG_ROLES = _catalog(
 _PG_AUTH_MEMBERS = _catalog(
     "pg_auth_members", "roleid", "member", "admin_option", "inherit_option", "set_option"
 )
+_PG_ATTRIBUTE = _catalog("pg_attribute", "attrelid", "attname", "attnum", "attisdropped", "attacl")
 _PG_DEFAULT_ACL = _catalog(
     "pg_default_acl", "defaclrole", "defaclnamespace", "defaclobjtype", "defaclacl"
 )
@@ -119,6 +120,23 @@ def take_snapshot(engine: Engine) -> Snapshot:
             .join(_PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_CLASS.c.relnamespace)
             .where(_PG_NAMESPACE.c.nspname.in_(_SCHEMAS))
         )
+        # 열 단위 권한(GRANT UPDATE (열) …)은 relacl에 없고 attacl에만 있다(0003부터 사용).
+        column_acl = conn.execute(
+            select(
+                _PG_NAMESPACE.c.nspname,
+                _PG_CLASS.c.relname,
+                _PG_ATTRIBUTE.c.attname,
+                cast(_PG_ATTRIBUTE.c.attacl, text_type),
+            )
+            .join(_PG_CLASS, _PG_CLASS.c.oid == _PG_ATTRIBUTE.c.attrelid)
+            .join(_PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_CLASS.c.relnamespace)
+            .where(
+                _PG_NAMESPACE.c.nspname.in_(_SCHEMAS),
+                _PG_ATTRIBUTE.c.attnum > 0,
+                _PG_ATTRIBUTE.c.attisdropped.is_(False),
+                _PG_ATTRIBUTE.c.attacl.is_not(None),
+            )
+        )
         default_acl = conn.execute(
             select(
                 owner_of(_PG_DEFAULT_ACL.c.defaclrole),
@@ -136,6 +154,7 @@ def take_snapshot(engine: Engine) -> Snapshot:
             "memberships": sorted([str(x) for x in r] for r in memberships),
             "schemas": sorted([r[0], r[1], _acl(r[2])] for r in schemas),
             "relations": sorted([r[0], r[1], r[2], r[3], _acl(r[4])] for r in relations),
+            "column_acl": sorted([r[0], r[1], r[2], _acl(r[3])] for r in column_acl),
             "default_acl": sorted([r[0], r[1], r[2], _acl(r[3])] for r in default_acl),
         }
         inspector = sa.inspect(conn)
@@ -259,6 +278,56 @@ def expect_privileges(snapshot: Snapshot, *, granted: bool) -> list[str]:
     return problems
 
 
+# 0003이 `bi_app`에 주는 권한(06 §2). 표 단위 ACL 문자: a INSERT, r SELECT, d DELETE, w UPDATE.
+# UPDATE는 열 단위라 표 ACL에는 없고 열 ACL(`w`)에만 있다.
+STATIC_TABLE_ACL = {"users": "bi_app=ar/bi_owner", "teams": "bi_app=ar/bi_owner"}
+STATIC_TABLE_ACL["team_members"] = "bi_app=ard/bi_owner"
+STATIC_COLUMN_ACL = {
+    ("users", "display_name"),
+    ("users", "is_admin"),
+    ("users", "is_active"),
+    ("teams", "name"),
+    ("teams", "is_active"),
+    ("team_members", "role"),
+}
+
+
+def expect_static_privileges(snapshot: Snapshot, *, granted: bool) -> list[str]:
+    """0003의 정적 표와 `bi_app` 권한(표·열 단위)이 head에는 정확히 있고 base에는 없는지 확인한다.
+
+    `bi_readonly`와 PUBLIC에는 아무 권한도 없어야 한다.
+    """
+    problems: list[str] = []
+    relations = {
+        r[1]: r for r in snapshot["relations"] if r[0] == "public" and r[1] in STATIC_TABLE_ACL
+    }
+    if not granted:
+        if relations:
+            problems.append(f"정적 표가 남아 있음: {sorted(relations)}")
+        if any(r[0] == "public" and r[1] in STATIC_TABLE_ACL for r in snapshot["column_acl"]):
+            problems.append("정적 표의 열 권한이 남아 있음")
+        return problems
+    for name, expected in STATIC_TABLE_ACL.items():
+        row = relations.get(name)
+        if row is None:
+            problems.append(f"정적 표 {name} 없음")
+            continue
+        acl = row[4] or []
+        # 소유자 항목은 PostgreSQL 버전마다 문자가 다르다(17부터 m 추가). bi_app 항목만 정확히 본다.
+        others = [entry for entry in acl if not entry.startswith("bi_owner=")]
+        if others != [expected]:
+            problems.append(f"{name} 표 ACL이 기대와 다름: {acl}")
+    column_acl = {
+        (r[1], r[2]): r[3] for r in snapshot["column_acl"] if r[0] == "public" and r[1] in relations
+    }
+    if set(column_acl) != STATIC_COLUMN_ACL:
+        problems.append(f"열 단위 UPDATE 권한 열이 기대와 다름: {sorted(column_acl)}")
+    for key, acl in column_acl.items():
+        if acl != ["bi_app=w/bi_owner"]:
+            problems.append(f"{key} 열 ACL이 기대와 다름: {acl}")
+    return problems
+
+
 def _current_revision(engine: Engine) -> str | None:
     with engine.connect() as conn:
         return MigrationContext.configure(conn).get_current_revision()
@@ -293,10 +362,12 @@ def main() -> int:
     base0 = take_snapshot(engine)
     step("출발 상태(db-bootstrap)", expect_bootstrap_state(base0))
     step("출발 상태 권한 없음", expect_privileges(base0, granted=False))
+    step("출발 상태 정적 표 없음", expect_static_privileges(base0, granted=False))
 
     command.upgrade(config, "head")
     head1 = take_snapshot(engine)
     step("upgrade 후 권한", expect_privileges(head1, granted=True))
+    step("upgrade 후 정적 표 권한", expect_static_privileges(head1, granted=True))
     try:
         command.check(config)
         step("alembic check", [])

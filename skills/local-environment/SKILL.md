@@ -159,7 +159,7 @@ Superset 이미지 버전을 올릴 때(6.1.0 고정 변경은 사용자 승인)
 ### 인증 스텁 스위치 (`AUTH_STUB_ENABLED`)
 - 기본 `false`. 스텁은 개발·시험에서만 켠다. `true`로 두려면 `.env`에 `APP_ENV=local`(또는 `test`)이 **명시**되어 있어야 한다. `.env.example`을 복사했다면 이미 `APP_ENV=local`이 들어 있다.
 - `true`인데 `APP_ENV`가 없거나 비었거나 `local`/`test`가 아니면(예: `production`, `staging`, `Local`) backend는 서비스하지 않는다(compose에서는 `restart: unless-stopped` 때문에 종료와 재시작을 반복하고 포트는 열리지 않는다. `docker compose logs backend`에 "AUTH_STUB_ENABLED=true는 …" 오류). 판정은 `backend/app/config.py`, 시험은 `backend/tests/test_config.py`다.
-- 운영 배포 설정에서는 `false`로 둔다. 스텁 로그인 화면·API는 FU-1a에서 만든다(지금은 스위치만 있다).
+- 운영 배포 설정에서는 `false`로 둔다. 켜졌을 때만 스텁 어댑터와 `/api/dev/*`(DV1~DV3)가 등록되고, 꺼져 있으면 경로가 없으며(404) 신원 어댑터도 없어 모든 업무 API가 401이다. 사용법과 시험용 사용자 시드는 `skills/permission-management/SKILL.md`다.
 
 ### 마이그레이션 왕복 테스트와 `alembic check` (tmpfs 테스트 DB)
 빈 DB에서 `upgrade head → downgrade base → upgrade head`가 성공하고 권한 상태가 복원되는지 확인한다. 테스트 DB `postgres-test`는 compose profile `test`에만 있고 데이터가 tmpfs(256MB 제한)라 호스트에 포트를 열지 않는다. DB 접속은 `bi_owner`다.
@@ -168,7 +168,7 @@ docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate python -m migrations.roundtrip
 ```
-`migrations/roundtrip.py`가 한 번에 한다: 스냅샷 A(db-bootstrap 직후, base) → `upgrade head` → 스냅샷 B(권한 확인) → `alembic check` → `downgrade base` → 스냅샷 A′(A와 비교) → `upgrade head` → 스냅샷 B′(B와 비교). 스냅샷은 역할 속성·멤버십, schema/표 소유자와 ACL, 기본 권한(`pg_default_acl`), `public` 표·열·인덱스다. 정규화: schema ACL의 NULL과 소유자 명시의 차이, 비어 있는 `alembic_version`. 출력 `[roundtrip] … 통과`가 모두 나오고 종료 코드 0이면 통과다. DB의 현재 revision이 base가 아니면 아무것도 하지 않고 종료 코드 2로 끝난다(쓰고 있는 DB에서 `downgrade`를 돌리지 않는다).
+`migrations/roundtrip.py`가 한 번에 한다: 스냅샷 A(db-bootstrap 직후, base) → `upgrade head` → 스냅샷 B(권한 확인) → `alembic check` → `downgrade base` → 스냅샷 A′(A와 비교) → `upgrade head` → 스냅샷 B′(B와 비교). 스냅샷은 역할 속성·멤버십, schema/표 소유자와 ACL, **열 단위 ACL**(`pg_attribute.attacl`, `0003`의 `UPDATE (열)` 권한), 기본 권한(`pg_default_acl`), `public` 표·열·인덱스다. 단계 `정적 표 권한`은 `0003`의 `bi_app` 표·열 권한이 head에서 정확히 있고(`bi_readonly`·PUBLIC 없음) base에서는 없는지 확인한다. 정규화: schema ACL의 NULL과 소유자 명시의 차이, 비어 있는 `alembic_version`. 출력 `[roundtrip] … 통과`가 모두 나오고 종료 코드 0이면 통과다. DB의 현재 revision이 base가 아니면 아무것도 하지 않고 종료 코드 2로 끝난다(쓰고 있는 DB에서 `downgrade`를 돌리지 않는다).
 
 개별 명령(필요할 때):
 ```
@@ -182,19 +182,19 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
 docker compose --profile test stop postgres-test
 docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이너만 제거(tmpfs 데이터도 사라짐)
 ```
-- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: 첫 실제 revision(`0002`)의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다.
+- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다. `0003`(`users`·`teams`·`team_members`)의 `downgrade()`는 표를 외래키 역순으로 `DROP`하므로 `tests/test_migrations.py`의 `DROP_APPROVED`에 기록이 있다.
 - 자동 생성 초안(`alembic revision --autogenerate`)에 `DROP`이 있으면 적용하지 말고 사용자 확인을 받는다(D2: `public` 정적 표 대상). 동적 객체(`bi_data`의 `ds_*`, `dv_*`, `de_*`)는 `target_metadata`(`backend/app/db_metadata.py`, 정적 표만)와 `include_name`/`include_object` 필터로 비교에서 제외되어 삭제 후보에 섞이지 않는다. 권한(GRANT)은 `alembic check`가 잡지 못하므로 위 스냅샷 비교로 확인한다.
 - 새 revision은 `backend/migrations/versions/`에 둔다. head는 항상 하나여야 한다(DB 없이 pytest가 검사: `alembic heads`가 둘이면 병합 revision이 필요). 마이그레이션 실행은 `migrate` 서비스뿐이며 앱 코드는 시작 때 마이그레이션을 하지 않는다.
 
 ## 6. 관련 UI / API / command / DB
 - UI: 포털 `${APP_BASE_PATH}/`(Gate ②에서는 API/DB 상태 표시뿐), Superset `${SUPERSET_APP_ROOT}/`
-- API (브라우저 쪽 경로 기준, 업무 API는 아직 없음):
-  - `GET ${APP_BASE_PATH}/api/health` — FastAPI 상태 (`{"status":"ok"}`)
+- API (브라우저 쪽 경로 기준, 권한 관리 API는 `skills/permission-management/SKILL.md`):
+  - `GET ${APP_BASE_PATH}/api/health` — FastAPI 상태. 본문 `{status, app, views, views_failed_count, public_create, db_timezone}`: 앞 두 개는 프로세스 상태, 나머지 네 개는 **시작 자가 점검이 채운 메모리 값**이라 DB에 접속하지 않는다(`views`·`views_failed_count` 지금은 0, `public_create`는 `bi_app`이 `public`에 CREATE 권한이 있는지로 정상은 `false`, `db_timezone`은 DB 시간대). 공개 응답이라 개수·불리언·시간대만 담고, 뷰 실패가 있어도 200이다
   - `GET ${APP_BASE_PATH}/api/health/db` — PostgreSQL `SELECT 1` (정상 200, 실패 503)
   - `GET ${SUPERSET_APP_ROOT}/health` — Superset (`OK`)
-  - 공통: 모든 `/api` 응답에 `X-Request-ID` 헤더가 붙는다. 이 두 health 경로만 인증 없이 열려 있고, 그 밖의 `/api` 경로는 `current_user`를 거쳐 신원 어댑터가 없으면 401 `UNAUTHENTICATED`다(신원 방식은 미결정 8번이라 어댑터는 FU-1a에서 스텁으로 연결). 오류는 `{"error": {"code", "message", "details", "request_id"}}` 형식이고 `request_id`는 헤더와 같다. 장애 때 이 id로 `docker compose logs backend`를 찾는다.
+  - 공통: 모든 `/api` 응답에 `X-Request-ID` 헤더가 붙는다. 이 두 health 경로만 인증 없이 열려 있고, 그 밖의 `/api` 경로는 `current_user`를 거쳐 신원 어댑터가 없으면 401 `UNAUTHENTICATED`다(신원 방식은 미결정 8번이라 어댑터는 `AUTH_STUB_ENABLED=true`일 때만 스텁이 연결된다). 오류는 `{"error": {"code", "message", "details", "request_id"}}` 형식이고 `request_id`는 헤더와 같다. 장애 때 이 id로 `docker compose logs backend`를 찾는다.
 - command: `scripts\*.bat`, `docker compose …`, `alembic …`(migrate 서비스 안)
-- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`, 빈 schema `bi_data`), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
+- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`과 정적 표 `users`·`teams`·`team_members`, 빈 schema `bi_data`), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
 
 ## 7. 실패 시 확인 방법
 | 증상 | 원인 | 확인과 해결 |
@@ -203,7 +203,7 @@ docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이�
 | 포트 사용 중 | `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT` 충돌 | `.env`의 포트를 바꾸고 `restart-local.bat` |
 | `db-bootstrap` 실패 | 비밀번호 변수 4개 중 하나가 비어 있음, `POSTGRES_USER`가 역할 이름과 같음, 또는 `POSTGRES_PASSWORD`가 볼륨 생성 때 값과 다름 | `docker compose logs db-bootstrap`. `POSTGRES_PASSWORD`는 DB 볼륨이 처음 만들어질 때만 적용된다. 값을 되돌리거나 psql에서 `\password`로 바꾼다 |
 | `migrate` 실패 | `POSTGRES_OWNER_PASSWORD` 불일치·누락, `db-bootstrap`이 먼저 성공하지 않음(`bi_owner`·`bi_data` 없음) | `docker compose logs migrate`. `.env`의 비밀번호를 고치고 `docker compose up -d`(db-bootstrap이 비밀번호를 다시 맞춘다) |
-| `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, 또는 `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님 | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
+| `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님, 또는 **시작 자가 점검 거부**(`bi_app`에 SUPERUSER·CREATEROLE·CREATEDB·REPLICATION·BYPASSRLS 속성이 있음, `bi_data`에 표·뷰·인덱스·제약·Identity 시퀀스 밖의 객체가 있음, `standard_conforming_strings`가 off, 정적 표·열이 DB에 없음). DB가 아직 안 올라왔으면 2초 간격 10회 재시도한 뒤 실패 | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
 | `superset-init` 실패 | 메타 DB 접속 실패, 키 누락, 계정 변수 누락·이름 중복, 표식 없는 기존 계정과의 이름 충돌("표식 없는 기존 계정 정리"), `GUEST_TOKEN_JWT_EXP_SECONDS`가 300이 아님, `없는 권한: …`(역할 목록의 권한이 Superset에 없음), 권한 동기화 실패, `migrate` 실패로 시작하지 않음 | `docker compose logs superset-init`(실패 단계 이름 바로 앞 `[superset-init]` 줄을 본다). `없는 권한`이 `schema_access`이면 `POSTGRES_DB` 값과 업무 데이터 연결 이름이 `sync_permissions` 단계의 결과와 같은지 확인 |
 | `up`이 `SUPERSET_SERVICE_PASSWORD`(또는 발급 계정 변수) `is missing a value`로 멈춤 | 예전 `.env`에 EW-3 변수 4개가 없음 | `.env.example`에서 4줄을 추가하고 비밀번호 2개를 채운다(`scripts\validate-env.bat`이 이름을 알려 준다) |
 | 로그에 `점검 필요: 역할 bi_author` | Superset 업그레이드 등으로 `Gamma`의 권한이 바뀜 | 위 "Superset 업그레이드 점검" 1번 |
@@ -219,7 +219,7 @@ docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이�
 | 컨테이너가 메모리 부족으로 종료(137) | `mem_limit` 초과 | `docker stats --no-stream`. 한도 조정은 `docs/decisions/03a-deploy-environment.md`를 따른다 |
 
 ## 8. 검증 방법
-- 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다.
+- 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다. 이 빌드에는 PostgreSQL이 없어 **`pg` 변형(실제 DB 시험: 정적 표 권한 매트릭스, 시작 자가 점검, LAST_ADMIN 경쟁)은 건너뛴다.** 실제 DB 시험은 tmpfs 테스트 DB(`postgres-test`)에 연결해 따로 실행한다: `skills/permission-management/SKILL.md`의 "검증 방법".
 - 구성 검증: `docker compose config --quiet`
 - 수동: `scripts\health-check.bat`이 모두 `[OK]`이고 마지막에 `All checks passed.`를 출력하며 `docker compose ps`에서 상시 서비스가 `healthy`.
 - Superset 계정·역할: `docker compose logs superset-init`에 `bi_service` 4개, `bi_guest_issuer` 2개, `bi_author_schema` 1개, `bi_guest` 4개, `bi_author` 새로 만듦 또는 `Gamma와 차이 없음`, 계정 2개, 마지막 `점검 요약: 강제 복구 N건`이 나오고 종료 코드 0. `GUEST_TOKEN_JWT_EXP_SECONDS`가 300이 아니면 `superset-init`은 실패한다(`설정 GUEST_TOKEN_JWT_EXP_SECONDS가 … 입니다`). 표식 없는 기존 계정과 이름이 충돌해도 실패한다. `Public` 역할 권한은 0개이고 발급 계정으로 `rls`가 비어 있지 않은 입장권 요청은 400이다. 서비스 계정으로 `…/api/v1/security/csrf_token/`·`/api/v1/dataset/`는 200, `/api/v1/database/`와 입장권 발급(`guest_token`)은 403, 발급 계정은 입장권 발급 권한이 있다. 로그에 비밀번호가 없다.
@@ -234,4 +234,5 @@ docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이�
 - `.claude/skills/env-bootstrap`: 이 환경을 만들고 점검하는 개발용 절차(Environment Ready 체크리스트)
 - `.claude/skills/qa-verification`: 기동과 Health 검증 절차
 - `.claude/skills/product-skill-authoring`: 이 Skill의 작성 형식
-- 업무 기능 Skill(`skills/<기능>/SKILL.md`)은 Gate ③ 이후 추가되며, 모두 이 환경이 통과한 상태를 사용 조건으로 삼는다.
+- `skills/permission-management`: `/health` 새 필드·시작 자가 점검·스텁 스위치의 사용 쪽(최초 관리자 명령, `/api/dev/*`, 실제 DB 시험 방법)
+- 업무 기능 Skill(`skills/<기능>/SKILL.md`)은 모두 이 환경이 통과한 상태를 사용 조건으로 삼는다.

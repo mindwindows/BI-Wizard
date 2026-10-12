@@ -74,7 +74,7 @@ def _code(response) -> str:
     return response.json()["error"]["code"]
 
 
-# --- fail-closed ---------------------------------------------------------------------------
+# --- fail-closed ----
 
 
 @pytest.mark.parametrize(("method", "path"), [("get", "/api/_t/me"), ("post", "/api/_t/write")])
@@ -86,6 +86,7 @@ def test_no_adapter_is_401(client, method, path):
 
 def test_adapter_without_reader_is_401(app, client):
     app.state.identity_adapter = FakeAdapter("kim")
+    app.state.user_reader = None
     assert client.get("/api/_t/me").status_code == 401
 
 
@@ -149,7 +150,7 @@ def test_lookup_failure_is_logged_without_identity_or_exception_detail(app, clie
         assert leaked not in caplog.text
 
 
-# --- 등록 상태 ---------------------------------------------------------------------------------
+# --- 등록 상태 ----
 
 
 def test_unregistered_user_is_403(app, client):
@@ -185,7 +186,7 @@ def test_require_admin(app, client):
     assert client.get("/api/_t/admin").status_code == 200
 
 
-# --- 권한 판정 -------------------------------------------------------------------------------
+# --- 권한 판정 ----
 
 
 def test_permission_functions():
@@ -203,7 +204,7 @@ def test_permission_functions():
     assert not is_admin(inactive) and not can_define(inactive, 1) and not can_enter(inactive, 1)
 
 
-# --- 라우터 조립 구조 시험 --------------------------------------------------------------------
+# --- 라우터 조립 구조 시험 ----
 
 _PATH_PARAM = re.compile(r"\{[^}]+\}")
 
@@ -237,9 +238,20 @@ def test_every_non_public_route_requires_auth(make_settings, sqlite_engine):
         assert "/api/_t/write" in app.openapi()["paths"]
 
 
-def test_real_app_has_only_public_routes_for_now(make_settings, sqlite_engine):
+ACCESS_PATHS = {
+    "/api/me",
+    "/api/teams",
+    "/api/teams/{team_id}",
+    "/api/teams/{team_id}/members/{user_id}",
+    "/api/users",
+    "/api/users/{user_id}",
+}
+
+
+def test_real_app_routes_are_public_health_plus_access(make_settings, sqlite_engine):
+    """실제 앱의 경로는 공개 경로 2개와 권한 관리(A1~A9)뿐이고, 스텁이 꺼져 있으면 /dev/*가 없다."""
     app = create_app(make_settings(), engine=sqlite_engine)
-    assert set(app.openapi()["paths"]) == PUBLIC_PATHS
+    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []
 

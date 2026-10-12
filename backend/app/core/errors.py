@@ -116,6 +116,19 @@ def not_found() -> AppError:
     return AppError(ErrorCode.NOT_FOUND, "요청한 대상을 찾을 수 없습니다.", status_code=404)
 
 
+def already_exists(field: str, message: str) -> AppError:
+    """유일 값 중복(409 `ALREADY_EXISTS`). `details.field`는 중복된 필드 이름이다(05 §3)."""
+    return AppError(ErrorCode.ALREADY_EXISTS, message, status_code=409, details={"field": field})
+
+
+def last_admin() -> AppError:
+    return AppError(
+        ErrorCode.LAST_ADMIN,
+        "마지막 활성 관리자는 관리자 권한을 해제하거나 비활성화할 수 없습니다.",
+        status_code=409,
+    )
+
+
 # HTTP 상태 코드 -> (오류 코드, 한국어 문구). HTTPException의 detail은 영어이거나
 # 내부 용어일 수 있어 응답에 쓰지 않고 이 표만 쓴다. 표 밖의 4xx는 BAD_REQUEST(임시), 5xx는
 # INTERNAL_ERROR다. 409·429는 상태만으로 사전 코드(ALREADY_EXISTS, PREVIEW_BUSY 등)를 고를 수
