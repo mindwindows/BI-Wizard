@@ -59,6 +59,9 @@ DDL_ONLY_NAMES = {
     "MigrationContext",
 }
 BANNED_EVERYWHERE = {"exec_driver_sql", "literal_binds"}
+# 07 §4-1: 수식 상수를 SQL 글자로 렌더하는 `literal_binds`는 **리터럴 렌더러 접점 한 곳**만 예외다.
+# 그 파일에는 `compile_kwargs={"literal_binds": True}` 한 줄(문자열 키)만 있어야 한다.
+LITERAL_RENDERER = APP / "formula" / "literals.py"
 
 
 def _sources(under: Path) -> list[Path]:
@@ -84,6 +87,9 @@ def raw_sql_findings(tree: ast.AST) -> list[str]:
             found.append(node.arg)
         if isinstance(node, ast.Name) and node.id in BANNED_EVERYWHERE:
             found.append(node.id)
+        # `compile_kwargs={"literal_binds": True}`처럼 사전 키로 쓰는 경우도 같은 규칙으로 잡는다.
+        if isinstance(node, ast.Constant) and node.value == "literal_binds":
+            found.append("literal_binds")
     return found
 
 
@@ -101,7 +107,15 @@ def ddl_name_findings(tree: ast.AST) -> list[str]:
 
 def test_app_code_has_no_raw_sql_text_anywhere():
     for path in _sources(APP):
-        assert raw_sql_findings(ast.parse(path.read_text(encoding="utf-8"))) == [], path
+        findings = raw_sql_findings(ast.parse(path.read_text(encoding="utf-8")))
+        if path == LITERAL_RENDERER:
+            continue  # 아래 시험이 이 한 곳의 예외를 정확히 고정한다
+        assert findings == [], path
+
+
+def test_literal_binds_exception_is_exactly_the_one_renderer_line():
+    findings = raw_sql_findings(ast.parse(LITERAL_RENDERER.read_text(encoding="utf-8")))
+    assert findings == ["literal_binds"]  # 한 번뿐이고 다른 금지 항목(text 등)은 없다
 
 
 def test_runtime_ddl_lives_only_in_the_ddl_module():
@@ -154,6 +168,7 @@ def test_static_detectors_catch_what_they_should():
     assert raw_sql_findings(ast.parse("import sqlalchemy as sa\nsa.text('x')\n"))
     assert raw_sql_findings(ast.parse("conn.exec_driver_sql('x')\n"))
     assert raw_sql_findings(ast.parse("f(literal_binds=True)\n"))
+    assert raw_sql_findings(ast.parse('f(compile_kwargs={"literal_binds": True})\n'))
     assert not raw_sql_findings(ast.parse("from sqlalchemy import Text\nx = Text()\n"))
     assert ddl_name_findings(ast.parse("from sqlalchemy.schema import CreateTable\n"))
     assert ddl_name_findings(ast.parse("schema.DropView(v)\n"))
