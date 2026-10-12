@@ -43,6 +43,12 @@ ALTER ROLE superset_meta PASSWORD :'meta_pw';
 ALTER ROLE bi_owner PASSWORD :'owner_pw';
 ALTER ROLE bi_app PASSWORD :'app_pw';
 
+-- 속성 재차단(03b 14-1): 위 CREATE ROLE은 역할이 없을 때만 실행된다. 역할이 이미 있을 때 사람이
+-- 슈퍼유저·CREATEDB·CREATEROLE 속성을 붙였다면 다음 기동에서 여기서 다시 막는다. 앱 계정 두 개만 대상이고
+-- 식별자와 속성은 고정 상수다(보간 없음). 로그인 속성과 비밀번호, 권한은 건드리지 않는다.
+ALTER ROLE bi_owner NOSUPERUSER NOCREATEDB NOCREATEROLE;
+ALTER ROLE bi_app NOSUPERUSER NOCREATEDB NOCREATEROLE;
+
 -- 안전장치: 읽기 전용 계정은 기본적으로 읽기 전용 트랜잭션이다(세션에서 해제할 수 있으므로 방어선은 권한이다).
 ALTER ROLE bi_readonly SET default_transaction_read_only = on;
 -- 느린 질의가 DB에서 계속 실행되지 않게 한다(AP-9, 03b 6-3 승인: 30초).

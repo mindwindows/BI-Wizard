@@ -227,6 +227,10 @@ done
 if ! service_code superset-init | grep -A1 -E '^[[:space:]]+migrate:[[:space:]]*$' | grep -Eq '^[[:space:]]+condition:[[:space:]]*service_completed_successfully[[:space:]]*$'; then
   fail "superset-init 서비스가 migrate 완료(depends_on migrate, condition: service_completed_successfully)를 기다리지 않습니다."
 fi
+# superset-init은 일회성이라 이미지 HEALTHCHECK를 끈다(종료 뒤 unhealthy 표시 방지).
+if ! service_code superset-init | grep -A1 -E '^[[:space:]]+healthcheck:[[:space:]]*$' | grep -Eq '^[[:space:]]+disable:[[:space:]]*true[[:space:]]*$'; then
+  fail "superset-init 서비스에 healthcheck: disable: true 가 없습니다(종료 뒤 unhealthy 표시 방지)."
+fi
 if service_code migrate | grep -Eq 'superset'; then
   fail "migrate 서비스가 superset 서비스에 의존하면 순환 의존이 됩니다."
 fi
@@ -291,6 +295,8 @@ else
     "CREATE DATABASE superset OWNER superset_meta" \
     "ALTER ROLE bi_readonly PASSWORD :'ro_pw'" \
     "ALTER ROLE superset_meta PASSWORD :'meta_pw'" \
+    "ALTER ROLE bi_owner NOSUPERUSER NOCREATEDB NOCREATEROLE;" \
+    "ALTER ROLE bi_app NOSUPERUSER NOCREATEDB NOCREATEROLE;" \
     "ALTER ROLE bi_owner PASSWORD :'owner_pw'" \
     "ALTER ROLE bi_app PASSWORD :'app_pw'" \
     "ALTER ROLE bi_readonly SET default_transaction_read_only = on" \

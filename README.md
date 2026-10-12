@@ -9,7 +9,7 @@
 | 서비스 | 역할 |
 | --- | --- |
 | `postgres` | PostgreSQL 16 (앱 DB + Superset 메타 DB) |
-| `db-bootstrap` | (일회성, 슈퍼유저로 접속하는 유일한 서비스) 계정 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 빈 schema `bi_data`, Superset 메타 DB 생성 |
+| `db-bootstrap` | (일회성, 슈퍼유저로 접속하는 유일한 서비스) 계정 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 빈 schema `bi_data`, Superset 메타 DB 생성. 매 기동 `bi_owner`·`bi_app`의 슈퍼유저 등 속성을 다시 차단 |
 | `migrate` | (일회성) Alembic 마이그레이션 실행 (`bi_owner`) |
 | `backend` | FastAPI (`/api/health`, `/api/health/db`) (`bi_app`) |
 | `frontend` | 포털 정적 파일 + nginx (로컬에서 메인 플랫폼 프록시 역할) |

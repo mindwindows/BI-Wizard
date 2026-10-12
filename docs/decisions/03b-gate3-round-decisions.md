@@ -392,3 +392,20 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - FU-1 이월: 훅의 embedded uuid 등록 표 검사, 발급 API 사용자별 429, backend 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB` 거부, 03b BY3).
 - 미시험: BAT 6종 실행과 Jenkins 실제 실행(Gate ② 보류), guest 경로의 `statement_timeout`, SDK 갱신 실패 시 재시도와 만료 뒤 401 복구, 정적 표 권한 매트릭스의 실제 표 재확인(첫 실제 표 revision `0003` 이후).
 
+## 14. EW-5~7 확인 사항 결정과 FU-1 착수 준비 (2026-10-12, 사용자)
+### 14-1. 13-3 확인 사항 결정
+1. **`roles.sql` 속성 재차단:** 기존 `bi_app`·`bi_owner`에 고정 문장 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE`을 추가한다. 권한 축소이고 식별자는 고정 상수라 D3에 저촉되지 않는다. 적용 후 qa-engineer가 db-bootstrap 멱등성, 권한 매트릭스, 슈퍼유저 속성을 붙인 뒤 재기동하면 다시 차단되는지를 확인한다.
+2. **`superset` 종료 지연(10초, exit 137):** 변경하지 않고 알려진 현상으로 기록한다.
+3. **`superset-init` healthcheck 비활성화:** 종료 뒤 `unhealthy`로 표시되지 않게 한다. `depends_on` 동작에 영향이 없는지 QA가 확인한다.
+4. **에이전트 모델:** 현행(7개 모두 sonnet)을 유지한다. 모델 재판단은 필요 없다.
+5. **`ci-validate-env.sh`의 `GUEST_TOKEN_JWT_EXP_SECONDS` 검사 범위:** 그대로 수용한다(주석이 아닌 줄에 나오면 실패, `globals().update` 같은 우회도 차단).
+6. **CA 오버레이 로컬 이미지와 `ew3qa-orig-*` 원본:** 그대로 둔다.
+### 14-2. FU-1 착수 준비
+- FU-1은 새 세션에서 시작한다. `gate-status.md` 인계 절을 FU-1 착수 기준으로 갱신한다. 다음 할 일 첫 항목은 AP-15 의존성(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)의 버전·라이선스를 확인해 사용자 승인을 요청하는 것이다. FU-1 이월 항목(훅 uuid 검사, 발급 API 429, backend 시작 자가 점검, 정적 표 권한 매트릭스 재확인)과 FU-1 합격 기준 위치를 적는다.
+### 14-3. 구현·검증 결과 (EW-8)
+- **구현:** `backend/bootstrap/roles.sql`에 `bi_owner`·`bi_app`의 속성 재차단 고정 문장 2줄(psql 변수 보간 없음, 비밀번호 리터럴 4곳 규칙 불변), `compose.yml`의 `superset-init`에 `healthcheck: disable: true`, `ci-validate-env.sh` 정적 검사(재차단 문장 필수, healthcheck 비활성화 필수)와 네거티브 시험 4건(116개). 문서는 `deploy-coordination.md` 29·40번, `skills/local-environment/SKILL.md`, `AGENTS.md`, `README.md`, `windows-bat-verification.md`, 06 §6.
+- **qa-engineer 독립 검증(실패 0):** 정적 검사 통과와 변조 5종 거부, 빈 볼륨 새 설치(`superset-init` `Exited (0)`·`unhealthy` 아님, `superset`은 `superset-init` 종료 직후 시작·healthy), `superset-init` 강제 실패(`GUEST_TOKEN_JWT_EXP_SECONDS=3600`) 때도 `superset` 미기동(`depends_on` 불변), 재기동 3회 모두 같은 결과, 속성 재차단(`bi_app`·`bi_owner`에 `SUPERUSER CREATEDB CREATEROLE`을 붙인 뒤 재기동하면 `false`로 복귀, 붙어 있는 동안에는 실제로 `CREATE ROLE`이 성공), `db-bootstrap` 멱등·비밀번호 변경(네트워크 접속에서 새 값 성공·옛 값 실패)·빈 비밀번호 거부, 권한 매트릭스(전후 동일), EW-3·4 역할·계정·권한 스모크, 왕복 테스트, 로그·`ps`·`inspect` 비밀번호·토큰 0건.
+- **적용 후 보고 항목:** `bi_owner`·`bi_app` 속성 재차단 2줄(되돌리기: 두 줄과 주석, 정적 검사 필수 문장 2개와 시험 삭제), 정적 검사 강화와 네거티브 시험 4건. `superset-init` healthcheck 비활성화는 14-1 ③ 사용자 결정(되돌리기: 해당 3줄 삭제). 사전 승인 필수 범주 변경 없음.
+- **알려진 현상(변경 없음):** `superset` stop은 약 10.4초 걸리고 exit 137, `OOMKilled=false`(14-1 2번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다(지시 범위 밖, 속성 변조 후에도 `t`로 남는다). `bi_readonly`·`superset_meta`도 사람이 속성을 바꾸면 재차단되지 않는다(지시 범위 밖). `superset_meta`는 PUBLIC 기본 `CONNECT`로 앱 DB에 접속할 수 있다(기존 동작, 위반 아님).
+- **미시험:** `APP_PROXY_STRIP_PREFIX=true`(변경이 compose healthcheck·DB 계정에 한정되어 영향 없을 것으로 추정, EW-6에서 true/false 모두 확인된 상태), BAT 실행, Jenkins 실제 실행, 정적 표 권한(첫 실제 표 이후).
+

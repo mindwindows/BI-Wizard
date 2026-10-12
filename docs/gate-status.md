@@ -1,6 +1,6 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-11 작성, 2026-10-12 갱신)
+## 다음 세션 인계 (2026-10-11 작성, 2026-10-12 FU-1 착수 기준으로 갱신)
 
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
@@ -8,18 +8,24 @@
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
 ### 현재 상태
-- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 작업 단위가 끝나 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다).
-- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 787줄이다(EW 결과 반영 뒤, FU-1 기준 약 800줄 이내). **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
-- **EW-1(앱 계정 분리) 완료·검증 통과**(QA 11항목 통과, reviewer 차단 0건, 아래 "EW-1 결과"). 목록 밖 추가 항목은 소급 승인됐다(2026-10-11, `CLAUDE.md` 변경 이력).
-- 코드 상태: backend는 `bi_app`, migrate는 `bi_owner`로만 접속한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. 인증 스텁 엔드포인트와 업무 기능 코드는 없다(`AUTH_STUB_ENABLED` 시작 거부 논리만 있음).
-- **EW-3(Superset 계정·역할) 구현·검증 완료**: `superset-init`이 `migrate`·`db-bootstrap` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 앱 컨텍스트 스크립트로 실행한다. 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본, 처음에만)·`bi_author_schema`(1), 계정 `bi_service`·`bi_guest_issuer`(기본 이름). `.env.example` 30개(Secret 10개). backend는 설정 로딩만(HTTP 호출 코드는 FU-1e). `bi_guest`(권한 4개)와 `GUEST_TOKEN_VALIDATOR_HOOK`은 EW-4에서 구현됐다(아래 "EW-4 결과").
+- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다). 현재 `harness/setup`의 EW-3~EW-8 변경은 아직 `main`에 없다.
+- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절, `04~08` 합계 787줄). **Gate ④**는 대기이며 진입 전 환경 작업(EW-1·3·4·5·6·7·8)이 모두 완료·검증됐다. **FU-1 착수는 새 세션에서, 사용자 승인 뒤에 한다.**
+- **환경 상태:** backend는 `bi_app`, migrate는 `bi_owner`로만 접속(슈퍼유저 접속 없음), db-bootstrap이 매 기동 두 역할의 `NOSUPERUSER NOCREATEDB NOCREATEROLE`을 재차단한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. `superset-init`이 `db-bootstrap`·`migrate` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 실행하고(종료 뒤 `unhealthy` 표시 없음), 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본)·`bi_author_schema`(1)·`bi_guest`(4), `Public` 0개, 계정 `bi_service`·`bi_guest_issuer`, 입장권 검증 훅(거부 5가지)과 `GUEST_TOKEN_JWT_EXP_SECONDS` 300 가드가 있다. `.env.example` 30개(Secret 10개). 인증 스텁은 `AUTH_STUB_ENABLED` 시작 거부 논리만 있고 업무 기능 코드는 없다.
+- **에이전트 모델:** 7개 모두 sonnet, 모델 재판단은 필요 없다(03b 14-1 4번). 호출 시 모델을 바꾸지 않는다.
+- **알려진 현상:** `superset` 컨테이너는 stop 때 약 10초 뒤 exit 137로 종료된다(변경하지 않음, `deploy-coordination.md` 40번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다.
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. ~~EW-1·EW-3·EW-4·EW-5·EW-6·EW-7~~ **모두 완료(2026-10-12).** EW-5~7 결과는 아래 "EW-5~7 결과"와 03b 13절. **사용자 확인 대기 항목이 있다(03b 13-3).** Gate ④ 진입(FU-1 착수)은 사용자 승인 뒤에 한다.
-2. **FU-1로 이월(EW-4 결정):** 훅의 "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 FU-1e에서 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다. 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인). 발급 API 사용자별 429 속도 제한과 backend 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB` 거부, 03b BY3)은 FU-1a·1e 구현분이다.
-3. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차. **착수 전에 에이전트 모델 재판단**이 필요한지 사용자가 정한다(현재 7개 모두 sonnet, 호출 시 모델 변경 금지).
-4. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
-5. **main 반영:** PR #2·#3은 merge가 끝났다. 현재 `harness/setup`의 EW-3~7 변경을 `main`에 반영하려면 **새 PR**이 필요하다(요청받을 때만 만든다).
+1. **AP-15 의존성의 버전·라이선스를 확인해 사용자 승인을 요청한다(FU-1 착수의 첫 일, 승인 전에는 설치·도입하지 않는다):** backend `lark`, 프런트 라우터, AG Grid Community, Superset Embedded SDK(`@superset-ui/embedded-sdk`). 각각 버전, 라이선스(운영 런타임은 허용형 MIT·BSD·Apache·PSF만, GPL·AGPL·EUPL·비오픈소스·`ag-grid-enterprise` 금지), 사용 위치, 대안을 표로 올리고 멈춘다. `httpx`는 승인됐고(03b 3-3) 운영 의존성 승격은 FU-1e에서 한다. 근거 표는 `docs/decisions/04-modules.md` §9-1(AP-15)·`07` §10·`08` §7.
+2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
+3. **FU-1 이월 항목(해당 단위에서 구현하고 검증):**
+   - **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.
+   - **발급 API 사용자별 429 속도 제한(FU-1e):** 한도 값은 구현 때 제안한다(08 §4, 03b 4-4 Z9).
+   - **backend 시작 자가 점검(FU-1a):** 슈퍼유저·`CREATEROLE`·`CREATEDB` 접속 거부와 정적 `MetaData` 연결, `/health` 필드, 스텁 시작 거부(03b 3-6 BY3, `docs/decisions/04-modules.md`).
+   - **정적 표 권한 매트릭스 재확인:** 첫 실제 표 revision `0003` 이후 실제 표로 EW-1 매트릭스(03c X-15 기준)를 다시 확인한다.
+   - 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인).
+4. **FU-1 합격 기준의 위치:** 개요는 `docs/decisions/04-modules.md` §8, 상세는 `docs/decisions/08-superset-embedding.md` §6(P1~P5: 서비스 계정 권한, guest 부정 시험, 훅·입장권, 6가지 차트 임베딩, Superset 불가 시 동작)과 `docs/decisions/07-formula-engine.md` §6(미리보기와 뷰 결과 불일치 0건)이다. 공통 완료 기준은 `feature-unit` 스킬이다.
+5. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위(FU-7)에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
+6. **main 반영:** 작업 단위가 끝나 `main` 반영이 필요해지면 새 PR을 요청받아 만든다(PR #2·#3은 merge 완료).
 
 ### 미결 항목
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
@@ -58,15 +64,16 @@
 - **EW-5(문서·하네스 정리):** 04~08에 EW-1·3·4 결과 반영(합계 787줄), `.claude/agents`·`.claude/skills` 낡은 문구 정리(D2·앱 계정·업로드 상한·9~11번 결정됨, Gate ④ 진입 조건), `CLAUDE.md` 변경 이력 갱신.
 - **EW-6(qa-engineer 통합 검증, 미시험 이월 포함, 실패 0):** 빈 볼륨 새 설치 전체 기동(순서 postgres → db-bootstrap → migrate → backend / superset-init → superset → frontend, superset-init 약 81초), EW-1 재확인(슈퍼유저 접속 0건, 권한 매트릭스, statement_timeout psql 30.14초·Superset 경유 30.1초 취소, db-bootstrap 멱등, 왕복 테스트와 `alembic check`, 스텁 시작 거부), EW-3·4 재확인(역할·계정 멱등, 서비스·발급·작성자 권한), 새 가드 2건, 6가지 차트 임베딩(STRIP false/true 모두), 훅 거부, X-25 부정 시험 86·13·14개 동일, **이월 5건 확인**(`migrate` 없이도 `schema_access` 생성, `migrate` 실패 시 backend·superset-init·superset 미기동, `superset-init` 실패 시 `superset` 미기동, 5분 초과 SDK 자동 갱신 400초 확인, 비밀번호 변경 후 Superset 연결 유지), 로그·`ps`·`docker inspect`의 비밀번호·토큰 0건. `docker stats`: 상시 서비스 idle 합계 약 333MiB, 렌더 중 약 424MiB(8GiB의 약 5%), 한도 합계 4.75GiB(8GiB의 59%), OOMKilled 없음, `superset-init` 최대 약 213MiB.
 - **EW-7(reviewer 최종 점검): 차단 0건.** 슈퍼유저 접속 없음, D3 예외 범위, Secret 로그 0건, 스텁 시작 거부 통과, 사전 승인 필수 범주의 승인 밖 변경 없음(새 환경변수 30개 모두 승인 목록에 근거 있음, 새 의존성 없음, 모델 7개 sonnet).
-- **지적 처리:** 낡은 문구·상태 서술 정리(M1·M2), 적용 후 보고 항목 기록(M3, 03b 13절), `qa-verification` 정리 명령 수정, `bat` 검증 문서·08·deploy-coordination 갱신. **미처리(사용자 확인 대기, 03b 13-3):** `roles.sql`의 기존 `bi_app`·`bi_owner` 슈퍼유저 속성 재차단(R1), `superset` 컨테이너 종료 지연(exit 137), `superset-init` 컨테이너가 `unhealthy`로 표시되는 현상.
+- **지적 처리:** 낡은 문구·상태 서술 정리(M1·M2), 적용 후 보고 항목 기록(M3, 03b 13절), `qa-verification` 정리 명령 수정, `bat` 검증 문서·08·deploy-coordination 갱신. **미처리였던 세 항목은 03b 14-1에서 결정됨(EW-8에서 반영, 아래):** `roles.sql`의 기존 `bi_app`·`bi_owner` 슈퍼유저 속성 재차단(R1), `superset` 컨테이너 종료 지연(exit 137), `superset-init` 컨테이너가 `unhealthy`로 표시되는 현상.
 
+- **EW-8(03b 14-1 ①·③, 2026-10-12, env-engineer 구현, qa-engineer 독립 검증 통과·실패 0):** `roles.sql`에 `bi_owner`·`bi_app`의 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE` 고정 문장 추가(슈퍼유저·`CREATEDB`·`CREATEROLE`을 붙인 뒤 재기동하면 복귀 확인, 권한 매트릭스·비밀번호·`db-bootstrap` 멱등 영향 없음), `superset-init`에 `healthcheck: disable: true`(종료 뒤 `Exited (0)`, `unhealthy` 아님, `superset`의 `depends_on` 동작 불변, 강제 실패 시에도 `superset` 미기동), `ci-validate-env.sh` 검사와 네거티브 시험 4건(시험 116개). `superset` 종료 지연은 알려진 현상으로만 기록.
 
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | **승인** (FU-1 범위) | 2026-10-11 | FU-1 범위의 04~08 승인, 합계 함수 빈 칸 전파, 지원 차트 6가지, 에이전트 모델 3개 sonnet 변경, §9-2 제안·§10 기능 축소 승인, AP-1·2·5·9·10·11·12·13·14·16 승인(AP-15는 FU-1 착수 때 요청). 상세 `03b` 6절 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` |
-| ④ 기능 개발 | 대기 (진입 전 EW-1·EW-3~EW-7 완료·검증 통과, 사용자 확인과 FU-1 착수 승인 대기) | - | - | - |
+| ④ 기능 개발 | 대기 (진입 전 EW-1·EW-3~EW-8 완료·검증 통과, FU-1 착수는 새 세션에서 AP-15 승인 요청부터) | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |

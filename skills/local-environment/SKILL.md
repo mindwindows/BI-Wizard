@@ -43,7 +43,7 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 Azure OpenAI 변수와 `/health/azure-openai`는 없다(브리프 5절 1번: 제외).
 
 ## 4. 출력
-- 컨테이너: `postgres`, `backend`, `frontend`, `superset`은 상시 실행. `db-bootstrap`, `migrate`, `superset-init`은 일회성이라 `Exited (0)`이 정상이다.
+- 컨테이너: `postgres`, `backend`, `frontend`, `superset`은 상시 실행. `db-bootstrap`, `migrate`, `superset-init`은 일회성이라 `Exited (0)`이 정상이다. `superset-init`은 이미지 HEALTHCHECK를 끄므로(`healthcheck: disable: true`) 종료 뒤에도 `unhealthy`가 아니라 `Exited (0)`로 표시된다.
 - 접속 주소(기본값): 포털 `http://localhost:5173/bi-wizard/`, Superset `http://localhost:5173/bi-wizard/superset/`
 - 데이터: Docker 볼륨 `postgres_data`(종료해도 유지).
 - Gate ② 때 만든 볼륨이 이미 있는 PC: `.env`에 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `AUTH_STUB_ENABLED=false`를 추가하고 `up -d --build`만 하면 된다(데이터 유지). `db-bootstrap`이 새 계정을 만들고 기존 `public.alembic_version`의 소유자를 `bi_owner`로 바꾸며, `migrate`가 `0002`를 적용한다.
@@ -149,6 +149,7 @@ Superset 이미지 버전을 올릴 때(6.1.0 고정 변경은 사용자 승인)
 ### db-bootstrap (DB 계정, `bi_data` schema, Superset 메타 DB)
 `docker compose up`마다 일회성 `db-bootstrap`이 `backend/bootstrap/run.sh`를 실행해 `roles.sql`을 적용한다(멱등, `initdb.d` 미사용). 이미지 슈퍼유저로 접속하는 유일한 서비스다.
 - 역할(`LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`): `bi_owner`(마이그레이션 실행, `public` 정적 표와 `bi_data` 소유), `bi_app`(backend 런타임), `bi_readonly`(읽기 전용, `default_transaction_read_only=on`, `statement_timeout=30s`), `superset_meta`(Superset 메타 DB 소유). 데이터베이스 `superset`(소유 `superset_meta`). 이름은 코드 상수다.
+- 속성 재차단(03b 14-1): `CREATE ROLE`은 역할이 없을 때만 실행되므로, 이미 있는 `bi_owner`·`bi_app`에는 매 기동 고정 문장 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE`을 다시 실행한다. 사람이 슈퍼유저·`CREATEDB`·`CREATEROLE`을 붙여도 다음 `docker compose up`에서 되돌아간다(로그인 속성·비밀번호·권한은 그대로). `bi_readonly`·`superset_meta`에는 이 문장이 없다.
 - 빈 schema `bi_data`(소유자 `bi_owner`, PUBLIC 권한 없음): 사용자 데이터 표(`ds_*`)와 수식 뷰(`dv_*`, `de_*`)가 놓일 곳. `bi_data`의 `USAGE/CREATE/SELECT` 권한 부여는 db-bootstrap이 아니라 마이그레이션 `0002`가 한다.
 - `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`: `bi_owner`가 `bi_app`의 상속 멤버여야 마이그레이션이 `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app …`을 실행할 수 있다(`SET ROLE bi_app`은 불가). 반복 실행하면 NOTICE만 난다.
 - `public` schema: `bi_owner`에 `CREATE`를 주고 PUBLIC의 `CREATE`는 회수한다. Gate ② 볼륨의 `alembic_version` 소유자를 `bi_owner`로 바꾼다.
@@ -211,6 +212,7 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 | Superset 로그인 화면에서 접두 없는 일러스트 이미지 요청이 404(404 페이지 그림). 올바른 경로 `${SUPERSET_APP_ROOT}/static/assets/<해시>.png`는 200 | 알려진 Superset 6.1.0 현상(이미지 요청 경로에 접두가 빠짐). 접두 밖 요청이 이제 404로 드러난다 | 화면 기능에는 영향이 없다. Superset 내부 코드는 수정하지 않는다 |
 | Embedded iframe이 "Something went wrong with embedded authentication"으로 실패 | **하위 경로 때문이 아니다.** guest 역할(`GUEST_ROLE_NAME`)에 권한이 없거나 역할이 없으면 `GET ${SUPERSET_APP_ROOT}/api/v1/me/roles/`가 403·500을 낸다(기본값 `Public`은 권한이 0개라 실패한다). 공식 Embedded SDK README도 guest가 `GUEST_ROLE_NAME` 역할로 동작한다고 설명한다 | EW-4부터 `GUEST_ROLE_NAME=bi_guest`(4권한)이고 `superset-init`이 매 기동 만든다. `docker compose logs superset-init`에서 `역할 bi_guest: 권한 4개 적용`을 확인한다. 권한을 임의로 늘리지 않는다(사용자 승인 필요) |
 | Superset이 갑자기 502/지연 후 복구 | 메모리 한도 초과로 컨테이너가 재시작됨(137) | `docker compose ps`, `docker stats --no-stream`, `docker compose logs superset` |
+| `docker compose stop`/`restart` 때 `superset`이 10초쯤 걸리고 exit 137로 끝남 | **알려진 현상**(03b 14-1 ②): `superset`(gunicorn)이 SIGTERM에 반응하지 않아 stop 유예 10초 뒤 강제 종료된다. 원인 미확인, 기능 영향 없음, compose는 바꾸지 않았다 | 조치 없음. 메모리 초과(137 + 재시작)와 구별하려면 `docker inspect -f '{{.State.OOMKilled}}' <컨테이너>`가 `false`인지 본다 |
 | 포털에서 API 오류 | 경로 값 불일치, backend 비정상 | `health-check.bat`, `docker compose logs backend frontend` |
 | BAT 출력이 영어다 | 일부 Windows cmd에서 UTF-8 BAT가 `goto` 레이블 탐색을 깨뜨릴 수 있어 BAT는 ASCII(영문)로만 쓴다 | 정상이다. 설명은 이 문서와 README에 있다. 성공은 `[OK]`, 실패는 `[FAIL]`, `.env` 검사는 `[MISSING]`/`[EMPTY]`로 표시한다 |
 | BAT가 이상하게 동작 | 줄바꿈이 LF로 바뀜 | `.gitattributes`가 BAT를 CRLF로 고정한다. 저장소를 다시 체크아웃 |

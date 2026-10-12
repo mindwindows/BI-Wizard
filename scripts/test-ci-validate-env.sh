@@ -145,6 +145,9 @@ expect_fail "roles.sql INHERIT FALSE" "필수 문장이 없습니다: GRANT bi_a
 expect_fail "roles.sql statement_timeout 없음" "필수 문장이 없습니다: ALTER ROLE bi_readonly SET statement_timeout" sed_roles "/statement_timeout/d"
 expect_fail "roles.sql public CREATE 회수 없음" "필수 문장이 없습니다: REVOKE CREATE ON SCHEMA public FROM PUBLIC" sed_roles "/^REVOKE CREATE ON SCHEMA public FROM PUBLIC/d"
 expect_fail "roles.sql bi_data 소유자" "필수 문장이 없습니다: CREATE SCHEMA IF NOT EXISTS bi_data AUTHORIZATION bi_owner" sed_roles "s/AUTHORIZATION bi_owner/AUTHORIZATION bi_app/"
+expect_fail "roles.sql bi_app 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "/^ALTER ROLE bi_app NOSUPERUSER/d"
+expect_fail "roles.sql bi_owner 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_owner NOSUPERUSER" sed_roles "/^ALTER ROLE bi_owner NOSUPERUSER/d"
+expect_fail "roles.sql bi_app 재차단이 CREATEROLE 허용" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "s/^ALTER ROLE bi_app NOSUPERUSER NOCREATEDB NOCREATEROLE;/ALTER ROLE bi_app NOSUPERUSER NOCREATEDB CREATEROLE;/"
 expect_fail "roles.sql 추가 \\getenv" "\\getenv 는 비밀번호 변수 4개뿐" append_roles '\getenv extra SOME_OTHER_VARIABLE'
 expect_fail "roles.sql \\getenv 누락" "필수 문장이 없습니다: \\getenv app_pw POSTGRES_APP_PASSWORD" sed_roles '/^\\getenv app_pw/d'
 
@@ -193,6 +196,7 @@ expect_fail "migrate가 superset에 의존(순환)" "순환 의존" add_after_se
 expect_fail "backend의 SUPERSET_SERVICE_PASSWORD 필수 처리(:?) 제거" "backend 서비스의 SUPERSET_SERVICE_PASSWORD 가" replace_in_service backend '${SUPERSET_SERVICE_PASSWORD:?' '${SUPERSET_SERVICE_PASSWORD:-x'
 expect_fail "backend의 SUPERSET_APP_ROOT 필수 처리(:?) 제거" "backend 서비스의 SUPERSET_APP_ROOT 가" replace_in_service backend '${SUPERSET_APP_ROOT:?' '${SUPERSET_APP_ROOT'
 expect_fail "superset-init의 SUPERSET_GUEST_ISSUER_USER 필수 처리(:?) 제거" "superset-init 서비스의 SUPERSET_GUEST_ISSUER_USER 가" replace_in_service superset-init '${SUPERSET_GUEST_ISSUER_USER:?' '${SUPERSET_GUEST_ISSUER_USER-'
+expect_fail "superset-init healthcheck 비활성화 제거" "superset-init 서비스에 healthcheck" delete_in_service superset-init "      disable: true"
 expect_fail "superset-init의 migrate 조건을 service_started로" "superset-init 서비스가 migrate 완료" migrate_condition_started
 expect_fail "frontend에 서비스 계정 이름" "frontend 서비스에 DB/Secret/스텁 변수" add_after_service frontend '      SUPERSET_SERVICE_USER: ${SUPERSET_SERVICE_USER}'
 expect_fail "postgres-test에 서비스 계정 비밀번호" "postgres-test 서비스에 SUPERSET_SERVICE_PASSWORD" add_after_service postgres-test '      SUPERSET_SERVICE_PASSWORD: ${SUPERSET_SERVICE_PASSWORD}'
