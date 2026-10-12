@@ -168,8 +168,10 @@ def test_validation_error_is_converted(client):
     for f in fields.values():
         assert set(f) == {"field", "code", "message"}
     # 입력 값은 응답에 되돌려 주지 않는다.
-    assert "toolongname" not in response.text
-    assert "abc" not in response.text
+    # request_id는 무작위 16진수라 "abc"가 우연히 들어갈 수 있으므로 뺀 본문으로 비교한다.
+    text = response.text.replace(error["request_id"], "")
+    assert "toolongname" not in text
+    assert "abc" not in text
 
 
 def test_validation_error_for_broken_json(client):

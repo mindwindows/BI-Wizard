@@ -181,7 +181,6 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
 ```
 docker compose --profile test stop postgres-test
 docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이너만 제거(tmpfs 데이터도 사라짐)
-docker compose --profile test down                    # 프로젝트 전체 종료(운영 데이터 볼륨은 유지)
 ```
 - 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: 첫 실제 revision(`0002`)의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다.
 - 자동 생성 초안(`alembic revision --autogenerate`)에 `DROP`이 있으면 적용하지 말고 사용자 확인을 받는다(D2: `public` 정적 표 대상). 동적 객체(`bi_data`의 `ds_*`, `dv_*`, `de_*`)는 `target_metadata`(`backend/app/db_metadata.py`, 정적 표만)와 `include_name`/`include_object` 필터로 비교에서 제외되어 삭제 후보에 섞이지 않는다. 권한(GRANT)은 `alembic check`가 잡지 못하므로 위 스냅샷 비교로 확인한다.
