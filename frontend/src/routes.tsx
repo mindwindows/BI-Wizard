@@ -2,6 +2,9 @@ import { createBrowserRouter, createMemoryRouter, type RouteObject } from "react
 import { getConfig } from "./config";
 import { AccessDenied } from "./features/access/AccessDenied";
 import { PermissionsPage } from "./features/access/permissions/PermissionsPage";
+import { DatasetCreatePage } from "./features/dataset/DatasetCreatePage";
+import { DatasetListPage } from "./features/dataset/DatasetListPage";
+import { WorkspacePage } from "./features/dataset/workspace/WorkspacePage";
 import { Home } from "./pages/Home";
 import { Placeholder } from "./pages/Placeholder";
 import { RouteError, Shell } from "./Shell";
@@ -24,9 +27,9 @@ export const routes: RouteObject[] = [
     children: [
       { index: true, element: <Home /> },
       { path: "access-denied", element: <AccessDenied /> },
-      { path: "datasets", element: <Placeholder screen="S2" title="데이터셋 목록" unit="단위 1b" /> },
-      { path: "datasets/new", element: <Placeholder screen="S3" title="데이터셋 만들기" unit="단위 1b" /> },
-      { path: "datasets/:datasetId", element: <Placeholder screen="S4" title="작업공간" unit="단위 1b~1d" /> },
+      { path: "datasets", element: <DatasetListPage /> },
+      { path: "datasets/new", element: <DatasetCreatePage /> },
+      { path: "datasets/:datasetId", element: <WorkspacePage /> },
       { path: "checks", element: <Placeholder screen="S5" title="점검" unit="단위 1d" /> },
       { path: "admin/permissions", element: <PermissionsPage /> },
       { path: "dashboards", element: <Placeholder screen="S7" title="대시보드" unit="단위 1e" /> },

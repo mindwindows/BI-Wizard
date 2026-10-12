@@ -299,3 +299,143 @@ button.link {
 .modal h2 {
   margin-top: 0;
 }
+
+/* ---- 단위 1b: S2 목록, S3 만들기, S4 작업공간(3분할)과 Inspector ---- */
+.button-link {
+  display: inline-block;
+  padding: 4px 12px;
+  border: 1px solid #1d6fd6;
+  border-radius: 4px;
+  background: #1d6fd6;
+  color: #fff;
+  text-decoration: none;
+}
+
+.list-table {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #cbd2d9;
+}
+
+.list-table th,
+.list-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #e4e7eb;
+}
+
+.list-table thead th {
+  background: #f0f2f5;
+}
+
+.workspace-grid {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.workspace-left {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 480px;
+  padding: 8px;
+  border: 1px dashed #cbd2d9;
+  background: #fff;
+}
+
+.inspector {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.inspector.collapsed {
+  padding: 4px;
+}
+
+.inspector-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.inspector-bar input[type="range"] {
+  flex: 1;
+}
+
+.inspector-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector-form h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.field .hint {
+  font-size: 12px;
+}
+
+.info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.info dt {
+  color: #616e7c;
+}
+
+.info dd {
+  margin: 0;
+}
+
+.column-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.column-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.column-list button.selected,
+.header-preview th.selected {
+  background: #d9e8fb;
+}
+
+.header-preview {
+  margin: 0;
+}
+
+.header-preview th {
+  padding: 6px 16px;
+  border-bottom: 2px solid #9aa5b1;
+  white-space: nowrap;
+}

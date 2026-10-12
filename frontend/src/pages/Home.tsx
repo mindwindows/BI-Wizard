@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { checkApi, checkDatabase, type HealthResult } from "../api";
 import { Loading } from "../components";
 import { useMe } from "../features/access/MeContext";
-import { ROLE_LABELS } from "../features/access/types";
+import { ROLE_LABELS, isActiveMembership } from "../features/access/types";
 
 type Status = HealthResult | "checking";
 
@@ -58,7 +58,10 @@ export function Home() {
               <tbody>
                 {me.memberships.map((m) => (
                   <tr key={m.team_id}>
-                    <td>{m.team_name}</td>
+                    <td>
+                      {m.team_name}
+                      {isActiveMembership(m) ? null : <span className="badge badge-off">비활성</span>}
+                    </td>
                     <td>{ROLE_LABELS[m.role] ?? m.role}</td>
                     <td>{m.team_id === workTeamId ? "선택됨" : ""}</td>
                   </tr>

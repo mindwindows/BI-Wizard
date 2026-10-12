@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError } from "../../api";
 import { getMe } from "./api";
-import type { Me } from "./types";
+import { isActiveMembership, type Me } from "./types";
 
 export type DenyReason = "UNAUTHENTICATED" | "USER_NOT_REGISTERED" | "USER_INACTIVE";
 
@@ -77,10 +77,10 @@ export function MeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<MeContextValue>(() => {
-    // 저장된 값이 현재 소속에 없으면(사용자 전환, 소속 해제) 첫 소속 팀을 쓴다.
+    // 저장된 값이 현재 소속에 없거나 비활성 팀이면(사용자 전환, 소속 해제, 팀 비활성) 첫 활성 팀을 쓴다.
     let workTeamId: number | null = null;
     if (state.status === "ready") {
-      const teams = state.me.memberships;
+      const teams = state.me.memberships.filter(isActiveMembership);
       workTeamId = teams.some((m) => m.team_id === storedTeam) ? storedTeam : (teams[0]?.team_id ?? null);
     }
     return { state, workTeamId, setWorkTeamId, refresh };

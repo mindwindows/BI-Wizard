@@ -10,6 +10,8 @@ export interface Membership {
   team_id: number;
   team_code: string;
   team_name: string;
+  /** 05 A1: 비활성 팀 소속도 응답에 나오며 화면은 이 값으로 작업 팀 선택에서 거른다. */
+  team_is_active: boolean;
   role: TeamRole;
 }
 
@@ -60,6 +62,13 @@ export interface StubUsers {
   /** 현재 선택된 스텁 login_id. 없으면 null. */
   current: string | null;
 }
+
+/** 05 §1 이름 규칙: 사용자 표시 이름 100자, 로그인 ID 200자(03b 17-1 결정 4). */
+export const USER_DISPLAY_NAME_MAX = 100;
+export const LOGIN_ID_MAX = 200;
+
+/** `team_is_active`가 false인 소속은 비활성 팀이다. */
+export const isActiveMembership = (m: Membership): boolean => m.team_is_active !== false;
 
 /** 05 §1: 팀 표시 이름 상한 50자, A3 code 형식. */
 export const TEAM_NAME_MAX = 50;

@@ -125,11 +125,11 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
   it("칸을 바꿔도 확인 전에는 아무것도 호출하지 않고, 돌아가기를 누르면 호출 없이 닫는다", async () => {
     const { calls } = setup();
     await openS6();
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
     expect(screen.getByText("변경 목록 (1건)")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("소속 추가: 퇴사자 이 → 영업 (입력자)")).toBeTruthy();
+    expect(within(dialog).getByText("소속 추가: 입력자 박 → 영업 (입력자)")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "돌아가기" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(writes(calls)).toEqual([]);
@@ -153,7 +153,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
       "PATCH /teams/10": () => json(200, TEAMS[0]),
       "PATCH /users/1": () => json(200, USERS[0]),
       "PATCH /users/2": () => json(200, USERS[1]),
-      "PUT /teams/10/members/3": () => json(200, { team_id: 10, user_id: 3, role: "entry" }),
+      "PUT /teams/10/members/2": () => json(200, { team_id: 10, user_id: 2, role: "entry" }),
       "PUT /teams/10/members/1": () => json(200, { team_id: 10, user_id: 1, role: "entry" }),
       "DELETE /teams/20/members/2": () => noContent(),
     });
@@ -183,7 +183,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
     // 5) 소속 해제, 역할 변경, 소속 추가
     fireEvent.change(cell("입력자 박", "운영"), { target: { value: "" } });
     fireEvent.change(cell("관리자 김", "영업"), { target: { value: "entry" } });
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
 
     expect(screen.getByText("변경 목록 (7건)")).toBeTruthy();
     expect(writes(calls)).toEqual([]);
@@ -196,7 +196,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
       "사용자 사전 등록: 신입 최 (new1), 관리자",
       '팀 수정: 영업 - 이름을 "영업1팀"(으)로 변경',
       "역할 변경: 관리자 김 / 영업 (정의 담당자 → 입력자)",
-      "소속 추가: 퇴사자 이 → 영업 (입력자)",
+      "소속 추가: 입력자 박 → 영업 (입력자)",
       "소속 해제: 입력자 박 ← 운영 (현재 입력자)",
       "사용자 수정: 관리자 김 - 관리자 권한 해제",
     ]);
@@ -209,7 +209,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
       "POST /users",
       "PATCH /teams/10",
       "PUT /teams/10/members/1",
-      "PUT /teams/10/members/3",
+      "PUT /teams/10/members/2",
       "DELETE /teams/20/members/2",
       "PATCH /users/1",
     ]);
@@ -218,7 +218,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
     expect(byKey("POST", "/users").body).toEqual({ login_id: "new1", display_name: "신입 최", is_admin: true });
     expect(byKey("PATCH", "/teams/10").body).toEqual({ name: "영업1팀" });
     expect(byKey("PUT", "/teams/10/members/1").body).toEqual({ role: "entry" });
-    expect(byKey("PUT", "/teams/10/members/3").body).toEqual({ role: "entry" });
+    expect(byKey("PUT", "/teams/10/members/2").body).toEqual({ role: "entry" });
     expect(byKey("DELETE", "/teams/20/members/2").body).toBeUndefined();
     expect(byKey("PATCH", "/users/1").body).toEqual({ is_admin: false });
 
@@ -260,19 +260,19 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
   it("LAST_ADMIN 409는 쉬운 문구로 알리고, 뒤 변경은 실행하지 않고, 실패분은 목록에 남긴다", async () => {
     const { calls } = setup({
       "PATCH /users/1": () => apiError(409, "LAST_ADMIN", "서버 내부 문구"),
-      "PUT /teams/10/members/3": () => json(200, { team_id: 10, user_id: 3, role: "entry" }),
+      "PUT /teams/10/members/2": () => json(200, { team_id: 10, user_id: 2, role: "entry" }),
     });
     await openS6();
     fireEvent.click(screen.getByRole("button", { name: "관리자 김 수정" }));
     const form = screen.getByRole("form", { name: "사용자 수정: 관리자 김" });
     fireEvent.click(within(form).getByLabelText("관리자"));
     fireEvent.click(within(form).getByRole("button", { name: "변경 목록에 담기" }));
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
     fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
     fireEvent.click(screen.getByRole("button", { name: "확인하고 저장" }));
     await screen.findByText("저장 결과");
     // 소속 추가(권한을 거두지 않는 변경)가 먼저 성공하고, 관리자 해제가 마지막에 실패한다.
-    expect(writes(calls)).toEqual(["PUT /teams/10/members/3", "PATCH /users/1"]);
+    expect(writes(calls)).toEqual(["PUT /teams/10/members/2", "PATCH /users/1"]);
     const alert = screen.getByRole("dialog").querySelector("[role=alert]")!;
     expect(alert.textContent).toContain("마지막 관리자");
     expect(alert.textContent).not.toContain("서버 내부 문구");
@@ -290,7 +290,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
     fireEvent.change(within(teamForm).getByLabelText("팀 코드"), { target: { value: "hr" } });
     fireEvent.change(within(teamForm).getByLabelText("팀 이름"), { target: { value: "인사" } });
     fireEvent.click(within(teamForm).getByRole("button", { name: "변경 목록에 담기" }));
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
     fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
     fireEvent.click(screen.getByRole("button", { name: "확인하고 저장" }));
     await screen.findByText("저장 결과");
@@ -319,7 +319,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
   it("Escape로 확인창을 닫을 수 있고 호출은 없다", async () => {
     const { calls } = setup();
     await openS6();
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
     fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -329,7 +329,7 @@ describe("S6 변경 요약 확인창 (저장 전 확인)", () => {
   it("빼기와 모두 취소로 변경 목록을 비울 수 있다", async () => {
     setup();
     await openS6();
-    fireEvent.change(cell("퇴사자 이", "영업"), { target: { value: "entry" } });
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
     fireEvent.change(cell("관리자 김", "영업"), { target: { value: "entry" } });
     fireEvent.click(screen.getByRole("button", { name: /^빼기: 소속 추가/ }));
     expect(screen.getByText("변경 목록 (1건)")).toBeTruthy();
@@ -389,5 +389,91 @@ describe("S6 입력 검증", () => {
     const form = screen.getByRole("form", { name: "사용자 사전 등록" });
     fireEvent.click(within(form).getByRole("button", { name: "변경 목록에 담기" }));
     expect(within(form).getByRole("alert").textContent).toContain("입력해 주세요");
+  });
+});
+
+describe("S6 비활성 팀·사용자 칸 (03b 17-1 결정 3: 소속 추가·변경은 서버가 409)", () => {
+  it("비활성 사용자 칸(소속 없음)과 비활성 팀 칸(소속 없음)은 컨트롤이 비활성이다", async () => {
+    setup();
+    await openS6();
+    expect(cell("퇴사자 이", "영업").disabled).toBe(true);
+    expect(cell("퇴사자 이", "운영").disabled).toBe(true);
+    expect(cell("관리자 김", "운영").disabled).toBe(true);
+    // 활성 사용자 x 활성 팀 칸은 그대로 쓸 수 있다.
+    expect(cell("입력자 박", "영업").disabled).toBe(false);
+    expect(cell("관리자 김", "영업").disabled).toBe(false);
+  });
+
+  it("이미 소속이 있는 비활성 팀 칸은 역할 변경·추가 선택이 막히고 소속 해제만 가능하다", async () => {
+    const { calls } = setup({ "DELETE /teams/20/members/2": () => noContent() });
+    await openS6();
+    const select = cell("입력자 박", "운영");
+    expect(select.disabled).toBe(false);
+    const option = (name: string) => within(select).getByRole("option", { name }) as HTMLOptionElement;
+    expect(option("정의 담당자").disabled).toBe(true);
+    expect(option("입력자").disabled).toBe(false); // 현재 값
+    expect(option("소속 없음").disabled).toBe(false);
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "확인하고 저장" }));
+    await screen.findByText("저장 결과");
+    expect(writes(calls)).toEqual(["DELETE /teams/20/members/2"]);
+  });
+
+  it("비활성 안내 문구를 격자 위에 보여 준다", async () => {
+    setup();
+    await openS6();
+    expect(screen.getByTestId("inactive-guide").textContent).toContain("비활성 팀이나 사용자에게는 소속을 지정할 수 없습니다");
+  });
+
+  it("서버가 409 TARGET_INACTIVE를 주면 결과 창에 details.field별 문구를 보여 준다", async () => {
+    setup({
+      // 화면이 막아도 서버가 최종 방어선이다: 목록이 낡았을 때 오는 409를 그대로 문구로 보여 준다.
+      "PUT /teams/10/members/2": () => apiError(409, "TARGET_INACTIVE", "서버 문구", { field: "team_id" }),
+    });
+    await openS6();
+    fireEvent.change(cell("입력자 박", "영업"), { target: { value: "entry" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "확인하고 저장" }));
+    await screen.findByText("저장 결과");
+    const alert = within(screen.getByRole("dialog")).getByRole("alert");
+    expect(alert.textContent).toContain("비활성 팀");
+    expect(alert.textContent).not.toContain("서버 문구");
+  });
+});
+
+describe("S6 길이 상한 (05 §1: 사용자 표시 이름 100자, 로그인 ID 200자)", () => {
+  it("사용자 등록 입력은 maxLength 200/100이다", async () => {
+    setup();
+    await openS6();
+    const form = screen.getByRole("form", { name: "사용자 사전 등록" });
+    expect((within(form).getByLabelText("로그인 ID") as HTMLInputElement).maxLength).toBe(200);
+    expect((within(form).getByLabelText("표시 이름") as HTMLInputElement).maxLength).toBe(100);
+  });
+
+  it("사용자 수정의 표시 이름도 maxLength 100이다", async () => {
+    setup();
+    await openS6();
+    fireEvent.click(screen.getByRole("button", { name: "입력자 박 수정" }));
+    const form = screen.getByRole("form", { name: "사용자 수정: 입력자 박" });
+    expect((within(form).getByLabelText("표시 이름") as HTMLInputElement).maxLength).toBe(100);
+  });
+
+  it("붙여넣기 등으로 한도를 넘긴 값은 제출 때 한 번 더 막는다", async () => {
+    setup();
+    await openS6();
+    const form = screen.getByRole("form", { name: "사용자 사전 등록" });
+    fireEvent.change(within(form).getByLabelText("로그인 ID"), { target: { value: "a".repeat(201) } });
+    fireEvent.change(within(form).getByLabelText("표시 이름"), { target: { value: "이름" } });
+    fireEvent.click(within(form).getByRole("button", { name: "변경 목록에 담기" }));
+    expect(within(form).getByRole("alert").textContent).toContain("200자");
+    fireEvent.change(within(form).getByLabelText("로그인 ID"), { target: { value: "ok" } });
+    fireEvent.change(within(form).getByLabelText("표시 이름"), { target: { value: "가".repeat(101) } });
+    fireEvent.click(within(form).getByRole("button", { name: "변경 목록에 담기" }));
+    expect(within(form).getByRole("alert").textContent).toContain("100자");
+    expect(screen.getByText("변경 목록 (0건)")).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText("표시 이름"), { target: { value: "가".repeat(100) } });
+    fireEvent.click(within(form).getByRole("button", { name: "변경 목록에 담기" }));
+    expect(screen.getByText("변경 목록 (1건)")).toBeTruthy();
   });
 });

@@ -3,7 +3,16 @@ import { ErrorNotice, Loading } from "../../../components";
 import { describeApiError } from "../../../errors";
 import { listAllTeams, listUsers } from "../api";
 import { useMe } from "../MeContext";
-import { ROLE_LABELS, TEAM_CODE_PATTERN, TEAM_NAME_MAX, type Team, type TeamRole, type User } from "../types";
+import {
+  LOGIN_ID_MAX,
+  ROLE_LABELS,
+  TEAM_CODE_PATTERN,
+  TEAM_NAME_MAX,
+  USER_DISPLAY_NAME_MAX,
+  type Team,
+  type TeamRole,
+  type User,
+} from "../types";
 import {
   applyChange,
   describeChange,
@@ -202,6 +211,11 @@ function PermissionsConsole() {
             </p>
           ) : null}
           {users.length > 0 ? (
+            <p className="muted" data-testid="inactive-guide">
+              비활성 팀이나 사용자에게는 소속을 지정할 수 없습니다(이미 있는 소속은 해제만 가능). 필요하면 먼저 다시 사용 상태로 바꿔 주세요.
+            </p>
+          ) : null}
+          {users.length > 0 ? (
             <div className="grid-scroll">
               <table className="matrix" aria-label="팀과 사용자 권한">
                 <thead>
@@ -239,16 +253,26 @@ function PermissionsConsole() {
                         const change = staged[memberKey(team.id, user.id)];
                         const value: "" | TeamRole =
                           change?.kind === "member_set" ? change.role : change?.kind === "member_remove" ? "" : (roleOf(user, team.id) ?? "");
+                        // 비활성 팀·사용자 칸: 소속 추가·역할 변경 컨트롤은 막는다(서버는 409 TARGET_INACTIVE, 최종 방어선).
+                        // 이미 있는 소속의 해제(A9)는 서버가 허용하므로 "소속 없음" 선택만 남긴다.
+                        const blocked = !team.is_active || !user.is_active;
+                        const original = roleOf(user, team.id);
+                        const noOption = (role: TeamRole) => blocked && value !== role;
                         return (
                           <td key={team.id} className={change ? "changed" : ""}>
                             <select
                               aria-label={`${user.display_name} - ${team.name} 역할`}
                               value={value}
+                              disabled={blocked && original === null && change === undefined}
                               onChange={(event) => onRoleChange(user, team, event.target.value as "" | TeamRole)}
                             >
                               <option value="">소속 없음</option>
-                              <option value="definer">{ROLE_LABELS.definer}</option>
-                              <option value="entry">{ROLE_LABELS.entry}</option>
+                              <option value="definer" disabled={noOption("definer")}>
+                                {ROLE_LABELS.definer}
+                              </option>
+                              <option value="entry" disabled={noOption("entry")}>
+                                {ROLE_LABELS.entry}
+                              </option>
                             </select>
                           </td>
                         );
@@ -477,6 +501,14 @@ function UserCreateForm({ staged, onStage }: { staged: Staged; onStage: (key: st
       setError("로그인 ID와 표시 이름을 입력해 주세요.");
       return;
     }
+    if (login.length > LOGIN_ID_MAX) {
+      setError(`로그인 ID는 ${LOGIN_ID_MAX}자 이하로 입력해 주세요.`);
+      return;
+    }
+    if (display.length > USER_DISPLAY_NAME_MAX) {
+      setError(`표시 이름은 ${USER_DISPLAY_NAME_MAX}자 이하로 입력해 주세요.`);
+      return;
+    }
     if (staged[newUserKey(login)]) {
       setError("같은 로그인 ID가 이미 변경 목록에 있습니다.");
       return;
@@ -493,11 +525,11 @@ function UserCreateForm({ staged, onStage }: { staged: Staged; onStage: (key: st
       <h2>사용자 사전 등록</h2>
       <label>
         로그인 ID
-        <input value={loginId} onChange={(event) => setLoginId(event.target.value)} />
+        <input value={loginId} maxLength={LOGIN_ID_MAX} onChange={(event) => setLoginId(event.target.value)} />
       </label>
       <label>
         표시 이름
-        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input value={displayName} maxLength={USER_DISPLAY_NAME_MAX} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       <label className="inline">
         <input type="checkbox" checked={isAdmin} onChange={(event) => setIsAdmin(event.target.checked)} />
@@ -592,6 +624,10 @@ function UserEditPanel({
       setError("표시 이름을 입력해 주세요.");
       return;
     }
+    if (trimmed.length > USER_DISPLAY_NAME_MAX) {
+      setError(`표시 이름은 ${USER_DISPLAY_NAME_MAX}자 이하로 입력해 주세요.`);
+      return;
+    }
     const change: Change = { kind: "user_update", userId: user.id, label: user.display_name };
     if (trimmed !== user.display_name) change.display_name = trimmed;
     if (isAdmin !== user.is_admin) change.is_admin = isAdmin;
@@ -607,7 +643,7 @@ function UserEditPanel({
       <p className="muted">로그인 ID {user.login_id}는 바꿀 수 없습니다.</p>
       <label>
         표시 이름
-        <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input value={displayName} maxLength={USER_DISPLAY_NAME_MAX} onChange={(event) => setDisplayName(event.target.value)} />
       </label>
       <label className="inline">
         <input type="checkbox" checked={isAdmin} onChange={(event) => setIsAdmin(event.target.checked)} />

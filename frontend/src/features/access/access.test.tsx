@@ -94,6 +94,19 @@ describe("/me 상태별 화면", () => {
     expect(screen.getByRole("alert").textContent).toContain("문의 번호: req-test");
   });
 
+  it("503 SERVICE_UNAVAILABLE: 접근 안내가 아니라 일시 장애 문구와 다시 시도(로그아웃과 구분)", async () => {
+    let n = 0;
+    const { calls } = withMe(() => (n++ === 0 ? apiError(503, "SERVICE_UNAVAILABLE") : json(200, MEMBER_ME)));
+    open();
+    const retry = await screen.findByRole("button", { name: "다시 시도" });
+    expect(screen.getByRole("alert").textContent).toContain("서버가 일시적으로 응답하지 못합니다. 잠시 뒤 다시 시도하세요");
+    expect(screen.queryByRole("heading", { name: /접근 권한이 없습니다/ })).toBeNull();
+    expect(screen.queryByTestId("access-denied-guide")).toBeNull();
+    fireEvent.click(retry);
+    expect(await screen.findByRole("navigation", { name: "주 메뉴" })).toBeTruthy();
+    expect(calls.filter((c) => c.path === "/me")).toHaveLength(2);
+  });
+
   it("계약과 다른 /me 응답은 오류로 처리한다", async () => {
     withMe(() => json(200, { hello: "x" }));
     open();
@@ -141,6 +154,52 @@ describe("작업 팀 선택", () => {
     withMe(() => json(200, ADMIN_ME));
     open();
     expect(((await screen.findByLabelText("작업 팀")) as HTMLSelectElement).value).toBe("10");
+  });
+
+  const MIXED_ME = {
+    ...ADMIN_ME,
+    memberships: [
+      { team_id: 10, team_code: "old", team_name: "폐쇄팀", team_is_active: false, role: "definer" },
+      { team_id: 20, team_code: "ops", team_name: "운영", team_is_active: true, role: "entry" },
+      { team_id: 30, team_code: "hr", team_name: "인사", team_is_active: true, role: "definer" },
+    ],
+  };
+
+  it("비활성 팀은 선택할 수 없고, 기본 선택은 첫 활성 팀이다", async () => {
+    withMe(() => json(200, MIXED_ME));
+    open();
+    const select = (await screen.findByLabelText("작업 팀")) as HTMLSelectElement;
+    expect(select.value).toBe("20");
+    const inactive = within(select).getByRole("option", { name: /폐쇄팀/ }) as HTMLOptionElement;
+    expect(inactive.disabled).toBe(true);
+    expect(inactive.textContent).toContain("비활성");
+    expect((within(select).getByRole("option", { name: "운영" }) as HTMLOptionElement).disabled).toBe(false);
+  });
+
+  it("저장된 선택이 비활성 팀이면 첫 활성 팀을 쓴다", async () => {
+    window.sessionStorage.setItem(WORK_TEAM_STORAGE_KEY, "10");
+    withMe(() => json(200, MIXED_ME));
+    open();
+    expect(((await screen.findByLabelText("작업 팀")) as HTMLSelectElement).value).toBe("20");
+  });
+
+  it("활성 팀이 하나도 없으면 작업 팀이 없다는 안내를 보인다", async () => {
+    withMe(() =>
+      json(200, { ...MEMBER_ME, memberships: [{ team_id: 20, team_code: "ops", team_name: "운영", team_is_active: false, role: "entry" }] }),
+    );
+    open();
+    expect(await screen.findByText("활성 팀 없음")).toBeTruthy();
+    expect(screen.queryByLabelText("작업 팀")).toBeNull();
+  });
+
+  it("홈의 소속 목록은 비활성 팀에 '비활성'을 표시한다", async () => {
+    withMe(() => json(200, MIXED_ME));
+    open();
+    const table = await screen.findByRole("table", { name: "소속 팀" });
+    const row = within(table).getByText("폐쇄팀").closest("tr")!;
+    expect(within(row).getByText("비활성")).toBeTruthy();
+    expect(within(table).getByText("운영").closest("tr")!.textContent).not.toContain("비활성");
+    expect(within(row).queryByText("선택됨")).toBeNull();
   });
 
   it("선택은 서버로 보내지 않는다(쓰기 호출 없음)", async () => {

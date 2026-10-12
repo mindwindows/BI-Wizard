@@ -50,8 +50,8 @@ export const ADMIN_ME = {
   is_active: true,
   is_admin: true,
   memberships: [
-    { team_id: 10, team_code: "sales", team_name: "영업", role: "definer" },
-    { team_id: 20, team_code: "ops", team_name: "운영", role: "entry" },
+    { team_id: 10, team_code: "sales", team_name: "영업", team_is_active: true, role: "definer" },
+    { team_id: 20, team_code: "ops", team_name: "운영", team_is_active: true, role: "entry" },
   ],
 };
 
@@ -60,7 +60,7 @@ export const MEMBER_ME = {
   display_name: "입력자 박",
   is_active: true,
   is_admin: false,
-  memberships: [{ team_id: 20, team_code: "ops", team_name: "운영", role: "entry" }],
+  memberships: [{ team_id: 20, team_code: "ops", team_name: "운영", team_is_active: true, role: "entry" }],
 };
 
 export const HEALTH_HANDLERS: Record<string, Handler> = {
