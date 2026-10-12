@@ -458,3 +458,17 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 ### 17-2. 이어서 진행
 - 1b(데이터셋·열 정의)와 1c(입력 그리드, AG Grid Community 36.2.0 설치)를 이어서 진행하고 **1c를 마친 뒤 보고하고 멈춘다.** 각 단위는 구현 → 테스트 → 제품 Skill → QA → reviewer.
 - 1a·1b·1c 주요 화면을 Playwright로 1920×1080 스크린샷을 찍어 `docs/screens/fu1/`에 PNG로 커밋한다(파일 이름에 화면과 상태, 비밀값 비노출 확인).
+
+## 18. FU-1 단위 1b·1c 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 18-1. 결과
+- **1a 결정 7건(17-1) 반영:** 422 통일·405·503 `SERVICE_UNAVAILABLE`·409 `TARGET_INACTIVE`(`details.field`=`team`/`user`)·`team_is_active`·`public_create` 시작 거부·nginx 루트 SPA fallback·`REQUIRE_PG`·`deploy-coordination.md` 41·42번. QA 실측: STRIP false/true 딥링크 모두 200 HTML(접두 안팎), `/api/nope` JSON 404, `/assets/` 누락 404.
+- **1b:** revision `0004`(`datasets`·`dataset_columns`), `ddl` 모듈(동적 DDL 허용 목록 게이트), `dataset` 모듈 B1~B6, S2·S3·S4 Inspector, `skills/dataset-definition`. QA 실패 0(실제 PG pytest 1194 passed, 권한 매트릭스 `0004` 기준 통과, `admin-cleanup` 1b 절차 실제 DB 검증). reviewer 차단 0·중요 3(rules float 거부, gate-status 낡은 문구, 굶음 시험 표현) 반영.
+- **1c:** `entry` 모듈 C1~C4(칸 단위 compare-and-swap, 붙여넣기 전부 취소, 5,000행·1MiB), AG Grid Community 36.2.0 입력 그리드, 붙여넣기 파서(`clipboard-cases.json` 42건), `skills/data-entry`. QA 실패 0(실제 PG 1548 passed·skip 0, Playwright 가시 검증, 413 JSON/HTML 실측). reviewer 차단 0·중요 3(붙여넣기 기준 날짜 열 같은 값, 본문 읽기 중 연결 점유, 굶음 시험 sleep 의존) 및 QA F-1~F-4 반영, 수정 후 실제 PG 1554 passed·skip 0, 프런트 361 passed.
+### 18-2. 적용 후 보고 항목(보안 강화·검사 강화, 새 변수·의존성 없음)
+- 동적 DDL 게이트 강화(`ddl/dynamic.py`), 코드 정적 검사 시험, DB 장애·예외 로그에서 클래스 이름과 request_id만 남김, 권한 검사 직후 연결 반납(`entry/router.py`), 알 수 없는 입력 키 비반사(`entry/service.py` `_echo`), 정의 변경 DDL 오류를 500에서 422/503으로 변환(`dataset/service.py`), rules JSON float 거부.
+### 18-3. 알려진 한계·결정 참고
+- 이름 변경(B4)은 `UNIQUE(team_id, name)` 때문에 `FOR UPDATE` 수준 잠금이라 FK 자식 INSERT가 커밋까지 기다린다(06 §5 서술 보완 필요, 영향은 짧은 대기). 뒤따르는 `FOR SHARE`가 대기 중 정의 변경을 앞지르는 굶음이 PG 16에서 관찰되며 정의 변경은 `DEFINITION_BUSY`로 끝난다.
+- C4 변경 없는 칸은 가드가 아님(05 반영). 비활성 팀의 데이터셋 생성은 현재 허용(06 §4-1 후속 K10) — 막을지 사용자 결정 대기.
+- 접두 밖 주소를 브라우저에 직접 입력하면 SPA는 빈 화면(사용자 주소는 항상 접두 안이라 영향 없음).
+- 5,000행 붙여넣기: tmpfs pytest 3~4초, 볼륨 PG+nginx 경유 4.7~6.5초. nginx 경유 1MiB 초과는 HTML 413(프런트 처리).
+- 미시험: 실제 Excel 클립보드, 메인 플랫폼 프록시, 계산 열 표시(1d), Superset(1e), BAT.
