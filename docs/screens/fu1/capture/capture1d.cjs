@@ -111,6 +111,10 @@ const dumps = [], made = [], notes = [];
       await page.keyboard.type('[');
       await page.waitForSelector('[role=listbox]');
       await shot(page, 'fu1d-editor-autocomplete-column-list', { wait: 50 });
+      // 후보가 8개를 넘으면 목록이 스크롤되고 "후보 N개" 안내가 나온다. 아래 방향키로 목록 끝까지 내려 스크롤된 상태를 찍는다.
+      notes.push('후보 안내 수 ' + (await page.locator('[data-testid=suggest-more]').count()) + ': ' + (await page.locator('[data-testid=suggest-more]').first().innerText().catch(() => '없음')));
+      for (let i = 0; i < 11; i++) await page.keyboard.press("ArrowDown");   // 후보 12개 중 마지막(12번째)까지 내려 목록이 스크롤된 상태를 찍는다
+      await shot(page, 'fu1d-editor-autocomplete-column-list-scroll-hint', { wait: 100 });
       await expr(page).fill('');
       await page.keyboard.type('SUMTAG("');
       await page.waitForSelector('[role=listbox]');
@@ -230,7 +234,9 @@ const dumps = [], made = [], notes = [];
       notes.push('계산 열 칸 더블클릭 후 편집기 수 ' + editing);
       await page.keyboard.type('123');
       await sleep(300);
-      await shot(page, 'fu1d-grid-calculated-cell-edit-attempt', { wait: 200 });
+      const noticeText = await page.locator('[data-testid=formula-edit-notice]').innerText().catch(() => '(안내 문구 없음)');
+      notes.push('계산 열 편집 시도 안내: ' + noticeText);
+      await shot(page, 'fu1d-grid-calculated-cell-edit-attempt', { wait: 100 });
       // 열 폭을 마우스로 넓혀(사용자 조작) 오류 칸의 코드(E1)와 값 전체가 보이게 한다.
       await page.keyboard.press('Escape');
       await page.evaluate(() => { document.querySelector('.ag-body-horizontal-scroll-viewport').scrollLeft = 0; });
@@ -266,6 +272,11 @@ const dumps = [], made = [], notes = [];
       await p2.waitForSelector('[data-testid=formula-text]');
       await scrollTo(p2, 'section.formula-view', 'start');
       await shot(p2, 'fu1d-formula-view-definer-with-edit-button');
+      // Inspector 전체: 수식 보기가 위에, 접힌 '열 정보' 구역이 아래에 보인다.
+      await p2.evaluate(() => { document.querySelector('details.column-info')?.scrollIntoView({ block: 'end' }); });
+      notes.push('열 정보 구역 열림 여부: ' + (await p2.evaluate(() => document.querySelector('details.column-info')?.open)));
+      await shot(p2, 'fu1d-formula-view-calculated-column-info-collapsed', { wait: 150 });
+      await scrollTo(p2, 'section.formula-view', 'start');
       await p2.getByRole('button', { name: '수식 고치기' }).click();
       await p2.waitForSelector('form.formula-editor');
       await sleep(900);

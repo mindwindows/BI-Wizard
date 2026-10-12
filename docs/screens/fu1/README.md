@@ -1,7 +1,7 @@
 # FU-1 화면 스크린샷 (1a·1b·1c·1d)
 
 - 촬영일: 2026-10-12(화면 수정분 재촬영: 같은 날, HEAD `809ea5f` 기준으로 이미지를 다시 빌드)
-- 크기: 모두 1920×1080 PNG(viewport, `deviceScaleFactor` 1, 스크롤하지 않은 첫 화면 또는 해당 영역으로 스크롤한 화면). 1a·1b·1c 42장(합계 약 5.6 MiB)과 1d 36장(합계 약 7.0 MiB)을 합쳐 PNG 78장, 약 13 MiB. 1d는 2026-10-12(HEAD `c161979` 기준, 이미지를 작업 트리로 다시 빌드)에 추가로 찍었고 기존 42장은 바꾸지 않았다.
+- 크기: 모두 1920×1080 PNG(viewport, `deviceScaleFactor` 1, 스크롤하지 않은 첫 화면 또는 해당 영역으로 스크롤한 화면). 1a·1b·1c 42장(합계 약 5.6 MiB)과 1d 38장(합계 약 7.6 MiB)을 합쳐 PNG 80장, 약 14 MiB. 1d는 2026-10-12(HEAD `c161979` 기준)에 추가로 찍었고, 같은 날 화면 수정분(HEAD `42c3619` + 작업 트리, 프로젝트 `shots5`)으로 17장을 다시 찍고 2장을 새로 추가했다. 1a·1b·1c 42장과 나머지 1d 장은 바이트 그대로다.
 - 데이터: 전부 합성 데이터다(팀·사용자·데이터셋·값). 실제 사용자·업무 데이터는 없다.
 - 신원: 개발용 인증 스텁(`AUTH_STUB_ENABLED=true`, `APP_ENV=local`)의 신원 전환기로 사용자를 바꿔 찍었다. 모든 화면 위쪽의 점선 "개발용 신원" 선택은 이 때문이다(운영 설정에서는 나타나지 않는다).
 - 스크롤바: 기본 headless Chromium은 스크롤바를 그리지 않으므로 Playwright를 `ignoreDefaultArgs: ['--hide-scrollbars']`로 띄워 가로·세로 스크롤바가 실제 브라우저처럼 보이게 찍었다(코드 변경 아님, 촬영 옵션).
@@ -71,14 +71,15 @@
 
 ### 1d 수식 열(계산 열)
 
-촬영 조건 공통: 1920×1080, `deviceScaleFactor` 1, 합성 데이터셋 "월별 손익"(26개월, 인원 0이 2개월·빈 값 1개월, 광고비 빈 값 2개월)과 "월별 수금", compose 프로젝트 `shots4`, HEAD `c161979`, 시드 `capture/seed1d.py`, 촬영 `capture/capture1d.cjs`. 별도 표기가 없으면 실제 서버 응답이다.
+촬영 조건 공통: 1920×1080, `deviceScaleFactor` 1, 합성 데이터셋 "월별 손익"(26개월, 인원 0이 2개월·빈 값 1개월, 광고비 빈 값 2개월)과 "월별 수금", compose 프로젝트 `shots4`(수정분 재촬영은 `shots5`, HEAD `42c3619` + 작업 트리), 시드 `capture/seed1d.py`, 촬영 `capture/capture1d.cjs`. 별도 표기가 없으면 실제 서버 응답이다.
 
 | 파일 | 화면 | 상태 | 촬영 조건 |
 | --- | --- | --- | --- |
 | `fu1d-editor-empty-new-formula-column.png` | 수식 편집기 | 계산 열 추가 직후 빈 편집기(열 이름 칩, 안내 문구) | `stub-definer`, "월별 손익", "계산 열 추가" |
 | `fu1d-editor-column-chip-inserted.png` | 수식 편집기 | 열 이름 칩 클릭으로 `[매출] / [인원]` 삽입(확인 중) | 칩 "매출", `/` 입력, 칩 "인원" |
 | `fu1d-editor-autocomplete-function-list.png` | 수식 편집기 | 함수 자동완성 열림(`RO` 입력, 후보와 설명·엑셀과 차이) | `RO` 입력 후 ↓ |
-| `fu1d-editor-autocomplete-column-list.png` | 수식 편집기 | `[` 입력 시 열 이름 후보(입력 열·계산 열 구분) | `[` 입력 |
+| `fu1d-editor-autocomplete-column-list.png` | 수식 편집기 | `[` 입력 시 열 이름 후보 12개(입력 열·계산 열 구분). 목록이 8줄까지만 보이고 세로 스크롤바가 생기며 아래에 "후보 12개 — 목록을 스크롤하거나 ↑↓로 끝까지 고르고…" 안내(2026-10-12 재촬영) | `[` 입력 |
+| `fu1d-editor-autocomplete-column-list-scroll-hint.png` | 수식 편집기 | (신규) 위 목록을 ↓로 마지막 후보("등급")까지 내려 목록이 스크롤된 상태와 "후보 12개" 안내 | `[` 입력 후 ↓ 11번 |
 | `fu1d-editor-autocomplete-tag-list.png` | 수식 편집기 | `SUMTAG("` 안의 구분 태그 후보 | `SUMTAG("` 입력 |
 | `fu1d-editor-error-unknown-column.png` | 수식 편집기 | 쉬운 말 오류: 없는 열 이름(밑줄이 `[없는열]`에 정확히 일치) | `[없는열]*2` |
 | `fu1d-editor-error-arg-count.png` | 수식 편집기 | 쉬운 말 오류: 인수 개수 | `ROUND([매출])` |
@@ -93,13 +94,14 @@
 | `fu1d-editor-circular-after-check.png` | 수식 편집기 | 순환 참조: 검사 단계에서 "열이 서로를 참조해 계산할 수 없습니다: 손익 → 손익률 → 손익" | "손익" 열 수식 고치기에서 `[손익률]+1` |
 | `fu1d-editor-result-type-changed-notice.png` | 수식 편집기 | `result_type_changed` 안내(저장 성공 + 차트 확인 안내) | "등급" 열 수식을 글자->숫자 결과로 저장 |
 | `fu1d-formula-view-readonly-no-define-permission-viewer.png` | 수식 보기 | 정의 권한 없음(열람자): 수식 보기만 있고 "수식은 팀의 정의 담당자만 고칠 수 있습니다." | `stub-viewer`, "1인당 매출" |
-| `fu1d-grid-calculated-columns-overview.png` | 입력 그리드 | 입력 열 쪽 화면(계산 열은 오른쪽으로 스크롤해야 보임) | `stub-entry` |
-| `fu1d-grid-calculated-columns-scrolled-right.png` | 입력 그리드 | 계산 열 머리글 `ƒ`·기울임·아래 선, 이탤릭 회색 값, 빈 계산 칸 | 가로 스크롤 끝 |
-| `fu1d-grid-calculated-cell-edit-attempt.png` | 입력 그리드 | 계산 열 오류 칸을 두 번 눌러 `123` 입력 시도: 편집기가 열리지 않음(안내 문구 없음) | 오류 칸 더블클릭 + 입력 |
-| `fu1d-grid-error-cell-e1-and-blank-cells-widened-column.png` | 입력 그리드 | 열 폭을 넓힌 "1인당 매출": `오류 E1` 칸(붉은 배경)과 빈 칸, 선택된 열 머리글 | 머리글 경계를 마우스로 드래그 |
+| `fu1d-grid-calculated-columns-overview.png` | 입력 그리드 | 입력 열 쪽 화면(계산 열은 오른쪽으로 스크롤해야 보임; 수정분 재촬영, 화면은 이전과 같음) | `stub-entry` |
+| `fu1d-grid-calculated-columns-scrolled-right.png` | 입력 그리드 | 계산 열 머리글 `ƒ`·기울임, 칸 왼쪽 세로 선(계산 열 표지), 값 있는 칸은 회색 배경·이탤릭, 빈 계산 칸은 입력 열과 같은 빗금, 오류 칸은 붉은 배경(2026-10-12 재촬영) | 가로 스크롤 끝 |
+| `fu1d-grid-calculated-cell-edit-attempt.png` | 입력 그리드 | 계산 열 오류 칸을 두 번 눌러 `123` 입력 시도: 편집기가 열리지 않고 그리드 위에 노란 안내 "계산 열은 수식으로 계산되어 직접 고칠 수 없습니다. 수식은 Inspector에서 고칠 수 있습니다."(5초간, 2026-10-12 재촬영) | 오류 칸 더블클릭 + 입력 |
+| `fu1d-grid-error-cell-e1-and-blank-cells-widened-column.png` | 입력 그리드 | (2026-10-12 재촬영: 안내 문구가 아직 남아 있고 계산 열 표지·빗금 반영) 열 폭을 넓힌 "1인당 매출": `오류 E1` 칸(붉은 배경)과 빈 칸, 선택된 열 머리글 | 머리글 경계를 마우스로 드래그 |
 | `fu1d-formula-view-division-with-error-cells-entry.png` | 수식 보기 | `[매출] / [인원]`, 결과 종류, 쓰는 열, 오류 칸 2개 + "점검 화면에서 보기" 링크(입력자, 읽기 전용) | `stub-entry`, "1인당 매출" |
 | `fu1d-formula-view-sumtag-with-tag-columns-entry.png` | 수식 보기 | `SUMTAG("비용")`, 태그로 더하는 열(광고비, 물류비) | `stub-entry`, "총비용" |
-| `fu1d-formula-view-definer-with-edit-button.png` | 수식 보기 | 정의 담당자: 수식 보기 + "수식 고치기" 버튼 | `stub-definer`, "손익률" |
+| `fu1d-formula-view-definer-with-edit-button.png` | 수식 보기 | 정의 담당자: 수식 보기 + "수식 고치기" 버튼이 위에, 접힌 "열 정보"가 아래에(2026-10-12 재촬영) | `stub-definer`, "손익률" |
+| `fu1d-formula-view-calculated-column-info-collapsed.png` | 수식 보기(Inspector 전체) | (신규) 계산 열 선택 시 수식 보기·수식 고치기가 위에, 읽기 전용 열 정보는 접힌 "열 정보" 구역(▶)으로 내려감 | `stub-definer`, "손익률" |
 | `fu1d-formula-edit-opened-definer.png` | 수식 고치기 | 수식 고치기 편집기가 보기 텍스트로 열림, 검사 통과, 미리보기(빈 값 2개) | "수식 고치기" 클릭 |
 | `fu1d-formula-view-no-error-cells-entry.png` | 수식 보기 | 오류 칸 "없음"(원인 값을 고친 뒤) | `stub-entry`, "1인당 매출" |
 | `fu1d-s5-checks-error-columns-list.png` | S5 점검 | 오류 칸이 있는 열 목록(데이터셋·팀·계산 열·건수, 오류 칸 보기·작업공간 열기) | `stub-viewer`, `/checks` |
@@ -111,6 +113,8 @@
 | `fu1d-s9-views-section-retry-while-locked.png` | S9 현황 | 잠금이 남은 동안 다시 시도: "다른 작업이 진행 중입니다…(약 2초 뒤)" 안내(`DEFINITION_BUSY`), 실패 2건 그대로 | "이 데이터셋 다시 시도" |
 | `fu1d-s9-views-section-after-single-retry.png` | S9 현황 | 잠금이 풀린 뒤 1건 다시 시도: "1개를 다시 만들었습니다. 아직 1개가 실패 상태입니다" | 같은 버튼 |
 | `fu1d-s9-views-section-recovered.png` | S9 현황 | "실패한 항목 전부 다시 시도" 뒤 복구: 실패 0개 | 전부 다시 시도 |
+
+2026-10-12 재촬영 대상(17장): 위 표에서 `fu1d-editor-autocomplete-column-list`, `fu1d-editor-check-ok-top`, `fu1d-editor-circular-after-check`, `fu1d-editor-error-arg-count`("ROUND에는 값이 2개 필요한데 1개가 들어 있습니다."), `fu1d-editor-preview-*`(2장, 기간 줄바꿈 없음), `fu1d-editor-result-type-changed-notice`, `fu1d-formula-*`(6장), `fu1d-grid-*`(4장). 나머지 1d 장(편집기 빈 화면·칩·함수/태그 자동완성·나머지 오류 4장·PREVIEW_BUSY, S5, S9)은 바꾸지 않았다.
 
 1d에서 찍지 못한 것: `FORMULA_CIRCULAR` 저장 단계의 경로 안내(검사 단계에서 같은 문구가 먼저 나와 저장 버튼이 막힘), 뷰가 없는 동안의 입력 그리드(계산 열이 빈 값). `PREVIEW_BUSY` 두 장은 서버가 아니라 브라우저에서 응답을 바꾼 모의 화면이다.
 
