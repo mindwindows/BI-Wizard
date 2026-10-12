@@ -36,7 +36,7 @@
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
 - **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`docs/deploy-coordination.md` 6번 확인 후). BAT는 `docs/windows-bat-verification.md` 기준으로 사용자 PC 검증을 요청한다(EW-1 이후 Secret 8개·`AUTH_STUB_ENABLED` 추가 반영됨).
 - **운영 DB 슈퍼유저 문제:** db-bootstrap은 슈퍼유저 접속이 필요하다(역할·스키마·메타 DB 생성). 관리형 운영 DB에서 줄 수 없으면 DBA가 한 번 수행하는 대안이 필요하다(`deploy-coordination.md` 29번). 운영 DB `log_statement`가 `ddl`/`all`이면 비밀번호가 서버 로그에 남을 수 있어 확인한다. 35번(첫 관리자 생성 명령을 운영 서버에서 실행 가능한지), 36번(`AUTH_STUB_ENABLED` 운영 설정)도 운영자 협의 항목이다.
-- **미검증 항목:** `FOR NO KEY UPDATE`·`FOR SHARE` 잠금과 굶음 시나리오(1b·1c 첫 시험), `ON CONFLICT DO NOTHING RETURNING`과 pg8000 `rowcount`, 실제 엑셀 클립보드 형식, 일부 차트 유형의 `bi_guest` 표시(P5: 6가지를 FU-1e에서 직접 시험), `superset-init` 구현 방법(A-22·A-26), Superset 경유 `statement_timeout`, 비밀번호 변경 후 Superset 연결 유지, 정적 표 권한 매트릭스(첫 실제 표 revision `0003` 이후 실제 표로 재확인).
+- **미검증 항목:** `FOR NO KEY UPDATE`·`FOR SHARE` 잠금과 굶음 시나리오(1b에서 시험함: 정의 변경이 `DEFINITION_BUSY`로 한도 안에 끝남, 굶음 관찰값은 1c에서 행 쓰기와 함께 재확인), `ON CONFLICT DO NOTHING RETURNING`과 pg8000 `rowcount`, 실제 엑셀 클립보드 형식, 일부 차트 유형의 `bi_guest` 표시(P5: 6가지를 FU-1e에서 직접 시험), `superset-init` 구현 방법(A-22·A-26), Superset 경유 `statement_timeout`, 비밀번호 변경 후 Superset 연결 유지, 정적 표 권한 매트릭스(첫 실제 표 revision `0003` 이후 실제 표로 재확인).
 - **04~08 3차 검토 미실시:** 2차 검토 반영분은 architect 자체 정합성 확인만 했다. `skills/admin-cleanup/SKILL.md`는 설계 문서 기준 초안이며 FU-1b·1d 구현 뒤 실제 DB로 검증해야 한다.
 - 합성 샘플(`docs/samples/`) 기준 수치다. 실제 팀 데이터로 검증한 것이 아니다.
 
@@ -312,7 +312,7 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **D2 (동적 객체 분리 방식) 결정:** 데이터 모델과 함께 옵션(S 별도 schema, N 이름 규칙, R 등록 테이블 기반, D 별도 DB)을 비교해 사용자가 결정한다. 읽기 전용 계정(D7)의 동적 객체 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식도 함께 정한다. 결정 전까지 자동 생성 초안의 `DROP`은 사용자 확인 없이 적용하지 않는다.
 - **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
 - **왕복 테스트의 실질 범위(EW-1에서 해소: `0002`와 `python -m migrations.roundtrip`이 권한 상태 복원까지 검증):** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
-- **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
+- **STRIP=true와 SPA 딥링크:** 해결됨(2026-10-12, `docs/decisions/03b` 17-1 결정 6). 하위 경로 설정에서 접두 밖 루트도 SPA fallback(`/index.html`)으로 응답한다(`/api`·`/assets`·`config.js`는 그대로). 접두 밖 임의 경로가 200 HTML이 되는 부작용은 수용했고 앞단 프록시와의 맞춤은 `deploy-coordination.md` 42번.
 - **Embedded guest 역할(구현·검증됨, EW-4·EW-6):** `bi_guest` 4권한(`superset/bi_roles.py`), 6가지 차트 임베딩 정상 표시, `Public` 0개, `Gamma`·`PUBLIC_ROLE_LIKE` 미사용(`bi-review`가 점검). 상세는 "EW-4 결과"와 03b 11절.
 - **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
 - **Alembic `target_metadata` 연결(EW-1에서 해소: `backend/app/db_metadata.py`로 연결됨):** 이전에는 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않았다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). EW-1에서 정적 모델 `MetaData`와 `include_object` 필터를 연결했다.
