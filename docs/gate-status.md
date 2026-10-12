@@ -5,6 +5,7 @@
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
 - 동기화했다면 에이전트·스킬 정의(`.claude/agents`, `.claude/skills`)가 세션 시작 시점의 옛 버전일 수 있다. **새 세션으로 다시 시작하도록 사용자에게 알린다**(이전 세션에서 로컬이 옛 커밋이라 정의 파일이 haiku였던 사례가 있었다).
+- 새 세션이 `harness/setup`을 옛 커밋으로 여는 경우가 반복됐으므로, **새 세션은 `main`으로 시작해 `harness/setup`으로 전환하는 방식을 기본으로 한다**(`git fetch` 뒤 HEAD가 `origin/main` 최신인지, `git merge-base --is-ancestor origin/harness/setup origin/main`과 `git diff origin/harness/setup origin/main`이 비어 있는지 확인하고 `git checkout -B harness/setup origin/harness/setup`).
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
 ### 현재 상태
