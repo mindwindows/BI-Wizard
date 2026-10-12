@@ -154,6 +154,15 @@ expect_fail "roles.sql bi_data 소유자" "필수 문장이 없습니다: CREATE
 expect_fail "roles.sql bi_app 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "/^ALTER ROLE bi_app NOSUPERUSER/d"
 expect_fail "roles.sql bi_owner 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_owner NOSUPERUSER" sed_roles "/^ALTER ROLE bi_owner NOSUPERUSER/d"
 expect_fail "roles.sql bi_app 재차단이 CREATEROLE 허용" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "s/^ALTER ROLE bi_app NOSUPERUSER NOCREATEDB NOCREATEROLE;/ALTER ROLE bi_app NOSUPERUSER NOCREATEDB CREATEROLE;/"
+for p in log_statement log_min_duration_statement log_min_duration_sample log_transaction_sample_rate log_min_error_statement; do
+  expect_fail "roles.sql 로그 억제 SET 없음 ($p)" "필수 문장이 없습니다: SET $p" sed_roles "/^SET $p = /d"
+  expect_fail "roles.sql 로그 RESET 없음 ($p)" "필수 문장이 없습니다: RESET $p;" sed_roles "/^RESET $p;/d"
+done
+expect_fail "roles.sql 로그 억제 SET이 BEGIN 뒤로 이동" "BEGIN; 앞에 있어야" sh -c "sed -i \"/^SET log_statement = 'none';/d; s/^BEGIN;/BEGIN;\\nSET LOCAL log_statement = 'none';\\nSET log_statement = 'none';/\" '$WORK/backend/bootstrap/roles.sql'"
+expect_fail "roles.sql log_statement 값이 none 아님" "필수 문장이 없습니다: SET log_statement = 'none';" sed_roles "s/^SET log_statement = 'none';/SET log_statement = 'ddl';/"
+expect_fail "roles.sql RESET이 COMMIT 앞으로 이동" "COMMIT; 뒤에 있어야" sh -c "sed -i '/^RESET log_statement;/d; s/^COMMIT;/RESET log_statement;\\nCOMMIT;/' '$WORK/backend/bootstrap/roles.sql'"
+expect_fail "roles.sql 역할 수준 로그 설정" "ALTER ROLE/DATABASE ... SET log_" append_roles "ALTER ROLE bi_app SET log_statement = 'none';"
+expect_fail "roles.sql 데이터베이스 수준 로그 설정" "ALTER ROLE/DATABASE ... SET log_" append_roles "ALTER DATABASE superset SET log_min_error_statement = panic;"
 expect_fail "roles.sql 추가 \\getenv" "\\getenv 는 비밀번호 변수 4개뿐" append_roles '\getenv extra SOME_OTHER_VARIABLE'
 expect_fail "roles.sql \\getenv 누락" "필수 문장이 없습니다: \\getenv app_pw POSTGRES_APP_PASSWORD" sed_roles '/^\\getenv app_pw/d'
 

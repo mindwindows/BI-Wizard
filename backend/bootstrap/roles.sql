@@ -18,12 +18,21 @@
 \getenv app_pw POSTGRES_APP_PASSWORD
 \getenv owner_pw POSTGRES_OWNER_PASSWORD
 
+-- 비밀번호 리터럴이 서버 로그에 남지 않게 BEGIN 앞에서 이 세션의 문장 로그를 끈다(고정 SET 문장, COMMIT 뒤 RESET으로 원복.
+-- 역할·DB 수준 설정은 쓰지 않는다). 접속 계정이 슈퍼유저라 변경할 수 있다. BEGIN 앞이어야 하는 이유: 트랜잭션 표본
+-- 추출(log_transaction_sample_rate)은 트랜잭션 시작 때 결정되어 안에서 SET LOCAL로는 끌 수 없다.
+--  * log_statement: 성공한 문장 기록(ddl/all일 때 ALTER ROLE ... PASSWORD '...'가 남는다)
+--  * log_min_duration_statement, log_min_duration_sample, log_transaction_sample_rate: 실행 시간·표본 기록
+--  * log_min_error_statement: 실패 시 ERROR 뒤의 STATEMENT 줄
+SET log_statement = 'none';
+SET log_min_duration_statement = -1;
+SET log_min_duration_sample = -1;
+SET log_transaction_sample_rate = 0;
+SET log_min_error_statement = panic;
+
 -- 역할 생성, 비밀번호 동기화, 검증은 한 트랜잭션이다. 비밀번호가 비어 있어 검증이 실패하면
 -- 이 블록 전체가 롤백된다. (변수가 아예 없으면 아래 ALTER가 구문 오류로 실패한다.)
 BEGIN;
-
--- 비밀번호 설정 문장이 실패해도 서버 오류 로그에 문장(평문 비밀번호 포함)이 남지 않게 한다. 고정 문장이다.
-SET LOCAL log_min_error_statement = panic;
 
 SELECT 'CREATE ROLE bi_readonly LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'bi_readonly') \gexec
@@ -92,6 +101,13 @@ END
 $$;
 
 COMMIT;
+
+-- 문장 로그 설정을 원복한다(이후 문장에는 비밀번호가 없다).
+RESET log_statement;
+RESET log_min_duration_statement;
+RESET log_min_duration_sample;
+RESET log_transaction_sample_rate;
+RESET log_min_error_statement;
 
 -- Superset 메타데이터 DB(앱 DB와 별도). CREATE DATABASE는 트랜잭션 밖에서 실행해야 한다.
 SELECT 'CREATE DATABASE superset OWNER superset_meta'

@@ -366,9 +366,35 @@ else
     "\\getenv app_pw POSTGRES_APP_PASSWORD" \
     "\\getenv owner_pw POSTGRES_OWNER_PASSWORD" \
     "\\set ON_ERROR_STOP on" \
-    "SET LOCAL log_min_error_statement = panic"; do
+    "SET log_statement = 'none';" \
+    "SET log_min_duration_statement = -1;" \
+    "SET log_min_duration_sample = -1;" \
+    "SET log_transaction_sample_rate = 0;" \
+    "SET log_min_error_statement = panic;" \
+    "RESET log_statement;" \
+    "RESET log_min_duration_statement;" \
+    "RESET log_min_duration_sample;" \
+    "RESET log_transaction_sample_rate;" \
+    "RESET log_min_error_statement;"; do
     printf '%s\n' "$body" | grep -qF -- "$needle" || fail "$ROLES 에 필수 문장이 없습니다: $needle"
   done
+  # 로그 억제 SET 5줄은 BEGIN; 앞(비밀번호 문장보다 앞), RESET 5줄은 COMMIT; 뒤에 있어야 한다.
+  begin_ln="$(printf '%s\n' "$body" | grep -n '^BEGIN;' | head -1 | cut -d: -f1)"
+  commit_ln="$(printf '%s\n' "$body" | grep -n '^COMMIT;' | head -1 | cut -d: -f1)"
+  for stmt in "SET log_statement = 'none';" "SET log_min_duration_statement = -1;" "SET log_min_duration_sample = -1;" \
+    "SET log_transaction_sample_rate = 0;" "SET log_min_error_statement = panic;"; do
+    ln="$(printf '%s\n' "$body" | grep -nF -- "$stmt" | head -1 | cut -d: -f1)"
+    if [ -z "$ln" ] || [ -z "$begin_ln" ] || [ "$ln" -ge "$begin_ln" ]; then fail "$ROLES 의 '$stmt' 는 BEGIN; 앞에 있어야 합니다."; fi
+  done
+  for stmt in "RESET log_statement;" "RESET log_min_duration_statement;" "RESET log_min_duration_sample;" \
+    "RESET log_transaction_sample_rate;" "RESET log_min_error_statement;"; do
+    ln="$(printf '%s\n' "$body" | grep -nF -- "$stmt" | head -1 | cut -d: -f1)"
+    if [ -z "$ln" ] || [ -z "$commit_ln" ] || [ "$ln" -le "$commit_ln" ]; then fail "$ROLES 의 '$stmt' 는 COMMIT; 뒤에 있어야 합니다."; fi
+  done
+  # 로그 설정은 세션 SET/RESET만 쓴다. 역할·DB 수준(ALTER ROLE/DATABASE ... SET log_*)은 금지한다.
+  if printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*ALTER[[:space:]]+(ROLE|DATABASE)[^;]*[[:space:]]SET[[:space:]]+log_'; then
+    fail "$ROLES 에 ALTER ROLE/DATABASE ... SET log_* 가 있습니다(세션 SET만 허용)."
+  fi
 fi
 
 if [ "$failed" -ne 0 ]; then
