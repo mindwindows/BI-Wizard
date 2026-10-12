@@ -3,12 +3,74 @@ body {
   font-family: system-ui, "Malgun Gothic", sans-serif;
   background: #f6f7f9;
   color: #1f2933;
+  font-size: 14px;
 }
 
-.shell {
-  max-width: 640px;
-  margin: 48px auto;
-  padding: 0 24px;
+/* 1920x1080 데스크톱 기준. 전체 폭을 쓰고 상단 Navigation은 고정 높이다. */
+.app {
+  min-width: 1280px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 44px;
+  padding: 0 16px;
+  background: #1f2933;
+  color: #fff;
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+}
+
+.nav-admin {
+  margin-left: auto;
+}
+
+.nav a {
+  color: #cbd2d9;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.nav a:hover {
+  background: #323f4b;
+}
+
+.nav a.active {
+  background: #3e4c59;
+  color: #fff;
+}
+
+.content {
+  flex: 1;
+  padding: 16px;
+}
+
+.muted {
+  color: #616e7c;
+}
+
+.state {
+  margin: 8px 0;
+}
+
+.state-error {
+  padding: 8px 12px;
+  border: 1px solid #d64545;
+  background: #fdf2f2;
+  color: #8a1c1c;
 }
 
 table {
