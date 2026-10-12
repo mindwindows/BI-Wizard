@@ -499,3 +499,19 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 ### 20-3. 알려진 한계·미시험
 - 게이트가 직접 막지 못하는 SQLAlchemy 부품(`custom_op`, `Extract.field`, `BindParameter.callable_`, 숫자 바인드의 `Decimal` 지수)은 formula가 만드는 식에는 나오지 않아 지금은 위험이 낮다(후속 단위에서 거부 추가 권장). 시작 시 `reconcile_all`은 동기로 끝난 뒤 서비스가 시작된다(데이터셋 50개 해시 일치 약 1.1~1.8초, 전체 재생성 약 3.2~4.3초, 행 없는 tmpfs DB 기준).
 - 한글 IME 조합 입력, `PREVIEW_BUSY` 화면 실서버 재현(QA 동시 요청 재현은 통과), 하위 경로 STRIP true 반복, Superset(1e), BAT는 미시험.
+
+## 21. 1d 결정 4건과 1e 진행 (2026-10-12, 사용자)
+### 21-1. 20-2 결정
+1. **07 §10-1 한도 승인(확정):** 수식 깊이 40, 변환 SQL 노드 5만, 단항 `neg`, `DATE` E3 범위 0001~9999, `ROUNDUP` 곱셈 형태. 07 §10-1을 확정으로 적었고 한도에 걸릴 때의 쉬운 말 문구를 `skills/dataset-definition/SKILL.md`에 적는다.
+2. **계산 열 표시 자릿수:** 화면 표시만 바꾼다(저장값·뷰·API 응답 값은 그대로). 기본 표시는 소수 최대 6자리, 끝자리 0 제거, 천 단위 쉼표. 전체 값은 툴팁과 Inspector에 그대로 보이고 복사하면 전체 값이 복사된다. 열 규칙 `decimals`는 이번에 추가하지 않고 후속 단위로 미룬다. 1e에서 Superset 차트가 이 값을 어떻게 보이는지 확인해 **보고만** 하고 설정은 바꾸지 않는다(선택지만 제시).
+3. **DB 서버 로그의 뷰 생성 문장:** `bi_app` 역할 수준 로그 설정은 바꾸지 않는다. `deploy-coordination.md` 43번에 운영 협의 항목을 추가했다. 또한 `backend/bootstrap/`의 비밀번호 설정 문장(`:'var'` 4곳)이 실패할 때나 `log_statement=ddl/all`일 때 서버 로그에 비밀번호가 남는지 실측하고, 남을 수 있으면 bootstrap 세션 안에서만 `log_statement`·`log_min_error_statement`·`log_min_duration_statement`를 끄는 고정 `SET` 문장을 비밀번호 문장 앞에 넣는다(역할·DB 수준 설정 금지). 비밀 노출 축소이므로 **적용 후 보고 항목**이며, 일부러 실패시킨 뒤 서버 로그를 grep해 비밀번호 0건을 확인한다.
+4. **계산 열 이름·위치·태그 변경 UI:** 후속 단위로 미룬다. `project-brief` 4.3에 결정 2의 `decimals`와 함께 기록했다.
+### 21-2. 1e 시작 전(0단계)
+- SQLAlchemy 부품 4종(`custom_op`, `Extract.field`, `BindParameter.callable_`, 숫자 바인드의 `Decimal` 지수)을 거부하도록 `ddl` 게이트에 추가한다(적용 후 보고 항목).
+- 그 커밋에서 QA가 전체 시험(실제 PG)과 차분 시험 전수를 다시 돌린다. **실패나 불일치가 1건이라도 있으면 1e로 넘어가지 않고 멈춰 보고한다.**
+- `docs/screens/fu1/README`에 `PREVIEW_BUSY` 두 장은 모의 화면, `FORMULA_CIRCULAR`는 검사 단계 화면으로 대신했다는 표시가 이미 있다(표의 `fu1d-editor-preview-busy-*` 두 행과 `fu1d-editor-circular-after-check` 행, 문서 끝 '1d에서 찍지 못한 것').
+### 21-3. 1e 승인(조건부)
+- **승인:** revision `0006`, `httpx` 운영 의존성 승격, `@superset-ui/embedded-sdk` 0.4.0 설치.
+- **조건:** 버전 정확히 고정(범위 금지)·lock 커밋·라이선스 기록. 게스트 토큰은 localStorage·sessionStorage·URL·로그 어디에도 남기지 않는다. 빌드한 프런트 번들에 Superset 관리자·서비스 계정 비밀번호·`SECRET_KEY`·토큰 발급 자격이 0건임을 grep으로 확인하고, 로그·`ps`·`docker inspect`의 비밀값 0건도 다시 확인한다.
+- **합격 기준:** P1~P5, 포털에서 차트 6종(선·막대·표·큰 숫자·파이·혼합) 표시, 훅의 uuid 등록 대조, 사용자별 429, STRIP true/false 모두 반복, Superset 포함 전체 메모리 실측(8GB 예산 대비), 스크린샷 1920×1080 `fu1e-{화면}-{상태}.png`.
+- 새 환경변수, 새 의존성, 기준과 다른 설정, 권한 확대가 더 필요해지면 그 자리에서 멈추고 승인을 요청한다. **1e를 마치면 main 반영 PR은 만들지 않고 보고만 한다**(PR은 사용자 확인 뒤 지시).
