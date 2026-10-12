@@ -50,6 +50,8 @@ FEATURE_FLAGS = {"EMBEDDED_SUPERSET": True}
 # 어긋나면 superset-init의 ensure_roles.py가 실제 적용된 설정과 비교해 실패한다. 역할은 superset-init이 매 기동 만든다
 # (권한 4개). PUBLIC_ROLE_LIKE는 설정하지 않는다(Public 권한 0개 유지, ensure_roles.py가 확인한다).
 # guest 토큰 유효 시간 GUEST_TOKEN_JWT_EXP_SECONDS는 Superset 기본값 300초(5분)를 그대로 쓴다(Z5, 설정하지 않는다).
+# 이 파일에서 재정의하면 ci-validate-env.sh가 실패하고, 어떤 경로로든 300이 아니면 ensure_roles.py가 superset-init을 실패시킨다.
+# 값을 바꿔야 하면 사전 승인을 받은 뒤 bi_roles.GUEST_TOKEN_EXP_SECONDS(가드 값)와 함께 바꾼다.
 GUEST_ROLE_NAME = "bi_guest"
 
 _log = logging.getLogger("bi_wizard.guest_token")

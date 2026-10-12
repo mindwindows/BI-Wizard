@@ -5,10 +5,11 @@
   활성화하며 역할을 목록대로 되돌린다. 계정 이름 변경·재생성 로직은 없다(이름을 바꾸면 새 계정이 생기고
   기존 계정이 소유한 데이터셋은 이전되지 않는다 -> 이름은 바꾸지 않는다).
 - 사람 계정 보호: 이름 비교는 대소문자를 무시한다(FAB auth_username_ci가 find_user를 대소문자 무시로 비교한다).
-  변경 전에 기존 계정을 모두 조회한다. **우리가 만든 표식**(first_name이 BI-Wizard이고 email이 <이름>@localhost,
-  대소문자 무시)이 없는 기존 계정이 관리자 역할이거나 bi_service/bi_guest_issuer 밖의 역할을 갖거나 역할이 0개이면
-  아무것도 바꾸지 않고 거부한다(사람 계정을 덮어쓰지 않는다). 새로 만들 계정의 이메일이 다른 계정과 겹치면 마찬가지로
-  사전에 거부한다(두 번째 계정 단계에서 일부만 바뀌는 것을 막는다).
+  변경 전에 기존 계정을 모두 조회한다. 같은 이름의 기존 계정은 **우리가 만든 표식**(first_name이 BI-Wizard이고
+  email이 <이름>@localhost, email만 대소문자 무시)이 있을 때만 진행한다. 표식이 없으면 역할과 관계없이(역할 0개, Gamma,
+  bi_service 하나만 있어도) 비밀번호 재설정 없이 아무것도 바꾸지 않고 거부한다(사용자 결정 03b 12-1 ③, 사람 계정을 덮어쓰지
+  않는다). 새로 만들 계정의 이메일이 다른 계정과 겹치면 마찬가지로 사전에 거부한다(두 번째 계정 단계에서 일부만 바뀌는 것을
+  막는다). 하나라도 거부 대상이면 어느 계정도 바꾸지 않는다.
 - 강제 복구(EW-3 확인 사항 결정, 03b 10-1): **표식이 있는 기존 계정**에 허용 밖 역할(Admin 포함)이 붙어 있으면 정해진 역할
   하나(bi_service 또는 bi_guest_issuer)만 남기고 모두 제거한다(권한을 줄이는 방향). 복구했으면 경고 로그를 남기고
   마지막 줄 `점검 요약: 강제 복구 N건`(0건이어도)으로 확인할 수 있게 한다. 표식이 없는 계정은 복구하지 않고 거부한다.
@@ -70,7 +71,6 @@ with app.app_context():
     admin_role = sm.auth_role_admin
 
     # 1) 변경 전에 기존 계정을 모두 확인한다. 하나라도 거부 대상이면 아무것도 바꾸지 않는다. 표식이 있는 계정의 허용 밖 역할은 거부하지 않고 복구 대상으로 모은다.
-    allowed_roles = {item[3] for item in settings}
     recoveries = {}  # 계정 이름 -> 제거할 역할 이름 목록(우리 표식이 있는 계정만)
     for _user_var, username, _password, role_name, (first_name, _last) in settings:
         email = f"{username}@localhost"
@@ -83,18 +83,13 @@ with app.app_context():
         existing_roles = {item.name for item in existing.roles}
         ours = existing.first_name == first_name and (existing.email or "").casefold() == email.casefold()
         if not ours:
-            if admin_role in existing_roles or not existing_roles <= allowed_roles:
-                fail(
-                    f"계정 {username}은(는) 이미 있고 이 스크립트가 만든 계정 표식이 없는데 관리자 역할이거나 "
-                    f"{', '.join(sorted(allowed_roles))} 밖의 역할을 갖고 있어 덮어쓰지 않습니다"
-                    "(사람 계정이면 .env의 계정 이름을 바꾸세요)."
-                )
-            if not existing_roles:
-                fail(
-                    f"계정 {username}은(는) 이미 있고 역할이 없으며 이 스크립트가 만든 계정 표식이 없어 덮어쓰지 않습니다"
-                    "(사람 계정이면 .env의 계정 이름을 바꾸세요)."
-                )
-            continue
+            # 표식이 없는 기존 계정은 역할과 관계없이 거부한다(비밀번호·활성·역할을 바꾸지 않는다). 역할 이름만 알린다.
+            fail(
+                f"계정 {username}은(는) 이미 있고 이 스크립트가 만든 계정 표식(이름 BI-Wizard, 이메일 {email})이 없어 "
+                f"덮어쓰지 않습니다(현재 역할: {', '.join(sorted(existing_roles)) or '없음'}). "
+                "사람 계정이면 .env의 계정 이름을 바꾸고, 예전에 만든 서비스·발급 계정이면 표식을 보정하세요"
+                "(skills/local-environment/SKILL.md의 표식 없는 기존 계정 정리)."
+            )
         # 표식이 있는 계정: 정해진 역할 하나 밖의 역할(허용 밖 역할, Admin 포함)은 2단계에서 모두 제거한다.
         outside = sorted(existing_roles - {role_name})
         if outside:

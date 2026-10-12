@@ -211,6 +211,10 @@ expect_fail "superset_config GUEST_ROLE_NAME 삭제" "GUEST_ROLE_NAME 은" sh -c
 expect_fail "superset_config 훅 설정 삭제" "GUEST_TOKEN_VALIDATOR_HOOK 설정이 없습니다" sh -c "sed -i '/^GUEST_TOKEN_VALIDATOR_HOOK = /d' '$WORK/superset/superset_config.py'"
 expect_fail "superset_config에 PUBLIC_ROLE_LIKE" "PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다" sh -c "printf 'PUBLIC_ROLE_LIKE = \"Gamma\"\n' >> '$WORK/superset/superset_config.py'"
 expect_fail "superset_config에 PUBLIC_ROLE_LIKE(타입 주석)" "PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다" sh -c "printf 'PUBLIC_ROLE_LIKE: str = \"Public\"\n' >> '$WORK/superset/superset_config.py'"
+expect_fail "superset_config가 입장권 유효 시간 재정의" "GUEST_TOKEN_JWT_EXP_SECONDS 를 재정의" sh -c "printf 'GUEST_TOKEN_JWT_EXP_SECONDS = 3600\n' >> '$WORK/superset/superset_config.py'"
+expect_fail "superset_config가 입장권 유효 시간 재정의(300 그대로 재선언)" "GUEST_TOKEN_JWT_EXP_SECONDS 를 재정의" sh -c "printf 'GUEST_TOKEN_JWT_EXP_SECONDS: int = 300\n' >> '$WORK/superset/superset_config.py'"
+expect_fail "superset_config가 입장권 유효 시간을 딕셔너리로 우회" "GUEST_TOKEN_JWT_EXP_SECONDS 를 재정의" sh -c "printf 'globals().update({\"GUEST_TOKEN_JWT_EXP_SECONDS\": 99})\n' >> '$WORK/superset/superset_config.py'"
+expect_pass "superset_config 주석에만 입장권 유효 시간 언급" sh -c "printf '# GUEST_TOKEN_JWT_EXP_SECONDS 는 기본값\n' >> '$WORK/superset/superset_config.py'"
 expect_fail "compose가 .env.example에 없는 변수 사용" "에 없는 변수" add_after_service backend '      NEW_THING: ${NEW_THING}'
 expect_fail "compose에 latest 태그" ":latest 태그" sh -c "printf '    image: foo:latest\n' >> '$WORK/compose.yml'"
 

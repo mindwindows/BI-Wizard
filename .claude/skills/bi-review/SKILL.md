@@ -75,6 +75,8 @@ description: BI-Wizard 변경 사항을 읽기 전용으로 리뷰하는 체크�
   - `Public` 역할 권한 0개와 `PUBLIC_ROLE_LIKE` 미설정을 `superset-init`이 확인하고 어기면 **고치지 않고 실패**하며, 그 시험(Public에 권한을 임시로 붙이면 실패)이 있다.
   - `GUEST_TOKEN_VALIDATOR_HOOK` 거부 조건 5가지(`rls`가 비어 있지 않음, 리소스가 정확히 1개가 아님, 유형이 `dashboard`가 아님, 리소스 id가 uuid 형식이 아님, `user` 누락)가 구현돼 있고 거부는 Superset의 400으로 나타난다(함수가 거짓을 돌려줌, 예외를 내지 않음). 훅이 포털 DB·backend 코드를 읽지 않고, 요청 본문·토큰·사용자 이름을 로그에 남기지 않는다. "포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e로 이월된 상태(훅의 확장 지점과 이월 주석)인지 확인한다.
   - backend에 `GUEST_TOKEN_JWT_SECRET`이 없다: `compose.yml`의 `backend`·`migrate` 환경, `backend/app` 코드(JWT 서명 라이브러리 import와 토큰 직접 생성 흔적 포함), `ci-validate-env.sh` 검사와 네거티브 시험을 확인한다.
+- **입장권 유효 시간(Z5, 03b 4-2·12-1 승인):** `GUEST_TOKEN_JWT_EXP_SECONDS`를 재정의하면 중요(기본 300초 유지). `superset-init`이 적용값을 확인해 300이 아니면 실패해야 하며, 값을 바꾸려면 사전 승인과 가드 값 변경이 함께여야 한다.
+- **계정 강제 복구는 표식 계정에만(03b 10-1·12-1 승인):** 서비스·발급 계정의 허용 밖 역할 제거와 비밀번호 재설정은 표식(first_name `BI-Wizard`, email `<이름>@localhost`)이 있는 계정에만 적용된다. 표식 없는 기존 계정은 역할과 관계없이 거부(exit 1, 아무것도 바꾸지 않음)해야 한다. 복구하면 경고 로그와 `점검 요약: 강제 복구 N건`이 남고 로그에 비밀번호·해시가 없어야 한다.
 - Scarf 호스트가 CSP에 다시 들어갔는지, 효과 없는 `SCARF_ANALYTICS` 변수가 다시 생겼는지 확인한다(중요).
 
 ### 7-3. 사실 확인 교차 검증 (Gate ③, 요청 시)

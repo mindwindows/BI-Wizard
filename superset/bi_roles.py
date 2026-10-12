@@ -23,6 +23,10 @@ GUEST_ISSUER_ROLE = "bi_guest_issuer"
 AUTHOR_ROLE = "bi_author"
 AUTHOR_SCHEMA_ROLE = "bi_author_schema"
 GUEST_ROLE = "bi_guest"  # superset_config.py의 GUEST_ROLE_NAME과 같아야 한다(ensure_roles.py가 확인한다).
+# guest 입장권(guest token) 유효 시간(초)의 고정 기준값(승인: 03b 4-2 Z5, 12-1). ensure_roles.py가 실제 적용된 설정
+# GUEST_TOKEN_JWT_EXP_SECONDS를 이 값과 비교해 다르면 superset-init을 실패시킨다(고치지 않는다). Superset 기본값도 300이라
+# superset_config.py는 이 값을 설정하지 않는다. 값을 바꿔야 하면 사전 승인을 받은 뒤 이 가드 값과 함께 바꾼다(여기 한 곳).
+GUEST_TOKEN_EXP_SECONDS = 300
 GAMMA_ROLE = "Gamma"  # 내장 역할. bi_author를 처음 만들 때 권한을 복사하는 원본이다(직접 부여하지 않는다).
 
 # 권한 목록을 통째로 교체하는 역할(매 기동 멱등).

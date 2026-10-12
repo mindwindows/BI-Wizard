@@ -24,7 +24,7 @@ description: BI-Wizard 백엔드(FastAPI, SQLAlchemy, PostgreSQL)의 구현 규�
 - **허용(D3):** `op.*`, SQLAlchemy 표현식, **보간이 전혀 없는 고정 SQL 문자열**(`op.execute("...")`). 뷰·확장은 autogenerate가 다루지 않으므로 이 방식으로 수동 작성한다.
 - **금지(D3):** SQL에 변수를 넣는 f-string, `%`, `.format()`, `+` 연결. 사용자 입력과 환경변수를 SQL 문자열에 넣지 않는다. 마이그레이션 디렉터리 밖의 코드는 위 "SQL 문자열 금지" 규칙을 그대로 따른다.
 - **`downgrade()` 필수(D5):** 모든 revision에 실제 동작하는 `downgrade()`를 작성하고, 빈 DB에서 upgrade → downgrade → upgrade 왕복 테스트를 통과시킨다. 운영 중 문제는 되돌리기가 아니라 **수정 마이그레이션을 추가**해서 대응한다.
-- **`DROP` 확인(D2 안전장치):** autogenerate 초안에 `DROP`(테이블, 열, 인덱스, 제약)이 있으면 적용하기 전에 메인을 통해 사용자 확인을 받는다. 확인 결과를 변경 요약(커밋 메시지)에 적는다. 확인 전에는 적용하지 않는다. 사용자가 런타임에 만드는 데이터셋 테이블·수식 뷰가 삭제 후보에 섞이는지 특히 살핀다. 동적 객체 분리 방식(D2)은 Gate ③에서 정한다.
+- **`DROP` 확인(D2 안전장치):** autogenerate 초안에 `DROP`(테이블, 열, 인덱스, 제약)이 있으면 적용하기 전에 메인을 통해 사용자 확인을 받는다. 확인 결과를 변경 요약(커밋 메시지)에 적는다. 확인 전에는 적용하지 않는다. 사용자가 런타임에 만드는 데이터셋 테이블·수식 뷰가 삭제 후보에 섞이는지 특히 살핀다. 동적 객체 분리 방식(D2)은 결정됐다(전용 schema `bi_data`): 이 안전장치는 `public` 정적 표 대상이다.
 - 실행은 compose의 일회성 `migrate` 서비스(backend 이미지 재사용)가 한다. 앱 코드가 시작 시 마이그레이션을 실행하지 않는다.
 - DB 계정: 마이그레이션과 앱 쓰기는 앱 계정, Superset 데이터 연결은 읽기 전용 계정(`bi_readonly`)이다. backend는 `bi_app`, 마이그레이션은 `bi_owner`로 접속한다(이름은 코드 상수 `backend/app/db.py`, 비밀번호만 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`). **backend·migrate가 슈퍼유저로 접속하면 `bi-review`가 차단한다.**
 - `backend/bootstrap/`(역할·DB 부트스트랩 SQL)은 `db-bootstrap` 서비스가 실행하는 별도 영역이다. 비밀번호 리터럴(`PASSWORD :'var'`)의 psql `:'var'` 외에는 보간이 금지된다. 앱 코드에서 건드리지 않는다. Superset 메타데이터는 별도 데이터베이스(D7)이므로 우리 Alembic이 건드리지 않는다.

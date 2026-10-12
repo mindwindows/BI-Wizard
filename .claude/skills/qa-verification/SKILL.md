@@ -78,7 +78,7 @@ docker compose ps
 docker compose --profile test up -d postgres-test      # 서비스 이름은 compose.yml을 따른다
 # backend 이미지로 테스트 DB에 대해 순서대로 실행 (명령은 README와 compose.yml을 따른다)
 #   alembic upgrade head → alembic downgrade base → alembic upgrade head
-docker compose --profile test down                     # -v 없음
+docker compose --profile test stop postgres-test && docker compose --profile test rm -f postgres-test   # 전체 스택을 내리지 않는다(EW-6: `--profile test down`은 실행 중인 전체 스택을 내린다), -v 없음
 ```
 - 세 단계가 모두 성공해야 통과다. 실패한 단계와 출력의 핵심 줄을 그대로 인용한다.
 - 자동 생성 초안에 `DROP`이 있으면 qa-engineer가 직접 적용하지 않고 "사용자 확인 필요"로 보고한다.

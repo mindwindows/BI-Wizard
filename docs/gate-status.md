@@ -9,18 +9,17 @@
 
 ### 현재 상태
 - **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 작업 단위가 끝나 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다).
-- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 785줄이다. **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
+- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 787줄이다(EW 결과 반영 뒤, FU-1 기준 약 800줄 이내). **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
 - **EW-1(앱 계정 분리) 완료·검증 통과**(QA 11항목 통과, reviewer 차단 0건, 아래 "EW-1 결과"). 목록 밖 추가 항목은 소급 승인됐다(2026-10-11, `CLAUDE.md` 변경 이력).
 - 코드 상태: backend는 `bi_app`, migrate는 `bi_owner`로만 접속한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. 인증 스텁 엔드포인트와 업무 기능 코드는 없다(`AUTH_STUB_ENABLED` 시작 거부 논리만 있음).
 - **EW-3(Superset 계정·역할) 구현·검증 완료**: `superset-init`이 `migrate`·`db-bootstrap` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 앱 컨텍스트 스크립트로 실행한다. 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본, 처음에만)·`bi_author_schema`(1), 계정 `bi_service`·`bi_guest_issuer`(기본 이름). `.env.example` 30개(Secret 10개). backend는 설정 로딩만(HTTP 호출 코드는 FU-1e). `bi_guest`(권한 4개)와 `GUEST_TOKEN_VALIDATOR_HOOK`은 EW-4에서 구현됐다(아래 "EW-4 결과").
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. ~~EW-3 Superset 계정~~ **완료(2026-10-12, 03b 9·10절).** 확인 사항 2건은 03b 10-1로 결정했다(표식 계정 강제 복구 구현, 소요 시간 허용).
-2. ~~EW-4 guest 역할~~ **구현·검증 완료(2026-10-12, 03b 11절). 사용자 확인 대기 3건이 있다(03b 11-3).** 사용자 확인 뒤 EW-5로 간다.
-3. **FU-1e로 이월(EW-4 결정):** 훅의 "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 FU-1e에서 넣는다. 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인). backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 소문자 36자)으로 정규화해야 훅의 uuid 형식 검사를 통과한다.
-4. **EW-5 문서·하네스**, **EW-6 통합 검증**(QA), **EW-7 reviewer 점검**. 계획표는 이 문서의 "FU-1용 Gate ④ 전 환경 작업(EW) 계획".
-5. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차.
-6. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
+1. ~~EW-1·EW-3·EW-4·EW-5·EW-6·EW-7~~ **모두 완료(2026-10-12).** EW-5~7 결과는 아래 "EW-5~7 결과"와 03b 13절. **사용자 확인 대기 항목이 있다(03b 13-3).** Gate ④ 진입(FU-1 착수)은 사용자 승인 뒤에 한다.
+2. **FU-1로 이월(EW-4 결정):** 훅의 "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 FU-1e에서 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다. 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인). 발급 API 사용자별 429 속도 제한과 backend 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB` 거부, 03b BY3)은 FU-1a·1e 구현분이다.
+3. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차. **착수 전에 에이전트 모델 재판단**이 필요한지 사용자가 정한다(현재 7개 모두 sonnet, 호출 시 모델 변경 금지).
+4. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
+5. **main 반영:** PR #2·#3은 merge가 끝났다. 현재 `harness/setup`의 EW-3~7 변경을 `main`에 반영하려면 **새 PR**이 필요하다(요청받을 때만 만든다).
 
 ### 미결 항목
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
@@ -54,12 +53,20 @@
 - **미시험:** 5분 넘는 SDK 자동 갱신과 사용자별 429(FU-1e 구현분), 브라우저 포털 화면(상태 코드까지만), BAT 실행.
 
 
+### EW-5~7 결과 (2026-10-12)
+- **EW-3 확인 3건 반영(03b 12-1):** `bi-review` 7-2에 두 항목 추가(입장권 유효 시간, 표식 계정에만 강제 복구)와 `CLAUDE.md` 이력, `superset-init`의 `GUEST_TOKEN_JWT_EXP_SECONDS` 적용값 300 가드, 표식 없는 기존 계정은 역할과 관계없이 거부(운영자 정리 절차는 `skills/local-environment/SKILL.md`).
+- **EW-5(문서·하네스 정리):** 04~08에 EW-1·3·4 결과 반영(합계 787줄), `.claude/agents`·`.claude/skills` 낡은 문구 정리(D2·앱 계정·업로드 상한·9~11번 결정됨, Gate ④ 진입 조건), `CLAUDE.md` 변경 이력 갱신.
+- **EW-6(qa-engineer 통합 검증, 미시험 이월 포함, 실패 0):** 빈 볼륨 새 설치 전체 기동(순서 postgres → db-bootstrap → migrate → backend / superset-init → superset → frontend, superset-init 약 81초), EW-1 재확인(슈퍼유저 접속 0건, 권한 매트릭스, statement_timeout psql 30.14초·Superset 경유 30.1초 취소, db-bootstrap 멱등, 왕복 테스트와 `alembic check`, 스텁 시작 거부), EW-3·4 재확인(역할·계정 멱등, 서비스·발급·작성자 권한), 새 가드 2건, 6가지 차트 임베딩(STRIP false/true 모두), 훅 거부, X-25 부정 시험 86·13·14개 동일, **이월 5건 확인**(`migrate` 없이도 `schema_access` 생성, `migrate` 실패 시 backend·superset-init·superset 미기동, `superset-init` 실패 시 `superset` 미기동, 5분 초과 SDK 자동 갱신 400초 확인, 비밀번호 변경 후 Superset 연결 유지), 로그·`ps`·`docker inspect`의 비밀번호·토큰 0건. `docker stats`: 상시 서비스 idle 합계 약 333MiB, 렌더 중 약 424MiB(8GiB의 약 5%), 한도 합계 4.75GiB(8GiB의 59%), OOMKilled 없음, `superset-init` 최대 약 213MiB.
+- **EW-7(reviewer 최종 점검): 차단 0건.** 슈퍼유저 접속 없음, D3 예외 범위, Secret 로그 0건, 스텁 시작 거부 통과, 사전 승인 필수 범주의 승인 밖 변경 없음(새 환경변수 30개 모두 승인 목록에 근거 있음, 새 의존성 없음, 모델 7개 sonnet).
+- **지적 처리:** 낡은 문구·상태 서술 정리(M1·M2), 적용 후 보고 항목 기록(M3, 03b 13절), `qa-verification` 정리 명령 수정, `bat` 검증 문서·08·deploy-coordination 갱신. **미처리(사용자 확인 대기, 03b 13-3):** `roles.sql`의 기존 `bi_app`·`bi_owner` 슈퍼유저 속성 재차단(R1), `superset` 컨테이너 종료 지연(exit 137), `superset-init` 컨테이너가 `unhealthy`로 표시되는 현상.
+
+
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | **승인** (FU-1 범위) | 2026-10-11 | FU-1 범위의 04~08 승인, 합계 함수 빈 칸 전파, 지원 차트 6가지, 에이전트 모델 3개 sonnet 변경, §9-2 제안·§10 기능 축소 승인, AP-1·2·5·9·10·11·12·13·14·16 승인(AP-15는 FU-1 착수 때 요청). 상세 `03b` 6절 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` |
-| ④ 기능 개발 | 대기 (진입 전 EW-1·EW-3·EW-4 완료·검증 통과, 사용자 확인 후 EW-5 이후) | - | - | - |
+| ④ 기능 개발 | 대기 (진입 전 EW-1·EW-3~EW-7 완료·검증 통과, 사용자 확인과 FU-1 착수 승인 대기) | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |
@@ -294,7 +301,7 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
 - **왕복 테스트의 실질 범위(EW-1에서 해소: `0002`와 `python -m migrations.roundtrip`이 권한 상태 복원까지 검증):** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
 - **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
-- **Embedded guest 역할 설계(결정됨: 최소 권한 커스텀 역할):** `GUEST_ROLE_NAME`에 지정할 커스텀 역할의 권한 목록을 데이터셋·대시보드 권한 모델과 함께 정한다. 최소한 `…/api/v1/me/roles/` 403을 일으키지 않는 권한이 필요하다(기본 `Public`은 권한이 없어 실패, `Gamma` 대조 실험은 성공). `Gamma`와 `PUBLIC_ROLE_LIKE`는 운영 설정에 쓰지 않는다(`bi-review`가 점검). 역할을 만드는 위치와 방식은 Gate ③에서 정한다. 만든 뒤 하위 경로 + Embedded 검증을 다시 한다.
+- **Embedded guest 역할(구현·검증됨, EW-4·EW-6):** `bi_guest` 4권한(`superset/bi_roles.py`), 6가지 차트 임베딩 정상 표시, `Public` 0개, `Gamma`·`PUBLIC_ROLE_LIKE` 미사용(`bi-review`가 점검). 상세는 "EW-4 결과"와 03b 11절.
 - **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
 - **Alembic `target_metadata` 연결(EW-1에서 해소: `backend/app/db_metadata.py`로 연결됨):** 이전에는 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않았다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). EW-1에서 정적 모델 `MetaData`와 `include_object` 필터를 연결했다.
 - **업로드 크기 상한:** 이 서비스가 다룰 데이터는 대용량이 아니고 현재 엑셀 파일은 5MB 이하다. Gate ② 검증에서 5MB급 샘플로 backend 사용량을 실측한 결과를 근거로 Gate ③에서 상한을 정한다. 프록시의 요청 본문 상한(`docs/deploy-coordination.md` 7번)과 맞춘다.

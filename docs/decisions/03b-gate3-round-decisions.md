@@ -361,3 +361,34 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - 지원 차트 6가지는 `bi_guest` 4권한만으로 정상 표시된다(`can_explore_json`·퍼머링크 읽기 불필요). 그래도 `rose` 같은 레거시 유형은 지원 차트가 아니다(08 §3-1).
 - guest 요청마다 Superset 로그에 `Failed to add user to db session: Class 'werkzeug.local.LocalProxy' is not mapped` 경고가 남지만 기능 영향은 없다.
 
+## 12. EW-4 확인 3건 결정과 EW-5~7 착수 (2026-10-12, 사용자)
+### 12-1. 11-3 확인 사항 결정
+1. **`bi-review` 7-2 확장:** 두 항목(입장권 유효 시간 재정의 지적, 강제 복구는 표식 계정에 한정)을 추가한다. 이미 승인된 Z5와 10-1을 리뷰 규칙으로 옮기는 것이다. `CLAUDE.md` 변경 이력도 갱신한다.
+2. **`GUEST_TOKEN_JWT_EXP_SECONDS` 가드:** `superset-init`이 적용값을 확인해 300이 아니면 실패하게 한다. 값을 바꿔야 하면 사전 승인을 거쳐 가드 값과 함께 바꾼다.
+3. **표식 없는 기존 계정:** 역할과 관계없이 거부한다(비밀번호 재설정 없이 exit 1). 운영자 정리 절차를 `skills/local-environment`에 적는다. (03b 10-1의 "표식 없는 계정과 이름이 충돌하면 실패"를 허용 역할만 가진 경우까지 넓힌 것이며 EW-3의 알려진 한계를 해소한다.)
+### 12-2. 이어서 진행(사용자 지시)
+- **EW-5:** `CLAUDE.md`, 하네스 스킬·에이전트 문구, `gate-status.md`, 04~08의 EW 결과 반영 확인과 정리.
+- **EW-6:** qa-engineer 통합 검증. 빈 볼륨 새 설치부터 전체 기동, EW-1·3·4 핵심 항목 재확인(접속 계정, 권한 매트릭스, 역할·계정 멱등, 6가지 차트 임베딩, 훅 거부, 위 1~3번 가드), `docker stats`로 8GB 배분 대비 실측, `APP_PROXY_STRIP_PREFIX` true/false, 로그 비밀번호 0건. EW-3·4에서 QA 재실행 없이 넘긴 항목과 이월 항목을 모두 확인한다.
+- **EW-7:** reviewer 점검: 슈퍼유저 접속 없음, D3 예외 범위, Secret 로그 0건, 스텁 시작 거부, 승인 목록 밖 변경 여부.
+- EW-7까지 마친 뒤 커밋·푸시하고 보고한다. 필요 없어진 시험 이미지는 이름을 지정해 정리한다.
+
+## 13. EW-5~7 결과 (2026-10-12, env-engineer·architect 구현, qa-engineer·reviewer 검증)
+### 13-1. 구현 요약
+- 03b 12-1 반영: `bi-review` 7-2 두 항목 추가와 `CLAUDE.md` 변경 이력 갱신, `superset-init`이 `GUEST_TOKEN_JWT_EXP_SECONDS` 적용값을 확인해 300이 아니면 아무것도 바꾸기 전에 실패(`bi_roles.GUEST_TOKEN_EXP_SECONDS`), 표식 없는 기존 계정은 역할과 관계없이 거부(모든 계정을 변경 전에 검사, 하나라도 거부 대상이면 아무것도 바꾸지 않음). 운영자 정리 절차는 `skills/local-environment/SKILL.md`(표식 보정을 삭제보다 권장).
+- 04~08 EW 결과 반영과 하네스 문구 정리(합계 787줄).
+### 13-2. 적용 후 보고 항목(승인 목록 밖, 거부·검사 강화 방향, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 입장권 유효 시간 가드의 값 타입 엄격 검사(`"300"` 문자열·bool 거부) | `superset/ensure_roles.py` | 승인된 가드(12-1 2번)가 설정 실수로 우회되지 않게 | 해당 조건 삭제 |
+| `ci-validate-env.sh`: 주석이 아닌 줄에 `GUEST_TOKEN_JWT_EXP_SECONDS`가 나오면 실패(승인보다 약간 넓음, `globals().update` 같은 우회도 차단)와 네거티브 시험 4건(시험 112개) | `scripts/` | 5분 불변의 정적 보강 | 해당 블록과 시험 줄 삭제 |
+| 표식 있는 계정을 매 기동 `active = True`로 되살림(EW-3부터, 03b 9-1·9-2 목록에 명시 없었음) | `superset/ensure_accounts.py` | 서비스·발급 계정이 비활성이어서 입장권이 안 나오는 상태 방지. 표식 계정·역할 하나로 한정 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 37·39번, `skills/local-environment/SKILL.md`(정리 절차, 가드), `qa-verification` 정리 명령(`--profile test down` → `stop`·`rm -f postgres-test`), `windows-bat-verification.md`(역할 5개) | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화, 실행 중 전체 스택 종료 방지 | - |
+- 사전 승인 필수 범주(새 환경변수·새 의존성·기준선과 다른 설정·권한 확대·모델 변경)에 해당하는 변경은 없다(reviewer EW-7, 환경변수 30개 모두 승인 근거 확인, 모델 7개 sonnet).
+### 13-3. 사용자 확인 대기
+1. **`roles.sql`에서 기존 `bi_app`·`bi_owner`의 속성 재차단(reviewer R1):** db-bootstrap은 역할이 없을 때만 `NOSUPERUSER` 등으로 만든다. 이미 있는 역할에 사람이 슈퍼유저 속성을 주면 다시 막지 않는다. `ALTER ROLE bi_app/bi_owner NOSUPERUSER NOCREATEDB NOCREATEROLE` 고정 문장을 추가하면 권한 축소(적용 후 보고 가능, D3 예외 범위 안의 고정 문장)다. D3 예외 영역이라 적용하지 않았다. 적용하면 db-bootstrap·권한 매트릭스를 QA가 다시 확인해야 한다.
+2. **`superset` 컨테이너 종료 지연:** stop 때 10초 유예가 끝나야 종료된다(exit 137, gunicorn이 SIGTERM에 반응하지 않는 것으로 추정, 원인 미확인). 기능 영향은 없다. `stop_grace_period` 등 compose 변경은 사전 승인 대상이라 권고만 한다.
+3. **`superset-init`이 종료 뒤 `unhealthy`로 표시:** 이미지 HEALTHCHECK 상속으로 추정. 오해 소지가 있으나 기능 문제는 아니다. `healthcheck: disable: true` 같은 compose 변경은 사전 승인 대상이라 권고만 한다.
+### 13-4. 이월·미시험
+- FU-1 이월: 훅의 embedded uuid 등록 표 검사, 발급 API 사용자별 429, backend 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB` 거부, 03b BY3).
+- 미시험: BAT 6종 실행과 Jenkins 실제 실행(Gate ② 보류), guest 경로의 `statement_timeout`, SDK 갱신 실패 시 재시도와 만료 뒤 401 복구, 정적 표 권한 매트릭스의 실제 표 재확인(첫 실제 표 revision `0003` 이후).
+

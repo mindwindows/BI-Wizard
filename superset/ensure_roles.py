@@ -6,7 +6,8 @@
   (schema_access 항목은 sync_permissions.py가 먼저 만든다. 항목 이름은 DATABASE_NAME과 POSTGRES_DB로 조립한다.)
   새 권한은 자동으로 추가하지 않는다(목록에 없는 권한은 통째 교체로 제거된다).
 - guest 불변식(고치지 않고 실패한다, 아무것도 바꾸기 전에 확인한다): 실제 적용된 설정 `GUEST_ROLE_NAME`이 bi_roles.GUEST_ROLE과
-  같다(이름 단일 출처 확인), `PUBLIC_ROLE_LIKE` 미설정, `Public` 역할의 권한 0개. bi_guest 목록에 금지 권한(내보내기·쓰기·
+  같다(이름 단일 출처 확인), `PUBLIC_ROLE_LIKE` 미설정, 실제 적용된 입장권 유효 시간 `GUEST_TOKEN_JWT_EXP_SECONDS`가
+  bi_roles.GUEST_TOKEN_EXP_SECONDS(300)이다(설정에 없으면 Superset 기본 300으로 보고 통과), `Public` 역할의 권한 0개. bi_guest 목록에 금지 권한(내보내기·쓰기·
   Explore·SQL Lab·데이터 접근 계열, bi_roles.forbidden_reason)이 있으면 실패한다.
 - bi_author(Gamma 복사본): **처음 만들 때만** 내장 Gamma의 권한을 복사한다(add_role로 역할과 권한을 한 번에 넣는다).
   그 뒤에는 Gamma와의 차이를 로그로 알리기만 하고 권한은 바꾸지 않는다(권한이 0개여도 되살리지 않는다.
@@ -22,6 +23,7 @@ from bi_roles import (
     AUTHOR_ROLE,
     GAMMA_ROLE,
     GUEST_ROLE,
+    GUEST_TOKEN_EXP_SECONDS,
     ROLE_PERMISSIONS,
     forbidden_reason,
     resolve,
@@ -58,6 +60,13 @@ with app.app_context():
         fail(
             f"설정 GUEST_ROLE_NAME이 {GUEST_ROLE}이(가) 아닙니다(superset_config.py와 bi_roles.GUEST_ROLE이 어긋남). "
             "guest 입장권이 다른 역할로 동작하게 되므로 중단합니다."
+        )
+    # 입장권 유효 시간: 설정에 없으면 Superset 기본값(300)이므로 통과한다. 값만 출력한다(비밀 아님).
+    applied_exp = app.config.get("GUEST_TOKEN_JWT_EXP_SECONDS", GUEST_TOKEN_EXP_SECONDS)
+    if isinstance(applied_exp, bool) or applied_exp != GUEST_TOKEN_EXP_SECONDS:
+        fail(
+            f"설정 GUEST_TOKEN_JWT_EXP_SECONDS가 {applied_exp!r}입니다({GUEST_TOKEN_EXP_SECONDS}여야 합니다). "
+            "입장권 유효 시간은 승인된 값(5분)에서 바꾸지 않으므로 중단합니다(자동으로 고치지 않습니다)."
         )
     if app.config.get("PUBLIC_ROLE_LIKE"):
         fail("설정 PUBLIC_ROLE_LIKE가 설정되어 있습니다. Public 역할이 권한을 갖게 되므로 설정하지 마세요.")

@@ -1,6 +1,6 @@
 # 05. REST API 계약 (FU-1 범위)
 
-**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·역할·enum은 04 부록 A, 필드·권한은 06, 수식 응답은 07, 입장권·동기는 08을 그대로 쓴다.
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·역할·enum은 04 부록 A, 필드·권한은 06, 수식 응답은 07, 입장권·동기는 08을 그대로 쓴다. EW-1·3·4 결과 대조(2026-10-12, EW-5): 계약(경로·필드·코드)은 바뀌지 않았고 E6 설명과 구현 상태 표기만 갱신했다.
 - 의존 결정: 브리프 5절 3·6·8(스텁 전제)·9·10번, `03b` 1-3·1-6·2-4·3-3·3-4·4-2·5-2(K2·K3·K7·Z6), 실험 `03c` X-24·X-28. 결정 원문은 반복하지 않고 `03b n-n`으로만 건다. 구현 상세(클래스·SQL)는 담지 않는다.
 - [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [AP]는 `03b` 6-3 기준).
 - 표지: **[제안]** 이 문서가 처음 내는 안 / **[미답]** 사용자 답 없음(기본값 사용) / **해소(03c A-27)** 표시 이름 갱신은 서버 내부 흐름이라 이 계약의 필드는 변하지 않는다(08 §2-3) / **[AP]** §6 승인 필요. 공통 규칙(경로·오류 형식·상태 코드·목록·값 형식·충돌 응답)은 사용자 답이 없어 기본값으로 쓰며 **[미답]**이다.
@@ -87,7 +87,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 승인]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - |
 | E4 | POST `/dashboards` | 관리자 | `{name, embedded_uuid}` (관리자가 Superset에서 임베드를 켜고 받은 번호를 수동 입력) | 201 dashboard | 409 `ALREADY_EXISTS`, 422(uuid 형식) |
 | E5 | PATCH `/dashboards/{id}` | 관리자 | `{name?, is_active?}` (uuid 불변. 해제는 `is_active=false`, Superset 임베드는 관리자가 따로 끈다) | 200 dashboard | 404 |
-| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표가 아니라 Superset 쪽 임베드 설정으로 확인하므로 오타 uuid는 Superset이 거부해 502가 된다 | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
+| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표를 읽지 않고(`rls` 빈 목록·리소스 1개 `dashboard`·uuid 형식·`user`만 거부, 포털 등록 표 일치 검사는 FU-1e 이월, EW-4 구현) 임베드 존재는 Superset 기본 검사가 확인하므로 오타·미임베드 uuid는 Superset이 400으로 거부해 502 `SUPERSET_REJECTED`가 된다. backend는 uuid를 하이픈 있는 36자 소문자 정규형으로 보낸다(훅 형식 검사, 08 §4) | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
 
 ### 2-6. 상태 확인 · 개발·시험 전용
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
@@ -98,7 +98,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | DV2 | PUT `/dev/stub-user` | 스텁 | `{login_id}` | 204 + 스텁 신원 쿠키 설정(이름 `bi_stub_login`, HttpOnly) [제안] | 404 미등록 |
 | DV3 | DELETE `/dev/stub-user` | 스텁 | - | 204, 쿠키 삭제 | - |
 - Skill: H1·H2는 `local-environment`, DV1~DV3는 `permission-management`(04 §6). 화면 ID(S1~S9, 04 §4)와 겹치지 않게 개발용은 DV로 쓴다.
-- 스텁 안전장치(8번 미결정, 방식만 제안, fail-closed): 스위치 미설정 = 꺼짐(기본 false). 스위치가 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test 등) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부한다(`bi-review` 7-5, 시험은 04 §8). 켜진 설정에서만 스텁 어댑터와 `/dev/*`를 등록하고 꺼져 있으면 경로 자체가 없다(404). 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별하고(config.js 변경 없음), 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 8번에서 어댑터를 바꾸면 `/dev/*`만 사라지고 A1 이하 계약은 그대로다. 스위치 `AUTH_STUB_ENABLED`와 판별 방식은 **이 문서 AP-1 = 통합 AP-13으로 승인됨**(`03b` 6-3).
+- 스텁 안전장치(8번 미결정, 방식만 제안, fail-closed): 스위치 미설정 = 꺼짐(기본 false). 스위치가 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test 등) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부한다(`bi-review` 7-5, 시험은 04 §8). 켜진 설정에서만 스텁 어댑터와 `/dev/*`를 등록하고 꺼져 있으면 경로 자체가 없다(404). 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별하고(config.js 변경 없음), 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다. 8번에서 어댑터를 바꾸면 `/dev/*`만 사라지고 A1 이하 계약은 그대로다. 스위치 `AUTH_STUB_ENABLED`와 판별 방식은 **이 문서 AP-1 = 통합 AP-13으로 승인됨**(`03b` 6-3). 스위치와 시작 거부 판정은 구현됨(EW-1, `backend/app/config.py`, `test_config.py`). 스텁 어댑터와 `/dev/*`는 FU-1a.
 
 ## 3. 오류 코드 사전 (FU-1)
 | 코드 | HTTP | `details` | 뜻 |
@@ -117,7 +117,8 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | `PREVIEW_BUSY` · `GUEST_TOKEN_RATE_LIMITED` | 429 | `retry_after` | 미리보기 사용자당 동시 1건·전역 상한 / 입장권 사용자별 제한(한도 값 **[미답]**, 08 §4) |
 | `SUPERSET_REJECTED` · `SUPERSET_UNAVAILABLE` | 502·503 | - | Superset이 거부 / 연결 불가 |
 | `INTERNAL_ERROR` | 500 | - | 예기치 않은 오류 |
-- 계산 열 칸의 오류 코드 `E1`(0으로 나눔) `E2`(글자 길이 범위) `E3`(날짜 범위)는 API 오류가 아니라 Row `errors` 값이며 문구는 D1 `cell_errors`가 준다(07 §2-2).
+- 계산 열 칸의 오류 코드 `E1`(0으로 나눔) `E2`(글자 길이 범위) `E3`(날짜 범위)는 API 오류가 아니라 Row `errors` 값이며 문구는 D1 `cell_errors`가 준다(07 §2-2). 이 셀 코드는 §2-5의 엔드포인트 ID `E1`~`E6`(Superset·대시보드)과 이름만 같고 별개다.
+- `VALIDATION_ERROR`의 필드 코드(`details.fields[].code`): `REQUIRED` `OUT_OF_RANGE` `BAD_FORMAT` `NOT_IN_OPTIONS` `NOT_PERIOD_START` `READ_ONLY` `TOO_LONG` `RESERVED`. API 오류 코드가 아니며 HTTP 422 한 가지로 돌려준다.
 
 ## 4. 권한 매트릭스와의 일치 (06 §4-1)
 | 06 동작 | 엔드포인트 | 권한 열 |
@@ -137,7 +138,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ## 6. 승인 상태 (`03b` 6-3. 통합 번호는 04 §9-1: 이 문서의 AP-1 = 통합 AP-13, AP-2 = 통합 AP-14)
 | 번호 | 항목 | 시점 |
 | --- | --- | --- |
-| AP-1 | **승인**: 새 환경변수 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 fail-closed 판별(`APP_ENV` 명시 설정 + 허용 목록 local·test, 04 §8). 8번 확정 시 어댑터 변수는 따로 승인 | 승인됨 |
+| AP-1 | **승인**: 새 환경변수 `AUTH_STUB_ENABLED`(스텁 켜기, 기본 꺼짐)와 fail-closed 판별(`APP_ENV` 명시 설정 + 허용 목록 local·test, 04 §8). 8번 확정 시 어댑터 변수는 따로 승인 | 승인됨, 스위치·시작 거부 구현됨(EW-1) |
 | AP-2 | **승인**(통합 AP-14): 04 부록 A 갱신 — `PERIOD_CONFLICT` 추가, 이 문서의 오류 코드 사전 채택 | 승인됨 |
 | - | 새 런타임 의존성·기준선과 다른 설정·모델 변경: 이 문서 없음. `/health` 필드 추가는 03b 3-6에서 승인됨 | - |
 - 승인된 **[제안]**(`03b` 6-2): 숫자 십진 문자열(일반 JSON 숫자와 다름), 이름 길이 상한·금지 문자, 붙여넣기 요청 상한 A/B, `WRITE_BUSY`, 클라이언트 임시 행, `/health` 새 필드의 메모리 값, `E3`가 `embedded_uuid`를 모두에게 노출, `E1` 상태 값을 읽기로 공개, 스텁 쿠키 방식, `LAST_ADMIN` 보호, 검사(D2)를 200으로 응답.

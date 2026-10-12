@@ -39,7 +39,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - 사용자가 디자인과 Reference를 고르면 `docs/decisions/`에 기록하고 Gate ②로 넘어간다.
 
 ### Gate ②: ENVIRONMENT BOOTSTRAP
-- DB 마이그레이션은 **Alembic**으로 결정됐다(D1~D7, `docs/decisions/03-migration-tool.md`). env-engineer가 `migrate` 서비스, tmpfs 테스트 DB(profile), Superset 별도 DB와 읽기 전용 계정을 반영한다. D2는 Gate ③, D6의 Jenkins 적용은 Jenkins 실행 환경 확인 후 정한다.
+- DB 마이그레이션은 **Alembic**으로 결정됐다(D1~D7, `docs/decisions/03-migration-tool.md`). env-engineer가 `migrate` 서비스, tmpfs 테스트 DB(profile), Superset 별도 DB와 읽기 전용 계정을 반영한다. D2는 결정됐다(전용 schema `bi_data`). D6의 Jenkins 적용은 Jenkins 실행 환경 확인 후 정한다.
 - env-engineer는 **파일을 만들기 전에** 사전 제안(하위 경로 환경변수 이름, 메모리 배분, 하위 경로 구성 확인 결과 등)을 메인에게 올리고, 메인이 사용자 승인을 받은 뒤에 만든다.
 - env-engineer가 환경을 만들고, qa-engineer가 `qa-verification` 스킬에 따라 검증한다. 둘은 SendMessage로 문제를 주고받는다.
 - Environment Ready 체크리스트(`env-bootstrap` 스킬)가 모두 통과하거나, 실패 항목에 사용자 승인이 난 뒤에만 Gate ③으로 넘어간다.
@@ -56,7 +56,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - API 계약과 모듈 경계는 승인 후에만 `docs/decisions/`에 확정한다. 이후 계약 변경은 사용자 승인이 필요하다.
 
 ### Gate ④: 기능 개발
-- **진입 조건:** Gate ③에서 설계한 최소 권한 앱 계정 분리가 완료되어 있어야 한다(`docs/gate-status.md` 인계 사항). backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다.
+- **진입 조건:** 최소 권한 앱 계정 분리(EW-1)와 Superset 계정·역할(EW-3·EW-4)이 완료·검증되어 있어야 하고, EW-5~EW-7 결과를 사용자가 승인해야 한다(`docs/gate-status.md`). backend가 슈퍼유저로 접속하면 `bi-review`가 차단한다.
 - 기능 단위 목록은 Gate ③에서 승인된 순서를 따른다. 한 번에 한 단위만 진행한다.
 - 단위마다 다음 순서를 따른다.
   1. backend-dev, frontend-dev가 계약을 확인하고 테스트를 포함해 구현한다.

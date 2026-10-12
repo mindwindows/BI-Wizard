@@ -10,7 +10,8 @@
 #     Superset 계정(EW-3): 관리자·서비스·발급 전용 계정 이름은 비어 있지 않고 서로 달라야 하며, superset-init은 migrate
 #     완료를 기다리고, 서비스·발급 비밀번호는 backend와 superset-init에만 전달한다.
 #     guest token(EW-4, AP-1): backend와 migrate는 GUEST_TOKEN_JWT_SECRET을 받지 않고(직접 서명 금지) backend/app 코드에도 이
-#     이름이 없다. superset/superset_config.py는 GUEST_ROLE_NAME을 bi_guest로 두고 PUBLIC_ROLE_LIKE를 설정하지 않는다.
+#     이름이 없다. superset/superset_config.py는 GUEST_ROLE_NAME을 bi_guest로 두고 PUBLIC_ROLE_LIKE와
+#     GUEST_TOKEN_JWT_EXP_SECONDS(입장권 유효 시간, 기본 300초 유지, EW-5)를 설정하지 않는다.
 #  6) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
 # 사용: sh scripts/ci-validate-env.sh [출력파일]
 # 이 검사의 네거티브 케이스 시험: sh scripts/test-ci-validate-env.sh
@@ -184,6 +185,11 @@ else
   grep -Eq '^GUEST_TOKEN_VALIDATOR_HOOK = [A-Za-z_]' "$SUPERSET_CONFIG" || fail "$SUPERSET_CONFIG 에 GUEST_TOKEN_VALIDATOR_HOOK 설정이 없습니다."
   if grep -Eq '^[[:space:]]*PUBLIC_ROLE_LIKE[[:space:]]*(:[^=]*)?=' "$SUPERSET_CONFIG"; then
     fail "$SUPERSET_CONFIG 에 PUBLIC_ROLE_LIKE 를 설정하면 안 됩니다(Public 권한 0개 유지)."
+  fi
+  # 입장권 유효 시간(03b 12-1 ②): 이 파일이 GUEST_TOKEN_JWT_EXP_SECONDS 를 재정의하면 안 된다(Superset 기본 300초 유지).
+  # 주석 줄만 제외하고 이름이 나오면 모두 실패시킨다(대입, 딕셔너리 갱신 등 우회 포함). 실제 적용값은 ensure_roles.py 가 300인지 확인한다.
+  if grep -Ev '^[[:space:]]*#' "$SUPERSET_CONFIG" | grep -q 'GUEST_TOKEN_JWT_EXP_SECONDS'; then
+    fail "$SUPERSET_CONFIG 가 GUEST_TOKEN_JWT_EXP_SECONDS 를 재정의합니다(입장권 유효 시간은 Superset 기본 300초 유지, 변경은 사전 승인과 bi_roles.GUEST_TOKEN_EXP_SECONDS 동시 변경)."
   fi
 fi
 if ! service_block backend | grep -Eq '^[[:space:]]+POSTGRES_APP_PASSWORD:'; then
