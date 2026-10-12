@@ -56,7 +56,7 @@
 
 ## 7. 검증 명령
 ```
-sh scripts/ci-validate-env.sh && sh scripts/test-ci-validate-env.sh   # 변수 목록·계정 분리·roles.sql 규칙과 그 네거티브 케이스(Docker 불필요)
+sh scripts/ci-validate-env.sh && sh scripts/test-ci-validate-env.sh   # 변수 목록·계정 분리·roles.sql 규칙·AG Grid Enterprise 혼입 방지와 frontend 의존성 정확한 버전 고정, 그 네거티브 케이스(Docker 불필요)
 docker compose config --quiet                       # 구성 (CI는 sh scripts/ci-validate-env.sh 로 만든 더미 env 사용)
 docker build --target test backend                  # ruff check/format, pytest
 docker build --target test frontend                 # eslint, tsc, vitest

@@ -22,6 +22,12 @@ reset_work() {
   cp -f "$ROOT/superset/superset_config.py" "$WORK/superset/superset_config.py"
   printf '# 시험용 빈 모듈\n' > "$WORK/backend/app/__init__.py"
   cp -f "$ROOT/scripts/"*.bat "$WORK/scripts/" 2>/dev/null || true
+  # frontend 파일(AG Grid Enterprise 혼입 검사용). 원본에 없으면 복사하지 않는다(검사도 건너뛴다).
+  mkdir -p "$WORK/frontend"
+  rm -rf "$WORK/frontend/src"
+  cp -f "$ROOT/frontend/package.json" "$WORK/frontend/package.json" 2>/dev/null || true
+  cp -f "$ROOT/frontend/package-lock.json" "$WORK/frontend/package-lock.json" 2>/dev/null || true
+  if [ -d "$ROOT/frontend/src" ]; then cp -R "$ROOT/frontend/src" "$WORK/frontend/src"; else mkdir -p "$WORK/frontend/src"; fi
 }
 
 # 서비스 블록 안에서만 줄을 지우거나(awk) 추가한다.
@@ -221,6 +227,23 @@ expect_fail "superset_config가 입장권 유효 시간을 딕셔너리로 우�
 expect_pass "superset_config 주석에만 입장권 유효 시간 언급" sh -c "printf '# GUEST_TOKEN_JWT_EXP_SECONDS 는 기본값\n' >> '$WORK/superset/superset_config.py'"
 expect_fail "compose가 .env.example에 없는 변수 사용" "에 없는 변수" add_after_service backend '      NEW_THING: ${NEW_THING}'
 expect_fail "compose에 latest 태그" ":latest 태그" sh -c "printf '    image: foo:latest\n' >> '$WORK/compose.yml'"
+
+# --- AG Grid Enterprise 혼입 / 의존성 버전 고정 ---
+fe_pkg_add() { # package.json의 "dependencies": { 바로 다음 줄에 항목을 넣는다
+  sed -i "s|^  \"dependencies\": {|  \"dependencies\": {\n    $1,|" "$WORK/frontend/package.json"
+}
+lock_add() { # package-lock.json의 "packages": { 바로 다음 줄에 키를 넣는다
+  sed -i "s|^  \"packages\": {|  \"packages\": {\n    \"node_modules/ag-charts-enterprise\": {\"version\": \"1.0.0\"},|" "$WORK/frontend/package-lock.json"
+}
+src_add() { mkdir -p "$WORK/frontend/src" && printf '%s\n' "$1" >> "$WORK/frontend/src/enterprise-test.tsx"; }
+expect_fail "package.json에 ag-grid-enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"ag-grid-enterprise": "34.0.0"'
+expect_fail "package-lock.json에 node_modules/ag-charts-enterprise 키" "AG Grid Enterprise 패키지" lock_add
+expect_fail "소스에 import ... from \"ag-grid-enterprise\"" "AG Grid Enterprise 패키지를 import" src_add 'import { ModuleRegistry } from "ag-grid-enterprise";'
+expect_fail "소스의 동적 import(ag-charts-enterprise)" "AG Grid Enterprise 패키지를 import" src_add 'const m = await import("ag-charts-enterprise");'
+expect_fail "소스의 옛 패키지 @ag-grid-enterprise/ import" "AG Grid Enterprise 패키지를 import" src_add "import '@ag-grid-enterprise/all-modules';"
+expect_fail "의존성에 ^ 범위 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "^1.2.3"'
+expect_fail "의존성에 latest 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "latest"'
+expect_pass "소스 주석에만 ag-grid-enterprise 언급" src_add '// ag-grid-enterprise 는 금지(import "ag-grid-enterprise" 쓰지 말 것)'
 
 # --- 파괴적 명령 ---
 # (금지 명령 문구를 이 파일에 그대로 쓰지 않도록 인자를 나눠 만든다)
