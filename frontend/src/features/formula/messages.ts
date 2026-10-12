@@ -1,7 +1,7 @@
 import { ApiError } from "../../api";
 import type { Column } from "../dataset/types";
 import { COLUMN_TYPE_LABELS } from "../dataset/types";
-import { displayText } from "../entry/values";
+import { displayText, formatComputedNumber } from "../entry/values";
 import { asErrorItems } from "./api";
 import type { FormulaErrorItem, PreviewRow } from "./types";
 
@@ -56,12 +56,17 @@ export const RESULT_TYPE_LABELS: Record<string, string> = COLUMN_TYPE_LABELS;
 
 export const resultTypeLabel = (type: string | null | undefined): string => (type ? (RESULT_TYPE_LABELS[type] ?? type) : "알 수 없음");
 
-export type PreviewCell = { kind: "value"; text: string } | { kind: "error"; text: string; code: string } | { kind: "empty"; text: string };
+export type PreviewCell = { kind: "value"; text: string; full?: string; truncated?: boolean } | { kind: "error"; text: string; code: string } | { kind: "empty"; text: string };
 
 /** 미리보기 한 칸: 값 / 오류 / 빈 값을 구별한다(05 §1: 오류 칸은 value null + error 코드). */
 export function previewCell(row: PreviewRow, resultType: string): PreviewCell {
   if (row.error) return { kind: "error", text: "오류", code: row.error };
   if (row.value === null || row.value === undefined) return { kind: "empty", text: "빈 값" };
+  // 계산 결과 숫자는 계산 열 칸과 같이 소수 최대 6자리로 줄여 보이고, 전체 값은 툴팁으로 둔다.
+  if (resultType === "number") {
+    const shown = formatComputedNumber(String(row.value));
+    return shown.truncated ? { kind: "value", text: shown.text, full: shown.full, truncated: true } : { kind: "value", text: shown.text };
+  }
   const column = { type: resultType in RESULT_TYPE_LABELS ? resultType : "text" } as Column;
   return { kind: "value", text: displayText(column, row.value) };
 }

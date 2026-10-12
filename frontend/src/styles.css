@@ -881,3 +881,7 @@ button.link {
   padding: 4px 8px;
   background: #fafbfc;
 }
+
+/* 선택한 계산 열 칸의 전체 값: 38자리도 잘리지 않게 줄을 바꾼다 */
+.selected-cell { margin-top: 8px; }
+.selected-cell-value { overflow-wrap: anywhere; user-select: all; }

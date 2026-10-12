@@ -31,6 +31,58 @@ export function formatNumber(raw: string, decimals?: number): string {
   return `${negative ? "-" : ""}${grouped}${padded ? `.${padded}` : ""}`;
 }
 
+/** 계산 열 값의 기본 표시 최대 소수 자릿수(결정 2026-10-12, 03b 21-1 결정 2). 화면 표시만 줄이며 저장값·API 값은 그대로다. */
+export const COMPUTED_MAX_DECIMALS = 6;
+
+export interface ComputedDisplay {
+  /** 화면 표시 글자(소수 최대 6자리, 끝자리 0 제거, 천 단위 쉼표) */
+  text: string;
+  /** API가 준 십진 문자열 그대로(툴팁·Inspector·복사용) */
+  full: string;
+  /** 6자리를 넘는 0이 아닌 자릿수가 잘려 표시와 전체 값이 다른가 */
+  truncated: boolean;
+}
+
+/**
+ * 계산 열 숫자의 표시 서식. 부동소수점으로 바꾸지 않고 문자열만 다룬다.
+ * 반올림은 '0에서 먼 쪽'(half away from zero): 7번째 소수 자리가 5 이상이면 6번째 자리를 올린다(음수도 크기 기준).
+ * 반올림 결과가 0이면 부호를 떼어 "-0"이 나오지 않게 한다. 십진 형식이 아니면 받은 글자를 그대로 돌려준다.
+ */
+export function formatComputedNumber(raw: string): ComputedDisplay {
+  if (!DECIMAL.test(raw)) return { text: raw, full: raw, truncated: false };
+  const negative = raw.startsWith("-");
+  const [int, frac = ""] = (negative ? raw.slice(1) : raw).split(".");
+  let digits = int + frac.slice(0, COMPUTED_MAX_DECIMALS).padEnd(COMPUTED_MAX_DECIMALS, "0");
+  const rest = frac.slice(COMPUTED_MAX_DECIMALS);
+  if (rest !== "" && rest[0] >= "5") digits = incrementDigits(digits);
+  const scale = COMPUTED_MAX_DECIMALS;
+  const intPart = digits.slice(0, digits.length - scale).replace(/^0+(?=\d)/, "") || "0";
+  const fracPart = digits.slice(digits.length - scale).replace(/0+$/, "");
+  const zero = /^0*$/.test(intPart) && fracPart === "";
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return {
+    text: `${negative && !zero ? "-" : ""}${grouped}${fracPart ? `.${fracPart}` : ""}`,
+    full: raw,
+    truncated: /[1-9]/.test(rest),
+  };
+}
+
+/** 십진 숫자 글자 묶음에 1을 더한다(자리 올림 포함, 길이 제한 없음). */
+function incrementDigits(digits: string): string {
+  const out = digits.split("");
+  for (let i = out.length - 1; i >= 0; i -= 1) {
+    if (out[i] === "9") out[i] = "0";
+    else {
+      out[i] = String(Number(out[i]) + 1);
+      return out.join("");
+    }
+  }
+  return `1${out.join("")}`;
+}
+
+/** 이 열의 값이 '계산 열 숫자' 표시 규칙(소수 최대 6자리)을 따르는가. 입력 열은 기존 규칙을 유지한다. */
+export const isComputedNumber = (column: Column): boolean => column.kind === "formula" && column.type === "number";
+
 function asBool(value: CellValue): boolean | null {
   if (value === true || value === "true") return true;
   if (value === false || value === "false") return false;
@@ -43,6 +95,7 @@ export function displayText(column: Column, value: CellValue | undefined, errorC
   if (isBlank(value)) return "";
   switch (column.type) {
     case "number":
+      if (isComputedNumber(column)) return formatComputedNumber(String(value)).text;
       return formatNumber(String(value), decimalsOf(column));
     case "boolean": {
       const flag = asBool(value as CellValue);

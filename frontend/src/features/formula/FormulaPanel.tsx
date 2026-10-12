@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ErrorNotice, Loading } from "../../components";
 import { COLUMN_KIND_LABELS, COLUMN_TYPE_LABELS, type Column } from "../dataset/types";
+import type { SelectedCell } from "../entry/selectedCell";
+import { cellErrorText } from "./messages";
 import { getFormulaView } from "./api";
 import { FormulaEditor, type SaveInput, type SaveOutcome } from "./FormulaEditor";
 import type { FormulaView } from "./types";
@@ -16,12 +18,14 @@ interface FormulaPanelProps {
   /** 정의 버전. 바뀌면(다른 열 이름 변경, 수식 저장) 수식 보기를 다시 읽는다 */
   version: number;
   save: (input: SaveInput) => Promise<SaveOutcome>;
+  /** 그리드에서 고른 계산 열 칸(이 열의 칸일 때만 전체 값을 보여 준다) */
+  selectedCell?: SelectedCell | null;
 }
 
 type Loaded = { key: string; view?: FormulaView; error?: unknown } | null;
 
 /** S4 Inspector의 계산 열: 수식 보기(D6, 누구나 읽기 전용) + 정의 담당자의 수식 고치기(D5). */
-export function FormulaPanel({ datasetId, column, columns, canDefine, version, save }: FormulaPanelProps) {
+export function FormulaPanel({ datasetId, column, columns, canDefine, version, save, selectedCell }: FormulaPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
   const [reload, setReload] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -51,7 +55,7 @@ export function FormulaPanel({ datasetId, column, columns, canDefine, version, s
             </button>
           </ErrorNotice>
         ) : null}
-        {view && ready?.error === undefined ? <FormulaViewBody datasetId={datasetId} column={column} view={view} /> : null}
+        {view && ready?.error === undefined ? <FormulaViewBody datasetId={datasetId} column={column} view={view} selectedCell={selectedCell ?? null} /> : null}
       </section>
       {canDefine ? (
         editorOpen ? (
@@ -82,7 +86,7 @@ export function FormulaPanel({ datasetId, column, columns, canDefine, version, s
   );
 }
 
-function FormulaViewBody({ datasetId, column, view }: { datasetId: number; column: Column; view: FormulaView }) {
+function FormulaViewBody({ datasetId, column, view, selectedCell }: { datasetId: number; column: Column; view: FormulaView; selectedCell: SelectedCell | null }) {
   return (
     <>
       <pre className="formula-text" aria-label="수식 전체" data-testid="formula-text">
@@ -121,6 +125,48 @@ function FormulaViewBody({ datasetId, column, view }: { datasetId: number; colum
           )}
         </dd>
       </dl>
+      <SelectedCellValue column={column} cell={selectedCell} />
     </>
+  );
+}
+
+/** 그리드에서 고른 칸의 전체 값. 칸에는 소수 6자리까지만 보이므로 여기서 API가 준 값을 그대로 읽는다(쉼표·반올림 없음). */
+function SelectedCellValue({ column, cell }: { column: Column; cell: SelectedCell | null }) {
+  const mine = cell && cell.columnId === column.id ? cell : null;
+  if (!mine) {
+    return (
+      <p className="muted" data-testid="selected-cell-hint">
+        입력 그리드에서 이 열의 칸을 누르면 그 칸의 전체 값을 여기에 보여 줍니다.
+      </p>
+    );
+  }
+  return (
+    <section aria-label="선택한 칸의 전체 값" className="selected-cell">
+      <h4>선택한 칸의 전체 값</h4>
+      <dl className="info">
+        <dt>기간</dt>
+        <dd data-testid="selected-cell-period">{mine.period || "없음"}</dd>
+        <dt>행 번호</dt>
+        <dd data-testid="selected-cell-row">{mine.rowId === null ? "저장 전 새 행" : `#${mine.rowId}`}</dd>
+        <dt>열 이름</dt>
+        <dd data-testid="selected-cell-column">{mine.columnName}</dd>
+        <dt>전체 값</dt>
+        <dd>
+          {mine.errorCode ? (
+            <span data-testid="selected-cell-value">
+              오류 {mine.errorCode}: {cellErrorText(mine.errorCode, undefined)}
+            </span>
+          ) : mine.full === null ? (
+            <span data-testid="selected-cell-value" className="muted">
+              빈 값
+            </span>
+          ) : (
+            <code data-testid="selected-cell-value" className="selected-cell-value">
+              {mine.full}
+            </code>
+          )}
+        </dd>
+      </dl>
+    </section>
   );
 }

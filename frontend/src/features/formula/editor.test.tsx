@@ -301,6 +301,20 @@ describe("미리보기(D3)", () => {
     expect(screen.getByTestId("preview-summary").textContent).toBe("결과: 숫자 · 전체 36행 중 오류 칸 1개 · 빈 값 1개");
   });
 
+  it("숫자 결과는 소수 최대 6자리로 줄여 보이고 줄었을 때만 툴팁에 전체 값이 있다", async () => {
+    const rows = [
+      { row_id: 1, period: "2026-03-01", value: "1234.5000000", error: null },
+      { row_id: 2, period: "2026-02-01", value: "3.141592653589", error: null },
+      { row_id: 3, period: "2026-01-01", value: "-0.0000004", error: null },
+    ];
+    mount({ handlers: { "POST /datasets/7/formulas/preview": () => json(200, { ...PREVIEW_OK, rows, total_rows: 3, error_count: 0, empty_count: 0 }) } });
+    typeExpr("1");
+    const table = await screen.findByRole("table", { name: "미리보기 결과" });
+    const cells = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[2]);
+    expect(cells.map((c) => c.textContent)).toEqual(["1,234.5", "3.141593", "0"]);
+    expect(cells.map((c) => c.getAttribute("title"))).toEqual([null, "전체 값: 3.141592653589", "전체 값: -0.0000004"]);
+  });
+
   it("행이 하나도 없으면 안내", async () => {
     mount({ handlers: { "POST /datasets/7/formulas/preview": () => json(200, { ...PREVIEW_OK, rows: [], total_rows: 0, error_count: 0, empty_count: 0 }) } });
     typeExpr("1");

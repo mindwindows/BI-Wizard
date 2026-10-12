@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { ErrorNotice } from "../../../components";
+import type { SelectedCell } from "../../entry/selectedCell";
 import { FormulaEditor, type SaveInput, type SaveOutcome } from "../../formula/FormulaEditor";
 import { FormulaPanel } from "../../formula/FormulaPanel";
 import {
@@ -61,10 +62,12 @@ interface InspectorProps {
   feedback: Feedback;
   actions: Actions;
   onSelect: (selection: Selection) => void;
+  /** 그리드에서 고른 계산 열 칸 */
+  selectedCell?: SelectedCell | null;
 }
 
 /** S4 우측 Inspector. 접기·폭 조절이 되고, 정의 권한이 없으면 모든 입력칸이 읽기 전용이다. */
-export function Inspector({ detail, columns, canDefine, selection, feedback, actions }: InspectorProps) {
+export function Inspector({ detail, columns, canDefine, selection, feedback, actions, selectedCell }: InspectorProps) {
   const [open, setOpen] = useState(true);
   const [width, setWidth] = useState(360);
   const widthId = useId();
@@ -128,6 +131,7 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
             columns={columns}
             canDefine={canDefine}
             version={detail.def_version}
+            selectedCell={selectedCell}
             save={actions.saveFormula}
           />
           <details className="column-info">

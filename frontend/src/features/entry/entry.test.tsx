@@ -984,3 +984,85 @@ describe("엑셀 붙여넣기 (C4)", () => {
     act(() => ctx.api.stopEditing(true));
   });
 });
+
+
+describe("계산 열 표시 자릿수(결정 2026-10-12): 칸은 소수 최대 6자리, 전체 값은 툴팁과 복사", () => {
+  const LONG: Row[] = [
+    row(1, { "1": "2026-03-01", "2": "0.1234567890", "3": null, "4": null, "5": "1234.5000000" }),
+    row(2, { "1": "2026-02-01", "2": "3", "3": null, "4": null, "5": "-0.0000004" }),
+    row(3, { "1": "2026-01-01", "2": null, "3": null, "4": null, "5": "12345678901234567890123456789012345678" }),
+    row(4, { "1": "2025-12-01", "2": null, "3": null, "4": null, "5": "2.718281828459" }),
+  ];
+  const title = (grid: HTMLElement, rowKey: string, colId: string) => cell(grid, rowKey, colId).querySelector(".cell-text")?.getAttribute("title");
+
+  it("칸에는 줄인 값이, 6자리를 넘게 잘린 칸의 툴팁에는 전체 값이 있다", async () => {
+    const { grid } = await openGrid({ rows: LONG });
+    expect(text(grid, "r1", "5")).toBe("1,234.5");
+    expect(title(grid, "r1", "5")).not.toContain("전체 값"); // 끝자리 0만 잘렸으면 툴팁 없음(기존 안내)
+    expect(text(grid, "r2", "5")).toBe("0"); // -0 아님
+    expect(title(grid, "r2", "5")).toBe("전체 값: -0.0000004");
+    expect(text(grid, "r3", "5")).toBe("12,345,678,901,234,567,890,123,456,789,012,345,678");
+    expect(text(grid, "r4", "5")).toBe("2.718282");
+    expect(title(grid, "r4", "5")).toBe("전체 값: 2.718281828459");
+  });
+
+  it("입력 열의 표시는 그대로(깎지 않음), 계산 열 폭은 190px 정의를 유지한다", async () => {
+    const { grid } = await openGrid({ rows: LONG });
+    expect(text(grid, "r1", "2")).toBe("0.1234567890");
+    expect(text(grid, "r2", "2")).toBe("3.00");
+    expect(cell(grid, "r1", "5").style.width).toBe("190px");
+  });
+
+  async function focusCell(api: GridApi<GridRow>, rowKey: string, colId: string) {
+    const index = api.getRenderedNodes().find((n) => n.data?.key === rowKey)?.rowIndex as number;
+    act(() => api.setFocusedCell(index, colId));
+    await sleep(10);
+  }
+
+  // jsdom에는 ClipboardEvent/DataTransfer가 없다. 일반 Event에 clipboardData 모양만 붙여 보내므로, 실제 브라우저의 클립보드 기록은 확인하지 못한다.
+  function copyEvent(target: Element) {
+    const data: Record<string, string> = {};
+    const event = new Event("copy", { bubbles: true, cancelable: true }) as Event & { clipboardData: { setData: (t: string, v: string) => void } };
+    event.clipboardData = { setData: (type, value) => void (data[type] = value) };
+    act(() => void target.dispatchEvent(event));
+    return { event, data };
+  }
+
+  it("계산 칸을 고르고 복사하면 쉼표·반올림 없는 전체 값이 text/plain에 들어간다", async () => {
+    const { grid, api } = await openGrid({ rows: LONG });
+    for (const [key, full] of [["r4", "2.718281828459"], ["r2", "-0.0000004"], ["r3", "12345678901234567890123456789012345678"], ["r1", "1234.5000000"]]) {
+      await focusCell(api, key, "5");
+      const { event, data } = copyEvent(cell(grid, key, "5"));
+      expect(data["text/plain"]).toBe(full);
+      expect(event.defaultPrevented).toBe(true);
+    }
+  });
+
+  it("입력 열 칸·오류 칸·빈 계산 칸은 가로채지 않는다(브라우저 기본 동작)", async () => {
+    const { grid, api } = await openGrid({ rows: [...LONG, row(5, { "1": "2025-11-01", "2": "1" }, { "5": "E1" }), row(6, { "1": "2025-10-01", "2": "1", "5": null })] });
+    for (const [key, col] of [["r1", "2"], ["r5", "5"], ["r6", "5"]]) {
+      await focusCell(api, key, col);
+      const { event, data } = copyEvent(cell(grid, key, col));
+      expect(data["text/plain"]).toBeUndefined();
+      expect(event.defaultPrevented).toBe(false);
+    }
+  });
+
+  it("그리드 밖에서 일어난 복사는 가로채지 않는다", async () => {
+    const { api } = await openGrid({ rows: LONG });
+    await focusCell(api, "r4", "5");
+    (document.activeElement as HTMLElement | null)?.blur();
+    const outside = document.body.appendChild(document.createElement("p"));
+    const { event, data } = copyEvent(outside);
+    expect(data["text/plain"]).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+    outside.remove();
+  });
+
+  it("복사해도 서버로 가는 요청이 없다(표시만 바뀜)", async () => {
+    const { grid, api, calls } = await openGrid({ rows: LONG });
+    await focusCell(api, "r4", "5");
+    copyEvent(cell(grid, "r4", "5"));
+    expect(writes(calls)).toHaveLength(0);
+  });
+});

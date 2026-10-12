@@ -630,7 +630,7 @@ function PreviewPanel({ trimmedEmpty, status, shown, stale, cellErrors, onRetry 
                       <td>#{row.row_id}</td>
                       <td
                         className={`preview-${cell.kind}`}
-                        title={cell.kind === "error" ? `계산 오류(${cell.code}): ${cellErrorText(cell.code, cellErrors)}` : cell.kind === "empty" ? "빈 값: 계산에 쓴 칸 중 비어 있는 칸이 있습니다." : undefined}
+                        title={cell.kind === "error" ? `계산 오류(${cell.code}): ${cellErrorText(cell.code, cellErrors)}` : cell.kind === "empty" ? "빈 값: 계산에 쓴 칸 중 비어 있는 칸이 있습니다." : cell.kind === "value" && cell.truncated ? `전체 값: ${cell.full}` : undefined}
                       >
                         {cell.kind === "error" ? (
                           <>

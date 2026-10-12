@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { ApiError } from "../../../api";
 import { ErrorNotice, Loading } from "../../../components";
 import { EntryGrid } from "../../entry/EntryGrid";
+import type { SelectedCell } from "../../entry/selectedCell";
 import { createFormula, updateFormula } from "../../formula/api";
 import type { SaveInput, SaveOutcome } from "../../formula/FormulaEditor";
 import { addColumn, getDataset, sortColumns, updateColumn, updateDataset } from "../api";
@@ -32,6 +33,8 @@ function Workspace({ datasetId }: { datasetId: number }) {
   const versionRef = useRef(0);
   // 수식을 저장하면 계산 열 값이 바뀌므로 그리드가 행을 다시 읽도록 올린다.
   const [gridRefresh, setGridRefresh] = useState(0);
+  // 그리드에서 고른 계산 열 칸(전체 값을 Inspector 수식 보기에 보여 준다)
+  const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
   const detail = loaded && "detail" in loaded ? loaded.detail : null;
   // 열 목록은 정의가 바뀔 때만 새 배열이 된다(그리드 열 정의가 불필요하게 다시 만들어지지 않게).
   const columns = useMemo(() => sortColumns(detail?.columns ?? []), [detail?.columns]);
@@ -271,6 +274,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
               onVersion={noteVersion}
               onDefinitionStale={refetch}
               refreshToken={gridRefresh}
+              onSelectedCell={setSelectedCell}
             />
           )}
         </section>
@@ -283,6 +287,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
           feedback={feedback}
           actions={actions}
           onSelect={select}
+          selectedCell={selectedCell}
         />
       </div>
     </section>

@@ -13,7 +13,7 @@ import {
   SelectEditorModule,
   TextEditorModule,
   TooltipModule,
-  themeQuartz, type CellEditRequestEvent, type CellDoubleClickedEvent, type CellKeyDownEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
+  themeQuartz, type CellEditRequestEvent, type CellDoubleClickedEvent, type CellKeyDownEvent, type CellClickedEvent, type CellFocusedEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ErrorNotice, Loading } from "../../components";
@@ -22,7 +22,8 @@ import { useFunctionCatalog } from "../formula/catalog";
 import { ENTRY_ROW, type GridRow } from "./model";
 import { PAGE_SIZES, useEntry, type EntryParams } from "./useEntry";
 import { FORMULA_EDIT_NOTICE, ROW_COLUMN_ID, buildColumnDefs } from "./gridColumns";
-import { displayText } from "./values";
+import { displayText, isBlank, isComputedNumber } from "./values";
+import type { SelectedCell } from "./selectedCell";
 
 // AG Grid Community 모듈 중 이 화면이 쓰는 것만 등록한다(AllCommunityModule 대비 번들 약 20% 감소, ag-grid-enterprise는 설치하지 않는다).
 // 모듈을 빠뜨리면 개발 모드에서 'AG Grid error #200'이 난다. 기능을 추가할 때는 ValidationModule을 잠깐 등록해 시험을 돌려 확인한다.
@@ -50,13 +51,15 @@ export interface EntryGridProps extends Omit<EntryParams, "columns"> {
   onSelectColumn: (columnId: number) => void;
   /** 그리드 API를 받는다(시험·자동화용: jsdom은 더블클릭으로 편집을 시작하지 못한다). */
   onGridApi?: (api: GridApi<GridRow>) => void;
+  /** 눌러 둔(포커스된) 계산 열 칸의 전체 값. 계산 열 칸이 아니면 null. Inspector의 수식 보기가 보여 준다. */
+  onSelectedCell?: (cell: SelectedCell | null) => void;
 }
 
 const MAX_LISTED = 20;
 
 /** S4 중앙 입력 그리드: 조회(C1)·칸 편집(C3)·임시 행(C2)·엑셀 붙여넣기(C4)·충돌 표시. */
 export function EntryGrid(props: EntryGridProps) {
-  const { columns, canEnter, baseDateColumnId, selectedColumnId, onSelectColumn, onGridApi } = props;
+  const { columns, canEnter, baseDateColumnId, selectedColumnId, onSelectColumn, onGridApi, onSelectedCell } = props;
   const entry = useEntry(props);
   const apiRef = useRef<GridApi<GridRow> | null>(null);
 
@@ -183,6 +186,81 @@ export function EntryGrid(props: EntryGridProps) {
     const listener = (event: globalThis.ClipboardEvent) => pasteHandler.current(event);
     document.addEventListener("paste", listener);
     return () => document.removeEventListener("paste", listener);
+  }, []);
+
+  // 포커스된 칸을 기억해 두고, 계산 열 칸이면 전체 값(API가 준 십진 문자열 그대로)을 Inspector에 알린다.
+  const [focused, setFocused] = useState<{ rowKey: string; colId: string } | null>(null);
+  const onCellFocused = useCallback((event: CellFocusedEvent<GridRow>) => {
+    const column = event.column;
+    const colId = column && typeof column !== "string" ? column.getColId() : typeof column === "string" ? column : null;
+    const api = apiRef.current;
+    if (!api || !colId || event.rowIndex === null || event.rowIndex === undefined) {
+      setFocused(null);
+      return;
+    }
+    const node = event.rowPinned === "bottom" ? api.getPinnedBottomRow(event.rowIndex) : api.getDisplayedRowAtIndex(event.rowIndex);
+    setFocused(node?.data ? { rowKey: node.data.key, colId } : null);
+  }, []);
+  const onCellClicked = useCallback(
+    (event: CellClickedEvent<GridRow>) => {
+      const colId = event.column.getColId();
+      if (event.data) setFocused({ rowKey: event.data.key, colId });
+      // 계산 열 칸을 누르면 Inspector가 그 열의 수식 보기를 보여 주도록 열을 고른다(머리글을 누른 것과 같음).
+      if (isFormulaColId(colId)) onSelectColumn(Number(colId));
+    },
+    [isFormulaColId, onSelectColumn],
+  );
+  const selectedCell = useMemo<SelectedCell | null>(() => {
+    if (!focused) return null;
+    const column = columns.find((c) => String(c.id) === focused.colId && c.kind === "formula");
+    const row = rowData.find((r) => r.key === focused.rowKey);
+    if (!column || !row) return null;
+    const base = baseDateColumnId === null ? undefined : columns.find((c) => c.id === baseDateColumnId);
+    const value = row.cells[focused.colId];
+    return {
+      columnId: column.id,
+      columnName: column.display_name,
+      rowId: row.rowId,
+      period: base ? displayText(base, row.cells[String(base.id)]) : "",
+      errorCode: row.errors[focused.colId] ?? null,
+      full: isBlank(value) ? null : String(value),
+    };
+  }, [focused, columns, rowData, baseDateColumnId]);
+  const selectedKey = selectedCell ? JSON.stringify(selectedCell) : "";
+  useEffect(() => {
+    onSelectedCell?.(selectedCell);
+    // selectedKey가 같으면 같은 내용이므로 다시 알리지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
+
+  // 복사: AG Grid Community에는 칸 복사가 없다(Enterprise 클립보드 모듈 사용 금지). 계산 열 숫자 칸을 고른 채 Ctrl+C를 누르면
+  // 화면에 줄여 보이는 글자가 아니라 전체 값(쉼표 없는 십진 문자열)을 text/plain에 넣는다. 그 외 칸·입력창은 브라우저 기본 동작.
+  const copyHandler = useRef<(event: globalThis.ClipboardEvent) => void>(() => undefined);
+  const handleCopy = (event: globalThis.ClipboardEvent) => {
+    const wrapper = gridRef.current;
+    if (!wrapper || !event.clipboardData) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+    const active = document.activeElement;
+    if (!((target !== null && wrapper.contains(target)) || (active !== null && wrapper.contains(active)))) return;
+    const cell = apiRef.current?.getFocusedCell();
+    if (!cell) return;
+    const column = columns.find((c) => String(c.id) === cell.column.getColId());
+    if (!column || !isComputedNumber(column)) return;
+    const node = cell.rowPinned === "bottom" ? apiRef.current?.getPinnedBottomRow(cell.rowIndex) : apiRef.current?.getDisplayedRowAtIndex(cell.rowIndex);
+    const key = String(column.id);
+    const value = node?.data?.cells[key];
+    if (!node?.data || node.data.errors[key] || isBlank(value)) return;
+    event.clipboardData.setData("text/plain", String(value));
+    event.preventDefault();
+  };
+  useEffect(() => {
+    copyHandler.current = handleCopy; // 매 렌더 뒤 최신 상태를 쓰는 처리기로 바꾼다(붙여넣기와 같은 방식)
+  });
+  useEffect(() => {
+    const listener = (event: globalThis.ClipboardEvent) => copyHandler.current(event);
+    document.addEventListener("copy", listener);
+    return () => document.removeEventListener("copy", listener);
   }, []);
 
   function onPanelKey(event: KeyboardEvent<HTMLElement>, close: () => void) {
@@ -381,6 +459,8 @@ export function EntryGrid(props: EntryGridProps) {
             onColumnHeaderClicked={onHeaderClicked}
             onCellDoubleClicked={onCellDoubleClicked}
             onCellKeyDown={onCellKeyDown}
+            onCellFocused={onCellFocused}
+            onCellClicked={onCellClicked}
             onGridReady={(e) => {
               apiRef.current = e.api;
               onGridApi?.(e.api);

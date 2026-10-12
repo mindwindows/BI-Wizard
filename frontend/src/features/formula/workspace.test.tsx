@@ -295,3 +295,37 @@ it("검사 호출 본문에 column_id가 실린다(수정 중 순환 기준)", a
   await waitFor(() => expect(of(calls, "POST", "/formulas/check")).toHaveLength(1), { timeout: 3000 });
   expect(of(calls, "POST", "/formulas/check")[0].body).toEqual({ expression: "[매출] + 1", column_id: 5 });
 });
+
+describe("선택한 계산 칸의 전체 값(결정 2026-10-12)", () => {
+  const LONG_ROWS: Row[] = [
+    { row_id: 3, cells: { "1": "2026-03-01", "2": "100", "3": "40", "4": null, "5": "2.718281828459" } },
+    { row_id: 2, cells: { "1": "2026-02-01", "2": "50", "3": "0", "4": null, "5": null }, errors: { "5": "E1" } },
+    { row_id: 1, cells: { "1": "2026-01-01", "2": null, "3": "10", "4": null, "5": "12345678901234567890123456789012345678" } },
+  ];
+  const cellAt = (rowKey: string, colId: string) => screen.getByRole("group", { name: "입력 그리드 표" }).querySelector(`[row-id="${rowKey}"] [col-id="${colId}"]`) as HTMLElement;
+
+  it("계산 칸을 누르면 Inspector 수식 보기에 기간·행 번호·열 이름·전체 값이 그대로 나온다", async () => {
+    const { fake } = await openWorkspace(salesDetail(), LONG_ROWS);
+    fake.views[5] = { column_id: 5, text: "1", refs: [], tag_columns: [], error_count: 0 };
+    await waitFor(() => expect(cellAt("r3", "5")).toBeTruthy());
+    fireEvent.click(cellAt("r3", "5"));
+    const section = await within(inspector()).findByRole("region", { name: "선택한 칸의 전체 값" });
+    expect(within(section).getByTestId("selected-cell-period").textContent).toBe("2026-03-01");
+    expect(within(section).getByTestId("selected-cell-row").textContent).toBe("#3");
+    expect(within(section).getByTestId("selected-cell-column").textContent).toBe("이익");
+    expect(within(section).getByTestId("selected-cell-value").textContent).toBe("2.718281828459"); // 6자리로 줄이지 않고 쉼표도 없음
+    fireEvent.click(cellAt("r1", "5"));
+    await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toBe("12345678901234567890123456789012345678"));
+    fireEvent.click(cellAt("r2", "5"));
+    await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toContain("오류 E1"));
+  });
+
+  it("고른 칸이 없으면 안내 문구만 보인다", async () => {
+    const { fake } = await openWorkspace(salesDetail(), LONG_ROWS);
+    fake.views[5] = { column_id: 5, text: "1", refs: [], tag_columns: [], error_count: 0 };
+    selectColumn(/^이익/);
+    await within(inspector()).findByTestId("formula-text");
+    expect(within(inspector()).queryByRole("region", { name: "선택한 칸의 전체 값" })).toBeNull();
+    expect(within(inspector()).getByTestId("selected-cell-hint")).toBeTruthy();
+  });
+});

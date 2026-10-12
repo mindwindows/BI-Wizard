@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COL } from "../dataset/test-server";
-import { displayText, editorText, formatNumber, parseEditInput, pasteCellValue, sameValue } from "./values";
+import { displayText, editorText, formatComputedNumber, formatNumber, parseEditInput, pasteCellValue, sameValue } from "./values";
 
 const NUM = COL(1, "매출", "number", { rules: { decimals: 2 } });
 const NUM_FREE = COL(2, "수량", "number");
@@ -110,5 +110,64 @@ describe("sameValue", () => {
     expect(sameValue("1234.50", "1234.50")).toBe(true);
     expect(sameValue("1234.5", "1234.50")).toBe(false); // 십진 문자열을 부동소수점으로 합치지 않는다
     expect(sameValue(true, "true")).toBe(true);
+  });
+});
+
+describe("formatComputedNumber: 계산 열 표시(소수 최대 6자리, 끝자리 0 제거, 쉼표, 0에서 먼 쪽 반올림)", () => {
+  it.each([
+    ["0.5", "0.5"],
+    ["1234.500000", "1,234.5"], // 끝자리 0 제거
+    ["1234.000000", "1,234"],
+    ["12.3456780000", "12.345678"],
+    ["0", "0"],
+    ["0.000000", "0"],
+    ["100", "100"],
+    ["1000", "1,000"],
+    ["-1234567.5", "-1,234,567.5"],
+    ["0.1234564", "0.123456"], // 7번째 자리 4: 내림
+    ["0.1234565", "0.123457"], // 5: 올림(경계)
+    ["0.1234569", "0.123457"],
+    ["-0.1234565", "-0.123457"], // 음수도 0에서 먼 쪽
+    ["-0.1234564", "-0.123456"],
+    ["0.9999995", "1"], // 자리 올림이 정수부까지
+    ["999.9999995", "1,000"],
+    ["-0.9999995", "-1"],
+    ["999999.9999999", "1,000,000"],
+    ["0.0000004", "0"], // 반올림하면 0
+    ["-0.0000004", "0"], // -0이 되지 않음
+    ["-0.0000005", "-0.000001"],
+    ["0.0000005", "0.000001"],
+    ["0.0000001", "0"], // 1E-7 같은 과학 표기가 오지 않음
+    ["1234567890123456789012345678901234.5678", "1,234,567,890,123,456,789,012,345,678,901,234.5678"],
+    ["12345678901234567890123456789012345678", "12,345,678,901,234,567,890,123,456,789,012,345,678"], // 38자리 정수
+    ["1234567890123456789012345678.123456789012", "1,234,567,890,123,456,789,012,345,678.123457"],
+    ["99999999999999999999999999999999999999.9999999", "100,000,000,000,000,000,000,000,000,000,000,000,000"],
+  ])("%s -> %s", (raw, expected) => {
+    expect(formatComputedNumber(raw).text).toBe(expected);
+    expect(formatComputedNumber(raw).text).not.toMatch(/e/i);
+    expect(formatComputedNumber(raw).full).toBe(raw);
+  });
+
+  it("6자리를 넘는 0이 아닌 자릿수가 있을 때만 truncated", () => {
+    expect(formatComputedNumber("0.1234567").truncated).toBe(true);
+    expect(formatComputedNumber("0.0000004").truncated).toBe(true);
+    expect(formatComputedNumber("1.5000000").truncated).toBe(false); // 끝자리 0만 잘림
+    expect(formatComputedNumber("1.123456").truncated).toBe(false);
+    expect(formatComputedNumber("42").truncated).toBe(false);
+  });
+
+  it("십진 형식이 아니면 그대로 둔다", () => {
+    expect(formatComputedNumber("abc")).toEqual({ text: "abc", full: "abc", truncated: false });
+  });
+
+  it("displayText는 계산 열 숫자에만 적용하고 입력 열(decimals 0 채움 등)은 그대로 둔다", () => {
+    const calc = COL(9, "합계", "number", { kind: "formula" });
+    const raw = COL(1, "매출", "number", { rules: { decimals: 2 } });
+    expect(displayText(calc, "1234.5000000")).toBe("1,234.5");
+    expect(displayText(calc, "0.1234567")).toBe("0.123457");
+    expect(displayText(calc, null)).toBe("");
+    expect(displayText(raw, "1234.5")).toBe("1,234.50");
+    expect(displayText(raw, "0.1234567")).toBe("0.1234567"); // 입력 열은 깎지 않음
+    expect(displayText(COL(10, "메모", "text", { kind: "formula" }), "0.1234567")).toBe("0.1234567"); // 숫자가 아닌 계산 열은 그대로
   });
 });
