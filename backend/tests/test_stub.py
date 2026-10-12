@@ -92,6 +92,20 @@ def test_dv2_sets_httponly_cookie_and_dv1_reports_current(stub_client, world):
     assert client.get("/api/dev/stub-users").json()["current"] == "definer"
 
 
+def test_dv1_current_is_the_cookie_value_even_when_not_registered(stub_client, world):
+    """05 DV1: `current`는 쿠키의 로그인 ID 그대로다(등록 여부와 무관)."""
+    _, call = stub_client
+    response = call("ghost-id", "GET", "/api/dev/stub-users")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current"] == "ghost-id"
+    assert "ghost-id" not in {u["login_id"] for u in body["items"]}
+    # 한글·특수 문자는 인코딩된 쿠키에서 복원해 그대로 돌려준다.
+    assert call("홍 길동/1", "GET", "/api/dev/stub-users").json()["current"] == "홍 길동/1"
+    # 쿠키가 없으면 null.
+    assert call(None, "GET", "/api/dev/stub-users").json()["current"] is None
+
+
 def test_dv2_unknown_login_is_404_and_sets_no_cookie(stub_client):
     _, call = stub_client
     response = call(None, "PUT", "/api/dev/stub-user", json={"login_id": "nobody"})

@@ -13,6 +13,7 @@ from sqlalchemy import case, column, func, insert, null, select, table, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
+from app.core.sorting import by_name
 from app.db_metadata import DYNAMIC_SCHEMA, dataset_columns, datasets, teams, users
 from app.ddl import dataset_table_name
 
@@ -53,7 +54,9 @@ def get_dataset(session: Session, dataset_id: int) -> RowMapping | None:
 
 
 def get_team(session: Session, team_id: int) -> RowMapping | None:
-    stmt = select(teams.c.id, teams.c.code, teams.c.name).where(teams.c.id == team_id)
+    stmt = select(teams.c.id, teams.c.code, teams.c.name, teams.c.is_active).where(
+        teams.c.id == team_id
+    )
     return session.execute(stmt).mappings().first()
 
 
@@ -75,7 +78,7 @@ def list_datasets(
         _dataset_select()
         .join(teams, teams.c.id == datasets.c.team_id)
         .where(*conditions)
-        .order_by(mine_first, teams.c.name, datasets.c.name, datasets.c.id)
+        .order_by(mine_first, by_name(teams.c.name), by_name(datasets.c.name), datasets.c.id)
         .limit(limit)
         .offset(offset)
     )

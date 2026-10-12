@@ -131,12 +131,15 @@ def service_unavailable() -> AppError:
     )
 
 
-def target_inactive(field: str) -> AppError:
-    """비활성 팀(`team`)·사용자(`user`)에 소속을 추가·변경하려 했다(A8). 해제(A9)는 허용된다."""
+def target_inactive(field: str, message: str | None = None) -> AppError:
+    """비활성 팀(`team`)·사용자(`user`)에 소속을 추가·변경하려 했다(A8). 해제(A9)는 허용된다.
+
+    `message`를 주면 다른 작업(예: B2 데이터셋 만들기)의 문구로 바꾼다. 코드와 `details`는 같다.
+    """
     label = "팀" if field == "team" else "사용자"
     return AppError(
         ErrorCode.TARGET_INACTIVE,
-        f"사용 중지된 {label}에는 소속을 추가하거나 역할을 바꿀 수 없습니다.",
+        message or f"사용 중지된 {label}에는 소속을 추가하거나 역할을 바꿀 수 없습니다.",
         status_code=409,
         details={"field": field},
     )
@@ -195,18 +198,27 @@ def validation_failed(fields: list[tuple[str, str]]) -> AppError:
     )
 
 
-def validation_failed_items(items: list[dict[str, Any]]) -> AppError:
+def _cap(items: list[dict[str, Any]], limit: int) -> dict[str, Any]:
+    """응답 상한 처리(05 §1 잘림 표시): `truncated`는 항상, `total`은 자르기 전 전체 건수."""
+    return {"truncated": len(items) > limit, "total": len(items)}
+
+
+def validation_failed_items(items: list[dict[str, Any]], *, limit: int) -> AppError:
     """입력 규칙 위반(422)을 항목 단위로 돌려준다. 각 항목은 `code`와 위치 키를 가진다.
 
     위치 키는 `field`(예: `cells.12`) 또는 `row_index`+`column_id`(붙여넣기, 05 §1 오류 형식)다.
-    `message`는 `code`로 채운다. 입력 값은 응답에 넣지 않는다.
+    `message`는 `code`로 채운다. 입력 값은 응답에 넣지 않는다. 전체 목록을 받아 `limit`건에서 자르고
+    `details.truncated`·`details.total`(자르기 전 전체 건수)을 넣는다.
     """
     return AppError(
         ErrorCode.VALIDATION_ERROR,
         "입력한 내용을 확인해 주세요.",
         status_code=422,
         details={
-            "fields": [{**item, "message": _FIELD_MESSAGES.get(item["code"], "")} for item in items]
+            "fields": [
+                {**item, "message": _FIELD_MESSAGES.get(item["code"], "")} for item in items[:limit]
+            ],
+            **_cap(items, limit),
         },
     )
 
@@ -248,13 +260,16 @@ def period_conflict(conflicts: list[dict[str, Any]]) -> AppError:
     )
 
 
-def paste_conflict(conflicts: list[dict[str, Any]]) -> AppError:
-    """C4: 붙여넣기 충돌(전부 취소). `conflicts[{row_index, row_id, column_id, kind, current}]`."""
+def paste_conflict(conflicts: list[dict[str, Any]], *, limit: int) -> AppError:
+    """C4: 붙여넣기 충돌(전부 취소). `conflicts[{row_index, row_id, column_id, kind, current}]`.
+
+    전체 목록을 받아 `limit`건에서 자르고 `details.truncated`·`details.total`을 넣는다(05 §1).
+    """
     return AppError(
         ErrorCode.PASTE_CONFLICT,
         "붙여넣기가 다른 사람의 변경과 충돌해 아무것도 반영하지 않았습니다.",
         status_code=409,
-        details={"conflicts": conflicts},
+        details={"conflicts": conflicts[:limit], **_cap(conflicts, limit)},
     )
 
 

@@ -68,6 +68,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
   - 409 `PERIOD_CONFLICT`(C2, C3 기간 이동) + `details.conflicts[{row_id, column_id, current}]`: `row_id`는 그 기간을 이미 차지한 행, `column_id`는 기준 날짜 열, `current`는 그 기간.
   - 409 `PASTE_CONFLICT`(C4) + `details.conflicts[{row_index, row_id, column_id, kind, current}]`, `kind`: `"cell"`(칸 값이 바뀜, `current`=지금 값), `"period"`(새 행의 기간이 이미 있거나 요청 안에서 겹침, `row_id`=그 기간의 기존 행, `column_id`=기준 날짜 열, `current`=기간), `"row_missing"`(행이 없음, `column_id`·`current`는 `null`). 첫 건에서 멈추지 않고 모아서(처음 1,000건까지) 돌려주며 **전부 취소**한다.
   - 413 `PAYLOAD_TOO_LARGE`(C4). 앞단 nginx의 기본 요청 상한(1m)이 먼저 413을 내면 **JSON이 아닌 HTML**일 수 있다(프런트가 둘 다 같은 안내로 처리한다).
+  - **잘림 표시(05 §1)**: 422 `VALIDATION_ERROR`의 `details.fields[]`는 200건, 409 `PASTE_CONFLICT`의 `details.conflicts[]`는 1,000건에서 자른다. 두 응답 모두 `details.truncated`(boolean, 잘렸을 때 true)와 `details.total`(자르기 전 전체 건수, 항상)을 준다. C2·C3의 422도 같은 모양이다. 화면은 `truncated`이면 "일부만 표시됨"을 안내한다. `CELL_CONFLICT`·`PERIOD_CONFLICT`(단건)는 상한이 없어 이 필드가 없다.
   - 503 `WRITE_BUSY` + `details.retry_after`(2초): 락 대기 3초 초과 또는 교착. 같은 요청을 다시 보내면 된다(재시도 가능).
 
 ## 5. 실행 방법
@@ -189,7 +190,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 - 실제 PostgreSQL(권장, `skills/permission-management/SKILL.md`의 "검증 방법" 절차로 tmpfs `postgres-test`): 같은 `pytest`가 `pg` 변형과 동시성 시험을 포함해 돈다. 시험 실행 환경에 `REQUIRE_PG=1`을 주면 PostgreSQL 환경이 없을 때 건너뛰지 않고 실패한다(skip 0 확인).
 - 시험 위치(`backend/tests/`):
   - `test_entry_values.py` — 열 타입별 해석 표(숫자 자릿수·범위·NaN·지수·부동소수점·큰 정수, 날짜 단위별 첫날, boolean 표기, choice, text 길이·NFC·제어문자), 응답 값 표현
-  - `test_entry_api.py` — C1 정렬·쪽·값 표현, C2~C4 모든 오류 코드, `expected` 누락 422, 전부 취소, 413(5,001행·1MiB 초과), `RowViewPort` 교체와 호출 조건 (SQLite·`pg` 두 변형)
+  - `test_entry_api.py` — C1 정렬·쪽·값 표현, 잘림 표시(201건 검증 오류·1,001건 충돌에서 `truncated` true와 `total`, 적을 때 false), C2~C4 모든 오류 코드, `expected` 누락 422, 전부 취소, 413(5,001행·1MiB 초과), `RowViewPort` 교체와 호출 조건 (SQLite·`pg` 두 변형)
   - `test_entry_concurrency.py` — (pg 전용) pg8000 `rowcount`·`ON CONFLICT` 사실, 같은 칸 동시 수정, 같은 기간 동시 INSERT, 붙여넣기 교차 갱신 교착 없음, `WRITE_BUSY`, 정의 변경과 행 쓰기 경쟁, 굶음 관찰
   - `test_permission_matrix.py` — C1~C4 × 역할(관리자·정의 담당자·입력자·다른 팀 구성원·비소속 읽기·비활성·인증 없음), 거부된 요청이 데이터를 바꾸지 않음
   - `test_dataset_api.py`·`test_ddl.py`·`test_dataset_concurrency.py` — 기준 날짜 열 규칙 DDL 실패의 오류 변환, 동적 DDL 게이트(FK·유일·계산 열 거부), 이름 변경 중 FK 자식 INSERT 대기, `FOR SHARE` 굶음

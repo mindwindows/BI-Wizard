@@ -11,6 +11,7 @@ SQLite 변형과 `pg` 변형의 차이(DB 없이 도는 쪽의 한계):
 
 import json
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -1064,3 +1065,46 @@ def test_paste_request_body_schema_is_in_openapi(make_settings, sqlite_engine):
     assert set(schema["required"]) == {"expected_version", "column_ids", "rows"}
     assert "$defs" not in schema
     assert schema["properties"]["rows"]["items"]["properties"].keys() >= {"row_id", "values"}
+
+
+# --- 잘림 표시(05 §1, 03b 19-1 결정 4) ----
+
+
+def test_validation_errors_over_the_cap_are_truncated_with_total(api, world):
+    plain = build(api, world, with_base=False)
+    count = entry_service.MAX_VALIDATION_ITEMS + 1
+    response = paste(api, plain, [plain.region], [new_row("대구") for _ in range(count)])
+    assert response.status_code == 422
+    details = err(response)["details"]
+    assert len(details["fields"]) == entry_service.MAX_VALIDATION_ITEMS == 200
+    assert details["truncated"] is True and details["total"] == 201
+
+
+def test_validation_errors_within_the_cap_are_not_truncated(api, world):
+    plain = build(api, world, with_base=False)
+    cap = entry_service.MAX_VALIDATION_ITEMS
+    response = paste(api, plain, [plain.region], [new_row("대구") for _ in range(cap)])
+    details = err(response)["details"]
+    assert len(details["fields"]) == cap
+    assert details["truncated"] is False and details["total"] == cap
+    # 단건 입력 오류도 같은 모양이다.
+    single = post_row(api, plain, {plain.region: "대구"})
+    assert err(single)["details"]["truncated"] is False and err(single)["details"]["total"] == 1
+
+
+def test_paste_conflicts_over_the_cap_are_truncated_with_total(api, world):
+    daily = build(api, world, unit="day")
+    days = [(date(2020, 1, 1) + timedelta(days=i)).isoformat() for i in range(1001)]
+    rows = [new_row(day, "서울") for day in days]
+    cols = [daily.period, daily.region]
+    assert paste(api, daily, cols, rows).status_code == 200
+    response = paste(api, daily, cols, rows)
+    assert response.status_code == 409 and err(response)["code"] == "PASTE_CONFLICT"
+    details = err(response)["details"]
+    assert len(details["conflicts"]) == entry_service.MAX_CONFLICT_ITEMS == 1000
+    assert details["truncated"] is True and details["total"] == 1001
+    # 적을 때: 잘리지 않고 total은 전체 건수다.
+    few = paste(api, daily, cols, rows[:3])
+    assert few.status_code == 409
+    assert err(few)["details"]["truncated"] is False and err(few)["details"]["total"] == 3
+    assert len(err(few)["details"]["conflicts"]) == 3

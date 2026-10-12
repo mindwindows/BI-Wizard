@@ -56,7 +56,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 `expected_version`(필수), `display_name?`, `required?`, `rules?`, `tag?`(`null`이면 지움), `position?`. **`type`·`kind`는 바꿀 수 없다**: 현재와 다른 값을 보내면 422 `COLUMN_LOCKED`(같은 값이면 무시). 다른 타입이 필요하면 새 열을 추가한다. 계산 열(`formula`)에는 `required: true`와 `rules`를 줄 수 없다(422). 이름을 바꿔도 원본 표의 열 이름(`c_<번호>`)은 그대로다.
 
 ### 목록 B1 `GET /api/datasets`
-`team_id?`, `limit`(기본 50, 1~200), `offset`. 정렬: **내 소속 팀의 데이터셋이 먼저**, 다음 팀 이름, 데이터셋 이름.
+`team_id?`, `limit`(기본 50, 1~200), `offset`. 정렬: **내 소속 팀의 데이터셋이 먼저**, 다음 팀 이름, 데이터셋 이름. 이름순은 한글 가나다순이다(아래 "이름순 정렬").
 
 ## 4. 출력
 - 공통 형태(05 §1):
@@ -68,6 +68,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - 오류(`{"error": {"code", "message", "details", "request_id"}}`, 한국어 `message`):
   - 409 `DEFINITION_VERSION_MISMATCH` + `details.current_version` — 다른 사람이 먼저 정의를 바꿈. 새로 읽고 다시 한다.
   - 409 `ALREADY_EXISTS` + `details.field`(`name`: 팀 안 데이터셋 이름, `display_name`: 데이터셋 안 열 이름)
+  - 409 `TARGET_INACTIVE` + `details.field=team` — B2에서 비활성 팀에는 데이터셋을 만들 수 없다(03b 19-1 결정 1). **권한 판정(그 팀의 정의 담당자)이 먼저**라서 정의 담당자가 아니면 팀이 비활성이어도 403이다. 팀을 다시 사용 중으로 바꾸려면 관리자가 A4(`permission-management`)를 쓴다. 이미 있는 데이터셋의 열 편집·행 입력은 이 규칙의 대상이 아니다.
   - 422 `VALIDATION_ERROR` + `details.fields[{field, code, message}]` — 필드 코드 `REQUIRED`·`TOO_LONG`·`BAD_FORMAT`·`RESERVED`·`OUT_OF_RANGE`. 규칙 오류의 `field`는 `rules.min`처럼 키까지 가리킨다. 기준 날짜 열이 원본 `date` 열이 아니거나 다른 데이터셋의 열이면 `base_date_column_id` `BAD_FORMAT`.
   - 422 `DATASET_HAS_ROWS` — 행이 있어 날짜 단위·기준 날짜 열을 바꿀 수 없음
   - 422 `COLUMN_LOCKED` — 열 `type`·`kind` 변경 시도
@@ -84,7 +85,8 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - `def_hash`는 FU-1d 전에는 정의 구조(열 번호·종류·타입) 해시다. 표시 이름·필수·규칙·순서는 해시에 들어가지 않는다.
 - 같은 `expected_version`으로 동시에 요청하면 하나만 성공하고 나머지는 `DEFINITION_VERSION_MISMATCH`다.
 - 행 쓰기(FU-1c, `data-entry`)는 같은 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다. **굶음은 일어날 수 있다(관찰, PostgreSQL 16.10)**: `FOR SHARE` 보유자가 쥔 동안 정의 변경이 기다리면, 뒤에 들어온 새 `FOR SHARE`(행 쓰기)가 정의 변경을 **앞질러** 잠금을 얻는다(공유 잠금끼리는 호환이라 줄을 서지 않는다). 그래서 행 입력이 끊이지 않으면 정의 변경(열 추가 등)이 계속 순서를 못 얻을 수 있다. 다만 무한 대기는 없다: 1초 뒤 `DEFINITION_BUSY`(503)로 끝나므로 입력이 잠잠할 때 다시 시도한다. 단정으로 고정한 시험: `test_dataset_concurrency.py`의 `test_continuous_for_share_holders_overtake_a_waiting_definition_change`(잠금 보유자만으로 재현)와 `test_entry_concurrency.py`의 `test_continuous_row_writes_overtake_a_waiting_definition_change`(실제 행 쓰기 경로).
-- **이름 변경(B4)은 FK 자식 INSERT를 기다리게 한다(관찰, PostgreSQL 16.10)**: `datasets.name`이 `UNIQUE(team_id, name)`에 들어 있어 이름을 바꾸는 UPDATE는 키 변경으로 취급돼 `FOR UPDATE` 수준의 행 잠금이 걸리고, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`가 커밋까지 기다린다. 열 추가는 `def_version`·`def_hash`만 바꾸므로 기다리게 하지 않는다. 이름 변경 트랜잭션이 짧으면 문제없고(`test_rename_in_progress_makes_fk_child_inserts_wait_until_commit`), 정의 변경 훅이 길어지는 FU-1d부터는 그 시간만큼 `superset_datasets` 같은 자식 INSERT가 기다릴 수 있다.
+- **이름 변경(B4)은 FK 자식 INSERT를 기다리게 한다(관찰, PostgreSQL 16.10)**: `datasets.name`이 `UNIQUE(team_id, name)`에 들어 있어 이름을 바꾸는 UPDATE는 키 변경으로 취급돼 `FOR UPDATE` 수준의 행 잠금이 걸리고, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`가 커밋까지 기다린다. 열 추가는 `def_version`·`def_hash`만 바꾸므로 기다리게 하지 않는다. 06 §5에서 짧은 대기로 보고 **그대로 두기로 결정**했다. 이름 변경 트랜잭션이 짧으면 문제없고(`test_rename_in_progress_makes_fk_child_inserts_wait_until_commit`), 정의 변경 훅이 길어지는 FU-1d부터는 그 시간만큼 `superset_datasets` 같은 자식 INSERT가 기다릴 수 있다.
+- **이름순 정렬(한글 가나다순, 03b 19-1 결정 2)**: 이 DB의 기본 정렬(`en_US.utf8`)은 한글을 가나다순으로 정렬하지 못한다. 이름순 목록(A1 소속, A2, A5, B1, DV1)의 `ORDER BY`에만 ICU collation `ko-KR-x-icu`를 붙인다(`app/core/sorting.py`의 `by_name()`, SQLAlchemy 구성요소이며 `text()`가 아니다). 저장 collation은 바꾸지 않아 마이그레이션이 없다. 선택 이유: 공식 `postgres:16.10-bookworm` 이미지에 `ko-KR-x-icu`가 있다(`pg_collation`로 확인). 'C' collation은 완성형 한글 가나다순과 같지만 라틴 대소문자가 한글 앞에 오고 한글·라틴 혼합 이름이 어색해서 쓰지 않았다. 한계: 숫자는 글자 순서(`10`이 `9`보다 앞), 라틴은 한글 뒤, 소문자가 대문자보다 앞(`abc`, `Abc`), 동명은 `id` 순. PostgreSQL이 아닌 방언(SQLite 시험)에서는 COLLATE를 붙이지 않는다. collation이 DB에 없으면 시작 자가 점검이 경고를 남기고(거부하지 않음) 이후 질의가 DB 기본 순서로 돌아간다.
 - **행이 0개 확인과 INSERT 경쟁**: 기준 날짜 열 지정·날짜 단위 변경의 "행이 0개" 확인은 `FOR NO KEY UPDATE`를 잡은 **뒤에** 실행되므로 진행 중인 행 INSERT가 끝난 뒤의 결과를 본다(`DATASET_HAS_ROWS`). 그래도 규칙 DDL이 기존 값 때문에 실패하면(NOT NULL·CHECK·유일 위반, 방어선) 500이 아니라 같은 422 `DATASET_HAS_ROWS`로, 표 잠금 대기 초과·교착이면 503 `DEFINITION_BUSY`로 답한다. 이름·번호 규칙 위반 같은 `DdlError`는 프로그램 오류라 500으로 둔다.
 
 ## 5. 실행 방법

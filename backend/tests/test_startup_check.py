@@ -210,6 +210,7 @@ def _stub_other_checks(monkeypatch, *, public_create: bool):
         "check_standard_conforming_strings",
         "check_bi_data_objects",
         "check_static_tables",
+        "check_name_collation",
     ):
         monkeypatch.setattr(sc, name, lambda conn: None)
     monkeypatch.setattr(sc, "read_public_create", lambda conn: public_create)
@@ -318,6 +319,35 @@ def test_app_start_stores_report_for_health(make_settings, sqlite_engine, monkey
     }
 
 
+# --- 이름순 collation 점검(경고, 거부 아님) ----
+
+
+class _FakeConn:
+    def __init__(self, found: bool):
+        self.found = found
+
+    def execute(self, stmt):
+        class _R:
+            def scalar_one(_self):
+                return self.found
+
+        return _R()
+
+
+def test_missing_collation_warns_and_falls_back_without_refusing(caplog):
+    from app.core import sorting
+
+    try:
+        with caplog.at_level("WARNING"):
+            assert sc.check_name_collation(_FakeConn(False)) is False
+        assert sorting.collation_available() is False
+        assert any("collation" in r.getMessage() for r in caplog.records)
+        assert sc.check_name_collation(_FakeConn(True)) is True
+        assert sorting.collation_available() is True
+    finally:
+        sorting.set_collation_available(True)
+
+
 # --- 실제 PostgreSQL ----
 
 
@@ -327,6 +357,14 @@ def test_pg_bi_app_passes_all_checks(pg_app_engine):
     assert report.public_create is False  # bi_app은 public에 CREATE 권한이 없다.
     assert isinstance(report.db_timezone, str) and report.db_timezone
     assert (report.views, report.views_failed_count) == (0, 0)
+
+
+def test_pg_korean_collation_exists(pg_app_engine):
+    from app.core import sorting
+
+    with pg_app_engine.connect() as conn:
+        assert sc.check_name_collation(conn) is True
+    assert sorting.collation_available() is True
 
 
 def test_pg_public_create_grant_refuses_start(pg_env, pg_app_engine):

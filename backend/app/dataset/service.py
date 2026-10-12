@@ -27,6 +27,7 @@ from app.core.errors import (
     dataset_has_rows,
     definition_version_mismatch,
     not_found,
+    target_inactive,
     validation_failed,
 )
 from app.core.ports import DefinitionHooks
@@ -126,7 +127,7 @@ def get_dataset_detail(session: Session, user: CurrentUser, dataset_id: int) -> 
     if team is None:  # FK가 보장하므로 일어나지 않는다.
         raise not_found()
     data = _dataset_dict(row)
-    data["team"] = dict(team)
+    data["team"] = {k: team[k] for k in ("id", "code", "name")}
     data["columns"] = [_column_dict(c) for c in repo.list_columns(session, dataset_id)]
     data["permissions"] = {
         "define": can_define(user, row["team_id"]),
@@ -199,9 +200,14 @@ def create_dataset(
     """데이터셋 등록 + 원본 표 생성(한 트랜잭션). 새 데이터셋 번호를 돌려준다."""
     try:
         set_lock_timeout(session)
-        if repo.get_team(session, team_id) is None:
+        team = repo.get_team(session, team_id)
+        if team is None:
             session.rollback()
             raise not_found()
+        if not team["is_active"]:
+            # 권한 판정(정의 담당자)은 라우터에서 먼저 끝났다. 비활성 팀에는 만들 수 없다(B2).
+            session.rollback()
+            raise target_inactive("team", "사용 중지된 팀에는 데이터셋을 만들 수 없습니다.")
         if repo.find_dataset_name_conflict(session, team_id, name):
             session.rollback()
             raise already_exists("name", _DATASET_NAME_TAKEN)

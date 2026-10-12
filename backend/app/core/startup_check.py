@@ -14,6 +14,8 @@
 5. 정적 `MetaData`의 표와 열이 DB에 있는지. alembic head와의 일치 확인은 대신하지 않는다:
    `bi_app`은 `alembic_version`을 읽을 수 없다(06 §4-2, 의도된 권한). `migrate` 서비스가 성공해야
    backend가 시작하는 compose 순서(D4)가 head 적용을 보장하고, 여기서는 표·열 존재로 확인한다.
+6. 이름순 정렬 collation(`ko-KR-x-icu`) 존재: 없으면 **거부하지 않고** 경고만 남기며
+   정렬은 DB 기본으로 돌아간다.
 
 점검이 채우는 **메모리 값**(`StartupReport`)이 `/health`의 `views`, `views_failed_count`,
 `public_create`, `db_timezone`이 된다(05 H1, DB 비접속 유지). 오류 메시지에는 비밀을 넣지 않는다.
@@ -42,6 +44,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
+from app.core.sorting import KOREAN_COLLATION, set_collation_available
 from app.db_metadata import DYNAMIC_SCHEMA, metadata
 
 logger = logging.getLogger(__name__)
@@ -104,6 +107,7 @@ _pg_depend = table(
     column("deptype"),
     schema=_PG,
 )
+_pg_collation = table("pg_collation", column("collname"), schema=_PG)
 _pg_proc = table("pg_proc", column("proname"), column("pronamespace"), schema=_PG)
 _pg_type = table(
     "pg_type",
@@ -290,12 +294,31 @@ def read_db_timezone(conn: Connection) -> str:
     return str(conn.execute(select(func.current_setting("TimeZone"))).scalar_one())
 
 
+def check_name_collation(conn: Connection) -> bool:
+    """이름순 정렬용 collation이 DB에 있는지 본다(03b 19-1 결정 2). 없으면 경고만 한다(거부 아님).
+
+    없으면 이름순 질의는 COLLATE 없이 DB 기본 순서로 돌아간다(`core/sorting.py`).
+    """
+    found = conn.execute(
+        select(exists().where(_pg_collation.c.collname == KOREAN_COLLATION))
+    ).scalar_one()
+    set_collation_available(bool(found))
+    if not found:
+        logger.warning(
+            "이름순 정렬용 collation %s가 DB에 없어 DB 기본 순서로 정렬한다"
+            "(한글 가나다순이 아닐 수 있다: ICU를 지원하는 PostgreSQL 이미지를 확인하세요).",
+            KOREAN_COLLATION,
+        )
+    return bool(found)
+
+
 def collect_report(conn: Connection) -> StartupReport:
     """점검을 모두 실행한다. 어긋나면 `StartupCheckError`, 통과하면 `/health`용 값을 돌려준다."""
     check_role_attributes(conn)
     check_standard_conforming_strings(conn)
     check_bi_data_objects(conn)
     check_static_tables(conn)
+    check_name_collation(conn)
     report = StartupReport(
         public_create=read_public_create(conn), db_timezone=read_db_timezone(conn)
     )

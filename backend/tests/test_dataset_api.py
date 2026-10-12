@@ -1484,3 +1484,38 @@ def test_dataset_hash_is_not_changed_by_a_pure_rename(api, db, world):
         json={"expected_version": dataset["def_version"], "name": "이름만"},
     )
     assert dataset_row(db, dataset["id"])["def_hash"] == before
+
+
+# --- 비활성 팀의 데이터셋 만들기 거부(B2, 03b 19-1 결정 1) ----
+
+
+def _create_in(api, login, team_id, name="새 데이터셋"):
+    return api(
+        login,
+        "POST",
+        "/api/datasets",
+        json={"team_id": team_id, "name": name, "date_unit": "day"},
+    )
+
+
+def test_create_in_inactive_team_is_409_target_inactive_and_creates_nothing(api, db, sync, world):
+    team_off = db.add_team("team_off", "중지 팀", is_active=False)
+    db.add_member(team_off, world.ids["definer"], "definer")
+    response = _create_in(api, "definer", team_off)
+    assert response.status_code == 409
+    body = err(response)
+    assert body["code"] == "TARGET_INACTIVE" and body["details"] == {"field": "team"}
+    assert body["message"] and "데이터셋" in body["message"]
+    assert db.rows(datasets) == [] and sync.dataset_requests == []
+    assert sa.inspect(db.engine).get_table_names(schema=DYNAMIC_SCHEMA) == []
+    # 활성 팀의 정의 담당자는 계속 만들 수 있다.
+    assert _create_in(api, "definer", world.team_a).status_code == 201
+
+
+def test_inactive_team_permission_is_judged_before_activity(api, db, world):
+    team_off = db.add_team("team_off", "중지 팀", is_active=False)
+    db.add_member(team_off, world.ids["entry"], "entry")
+    # 정의 담당자가 아니면(입력자, 비소속, 관리자) 팀이 비활성이어도 403이다.
+    for login in ("entry", "viewer", "admin", "other"):
+        assert _create_in(api, login, team_off).status_code == 403, login
+    assert _create_in(api, None, team_off).status_code == 401

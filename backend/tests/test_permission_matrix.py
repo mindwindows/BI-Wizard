@@ -291,3 +291,38 @@ def test_admin_flag_alone_grants_no_team_rights():
 
     admin = CurrentUser(id=1, display_name="a", is_active=True, is_admin=True)
     assert not can_define(admin, 1) and not can_enter(admin, 1)
+
+
+# B2는 팀 활성 여부를 권한 판정 뒤에 본다(03b 19-1 결정 1): 비활성 팀과 역할의 곱.
+@pytest.mark.parametrize(
+    ("role", "team_active", "expected"),
+    [
+        ("definer", True, 201),
+        ("definer", False, 409),  # 정의 담당자라서 권한은 통과하고 팀 활성 확인에서 거부
+        ("entry", False, 403),  # 권한 판정이 먼저
+        ("admin", False, 403),
+        ("other", False, 403),
+        ("viewer", False, 403),
+        ("inactive", False, 403),
+        (None, False, 401),
+    ],
+)
+def test_b2_matrix_with_team_activity(db: Db, stub_settings, role, team_active, expected):
+    from tests.api_helpers import build_world
+
+    world = build_world(db)
+    team = world.team_a
+    if not team_active:
+        with db.writer.begin() as conn:
+            conn.execute(sa.update(teams).where(teams.c.id == team).values(is_active=False))
+    with TestClient(create_app(stub_settings, engine=db.engine)) as client:
+        response = make_caller(client)(
+            role,
+            "POST",
+            "/api/datasets",
+            json={"team_id": team, "name": "새 데이터셋", "date_unit": "day"},
+        )
+    assert response.status_code == expected, response.text
+    if expected == 409:
+        assert response.json()["error"]["code"] == "TARGET_INACTIVE"
+        assert response.json()["error"]["details"] == {"field": "team"}

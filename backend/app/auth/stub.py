@@ -24,6 +24,7 @@ from app.auth.identity import Identity
 from app.config import Settings, check_auth_stub_allowed
 from app.core.deps import get_session
 from app.core.errors import not_found
+from app.core.sorting import by_name
 from app.db_metadata import users
 
 STUB_COOKIE = "bi_stub_login"
@@ -88,7 +89,7 @@ def stub_users(
 ) -> StubUsersResponse:
     rows = session.execute(
         select(users.c.login_id, users.c.display_name, users.c.is_admin)
-        .order_by(users.c.login_id)
+        .order_by(by_name(users.c.display_name), users.c.id)
         .limit(_LIST_LIMIT)
     ).all()
     raw = request.cookies.get(STUB_COOKIE)

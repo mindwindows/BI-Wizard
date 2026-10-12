@@ -157,7 +157,7 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 ```
 (네트워크 이름은 compose 프로젝트 이름에 따른다: `docker network ls`. 이 시험은 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`*_PASSWORD`가 필요하다. 시험 DB는 새 DB여야 한다: 시험이 `users`·`teams`·`team_members`의 행을 지운다.)
 - 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`·`0004`의 표·열 단위 권한 상태(0004 한 단계 내림 포함)를 확인한다.
-- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), DV1~DV3 × 역할(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
+- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), DV1~DV3 × 역할(+ B2의 비활성 팀 행: 정의 담당자 409 `TARGET_INACTIVE`, 그 밖 역할은 403·401로 권한 판정이 먼저)(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
 - 수동: 위 스텁 curl로 관리자 로그인 후 팀 만들기 → 사용자 등록 → 소속 지정 → `/api/me`(해당 사용자)로 소속 확인, 마지막 관리자 해제 시 409.
 - 프런트:
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
@@ -169,6 +169,11 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
   - `errors.test.ts`: `SERVICE_UNAVAILABLE`·`TARGET_INACTIVE`·`METHOD_NOT_ALLOWED`.
   - 기존 S6 시험은 비활성 사용자 칸에 소속을 추가하던 부분을 활성 사용자(입력자 박) 칸으로 바꿨다.
 - `/health` 새 필드(`views`, `views_failed_count`, `public_create`=false, `db_timezone`)가 본문에 있다(`skills/local-environment/SKILL.md`).
+
+## 8-1. 정렬과 DV1 `current` (03b 19-1)
+- A2 `/teams`, A5 `/users`(표시 이름), A1 `memberships`, DV1 `items`(표시 이름)는 한글 가나다순이다(`ko-KR-x-icu`, 자세한 방식·한계·collation이 없을 때의 동작은 `skills/dataset-definition/SKILL.md`의 "이름순 정렬"). 같은 이름은 `id` 순. DV1 `items`는 이전에는 로그인 ID 순이었다.
+- DV1 `current`는 쿠키의 로그인 ID 그대로이며 등록 여부와 무관하다(스텁 전용 경로라 쿠키에 담긴 값을 되돌려 줄 뿐 DB를 더 읽지 않는다). 등록되지 않은 값이면 `items`에 없으므로 화면이 "(미등록)"으로 보여 준다. 쿠키가 없을 때만 `null`이다. 시험: `test_stub.py`, 정렬은 `test_name_sorting.py`(pg 변형에서 순서 단정).
+- 시작 자가 점검에 collation 존재 확인이 추가됐다(경고만, 시작 거부 없음).
 
 ## 9. 연관 Skill
 - `local-environment`: 환경 기동·마이그레이션 왕복·`/health` 필드·스텁 스위치(`AUTH_STUB_ENABLED`) 설정, 시작 자가 점검 실패 대응

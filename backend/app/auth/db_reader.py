@@ -11,6 +11,7 @@ from sqlalchemy import Engine, select
 
 from app.auth.identity import UserRecord
 from app.auth.models import CurrentUser, Membership, TeamRole
+from app.core.sorting import by_name
 from app.db_metadata import team_members, teams, users
 
 
@@ -35,7 +36,7 @@ class DbUserReader:
                 )
                 .join(team_members, team_members.c.team_id == teams.c.id)
                 .where(team_members.c.user_id == user.id)
-                .order_by(teams.c.name, teams.c.id)
+                .order_by(by_name(teams.c.name), teams.c.id)
             ).all()
         memberships = tuple(
             Membership(

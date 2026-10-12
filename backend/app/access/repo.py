@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
+from app.core.sorting import by_name
 from app.db_metadata import team_members, teams, users
 
 _TEAM_COLUMNS = (teams.c.id, teams.c.code, teams.c.name, teams.c.is_active)
@@ -31,7 +32,10 @@ def list_teams(session: Session, limit: int, offset: int) -> tuple[list[RowMappi
     total = session.execute(select(func.count()).select_from(teams)).scalar_one()
     rows = (
         session.execute(
-            select(*_TEAM_COLUMNS).order_by(teams.c.name, teams.c.id).limit(limit).offset(offset)
+            select(*_TEAM_COLUMNS)
+            .order_by(by_name(teams.c.name), teams.c.id)
+            .limit(limit)
+            .offset(offset)
         )
         .mappings()
         .all()
@@ -125,7 +129,7 @@ def list_users(
         session.execute(
             select(*_USER_COLUMNS)
             .where(*conditions)
-            .order_by(users.c.display_name, users.c.id)
+            .order_by(by_name(users.c.display_name), users.c.id)
             .limit(limit)
             .offset(offset)
         )

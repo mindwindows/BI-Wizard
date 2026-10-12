@@ -273,7 +273,7 @@ def create_row(
         ctx = dataset_service.lock_row_context(session, dataset_id, expected_version)
         values, problems = _parse_create(ctx, cells)
         if problems:
-            raise validation_failed_items(problems[:MAX_VALIDATION_ITEMS])
+            raise validation_failed_items(problems, limit=MAX_VALIDATION_ITEMS)
         tbl = repo.dynamic_table(ctx)
         base_id = ctx.base_date_column_id
         row_id = repo.insert_row(session, tbl, values, skip_period_conflict=base_id is not None)
@@ -361,7 +361,7 @@ def update_row(
         ctx = dataset_service.lock_row_context(session, dataset_id, expected_version)
         parsed, problems = _parse_changes(ctx, changes)
         if problems:
-            raise validation_failed_items(problems[:MAX_VALIDATION_ITEMS])
+            raise validation_failed_items(problems, limit=MAX_VALIDATION_ITEMS)
         tbl = repo.dynamic_table(ctx)
         base_id = ctx.base_date_column_id
         try:
@@ -540,7 +540,7 @@ def paste_rows(
         ctx = dataset_service.lock_row_context(session, dataset_id, expected_version)
         parsed = _parse_paste(ctx, column_ids, rows)
         if parsed.problems:
-            raise validation_failed_items(parsed.problems[:MAX_VALIDATION_ITEMS])
+            raise validation_failed_items(parsed.problems, limit=MAX_VALIDATION_ITEMS)
         tbl = repo.dynamic_table(ctx)
         base_id = ctx.base_date_column_id
         conflicts: list[dict[str, Any]] = []
@@ -603,7 +603,7 @@ def paste_rows(
 
         if conflicts:
             conflicts.sort(key=lambda c: (c["row_index"], c["column_id"] or 0))
-            raise paste_conflict(conflicts[:MAX_CONFLICT_ITEMS])
+            raise paste_conflict(conflicts, limit=MAX_CONFLICT_ITEMS)
         session.commit()
     created.sort(key=lambda c: c["index"])
     return {
