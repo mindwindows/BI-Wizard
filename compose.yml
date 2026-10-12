@@ -1,7 +1,7 @@
 # BI-Wizard 로컬 실행 기준(Single Entry). 시작: docker compose up -d --build / 종료: docker compose down (볼륨 삭제 옵션 금지)
 #
 # 서비스 순서:  postgres(healthy) -> db-bootstrap(성공 완료) -> migrate(성공 완료) -> backend -> frontend
-#               db-bootstrap -> superset-init(성공 완료) -> superset
+#               db-bootstrap + migrate -> superset-init(성공 완료) -> superset
 # DB 계정(03b 3-2): POSTGRES_USER/POSTGRES_PASSWORD는 이미지 슈퍼유저 전용이다(postgres 이미지, healthcheck,
 #   db-bootstrap만 쓴다. 운영 가이드의 POSTGRES_USER=앱 계정 의미와 다른 의도적 차이).
 #   migrate는 bi_owner(POSTGRES_OWNER_PASSWORD), backend는 bi_app(POSTGRES_APP_PASSWORD)로 접속한다(계정 이름은 코드 상수).
@@ -112,6 +112,14 @@ services:
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD를 .env에 설정하세요}
+      # Superset 서비스·발급 전용 계정(EW-3, 사용은 FU-1e). Superset 내부 주소는 코드 상수(http://superset:8088)이고
+      # 하위 경로만 SUPERSET_APP_ROOT로 받는다(AP-12). 설정 누락은 compose 단계에서 막고, backend는 값이 없어도 시작한다
+      # (Superset 불가가 포털을 멈추지 않는다: 08 §2-1. 필요한 쪽이 사용 시점에 실패한다).
+      SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT:?SUPERSET_APP_ROOT를 .env에 설정하세요}
+      SUPERSET_SERVICE_USER: ${SUPERSET_SERVICE_USER:?SUPERSET_SERVICE_USER를 .env에 설정하세요}
+      SUPERSET_SERVICE_PASSWORD: ${SUPERSET_SERVICE_PASSWORD:?SUPERSET_SERVICE_PASSWORD를 .env에 설정하세요}
+      SUPERSET_GUEST_ISSUER_USER: ${SUPERSET_GUEST_ISSUER_USER:?SUPERSET_GUEST_ISSUER_USER를 .env에 설정하세요}
+      SUPERSET_GUEST_ISSUER_PASSWORD: ${SUPERSET_GUEST_ISSUER_PASSWORD:?SUPERSET_GUEST_ISSUER_PASSWORD를 .env에 설정하세요}
       # 인증 스텁 스위치(기본 false). true는 APP_ENV가 local 또는 test일 때만 시작을 허용한다.
       AUTH_STUB_ENABLED: ${AUTH_STUB_ENABLED:?AUTH_STUB_ENABLED를 .env에 설정하세요}
       LOG_LEVEL: ${LOG_LEVEL:?LOG_LEVEL을 .env에 설정하세요}
@@ -158,6 +166,7 @@ services:
     logging: *default-logging
 
   # Superset 초기화(일회성, 멱등): db upgrade -> 관리자 -> init -> 업무 데이터 연결(bi_readonly) 등록
+  #   -> schema 권한 동기화 -> 역할 5개(bi_guest 포함) -> 서비스·발급 전용 계정 2개
   superset-init:
     build:
       context: ./superset
@@ -165,6 +174,10 @@ services:
     restart: "no"
     mem_limit: 1g
     entrypoint: ["bash", "/app/bi-wizard/init.sh"]
+    # 일회성 서비스다. 상속한 이미지 HEALTHCHECK가 종료 뒤에도 실패해 `unhealthy`로 표시되는 것을 막는다.
+    # superset의 depends_on(service_completed_successfully)은 종료 코드로 판단하므로 영향이 없다.
+    healthcheck:
+      disable: true
     environment:
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?SUPERSET_SECRET_KEY를 .env에 설정하세요}
       GUEST_TOKEN_JWT_SECRET: ${GUEST_TOKEN_JWT_SECRET:?GUEST_TOKEN_JWT_SECRET를 .env에 설정하세요}
@@ -172,6 +185,10 @@ services:
       SUPERSET_APP_ROOT: ${SUPERSET_APP_ROOT}
       SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:?SUPERSET_ADMIN_USER를 .env에 설정하세요}
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?SUPERSET_ADMIN_PASSWORD를 .env에 설정하세요}
+      SUPERSET_SERVICE_USER: ${SUPERSET_SERVICE_USER:?SUPERSET_SERVICE_USER를 .env에 설정하세요}
+      SUPERSET_SERVICE_PASSWORD: ${SUPERSET_SERVICE_PASSWORD:?SUPERSET_SERVICE_PASSWORD를 .env에 설정하세요}
+      SUPERSET_GUEST_ISSUER_USER: ${SUPERSET_GUEST_ISSUER_USER:?SUPERSET_GUEST_ISSUER_USER를 .env에 설정하세요}
+      SUPERSET_GUEST_ISSUER_PASSWORD: ${SUPERSET_GUEST_ISSUER_PASSWORD:?SUPERSET_GUEST_ISSUER_PASSWORD를 .env에 설정하세요}
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -181,6 +198,11 @@ services:
       postgres:
         condition: service_healthy
       db-bootstrap:
+        condition: service_completed_successfully
+      # bi_readonly의 bi_data USAGE는 마이그레이션 0002가 준다. 빈 볼륨 새 설치에서 schema 권한 동기화(schema_access 생성)가
+      # 이 권한보다 먼저 실행되는 순서 경쟁을 막으려고 migrate 완료를 기다린다. migrate는 db-bootstrap에만 의존하므로
+      # 순환 의존이 없다(superset-init -> migrate -> db-bootstrap -> postgres).
+      migrate:
         condition: service_completed_successfully
     logging: *default-logging
 

@@ -29,6 +29,11 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "POSTGRES_PASSWORD",
         "POSTGRES_APP_PASSWORD",
         "POSTGRES_OWNER_PASSWORD",
+        "SUPERSET_APP_ROOT",
+        "SUPERSET_SERVICE_USER",
+        "SUPERSET_SERVICE_PASSWORD",
+        "SUPERSET_GUEST_ISSUER_USER",
+        "SUPERSET_GUEST_ISSUER_PASSWORD",
     ):
         monkeypatch.delenv(name, raising=False)
     for name, value in _BASE_ENV.items():

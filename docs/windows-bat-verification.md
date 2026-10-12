@@ -2,7 +2,7 @@
 
 > **상태: 보류(사내 환경에서 검증, 2026-10-11).** 개인 PC 검증은 하지 않는다. 사내 환경은 Docker Desktop을 쓸 수 없으므로 사내 컨테이너 실행 방식(`docs/deploy-coordination.md` 26번)을 확인한 뒤, 사내 워크스테이션 또는 팀 웹서버 배포 준비 때 이 요청서로 검증한다. 아래 "Docker Desktop" 전제 문구는 그 방식에 맞게 바꿔 읽는다.
 
-- 작성: qa-engineer, 2026-10-11 (커밋 `4fbf7ad` 기준, EW-1 이전). EW-1(DB 계정 분리, 2026-10-11) 이후 바뀐 점: `.env` Secret 8개와 `AUTH_STUB_ENABLED` 추가, `scripts\validate-env.bat`·나머지 BAT는 파일 변경 없음(`.env.example`을 읽어 검사). BAT 기대 결과 중 EW-1 이후 기준으로 다시 확인하지 않은 항목은 이 요청서로 사내 환경에서 확인할 때 함께 본다
+- 작성: qa-engineer, 2026-10-11 (커밋 `4fbf7ad` 기준, EW-1 이전). EW-1(DB 계정 분리, 2026-10-11)과 EW-3(Superset 서비스·발급 계정, 2026-10-12) 이후 바뀐 점: `.env` Secret 10개(EW-3에서 `SUPERSET_SERVICE_PASSWORD`, `SUPERSET_GUEST_ISSUER_PASSWORD`와 이름 변수 `SUPERSET_SERVICE_USER`, `SUPERSET_GUEST_ISSUER_USER` 추가)와 `AUTH_STUB_ENABLED` 추가, `scripts\validate-env.bat`·나머지 BAT는 파일 변경 없음(`.env.example`을 읽어 검사). BAT 기대 결과 중 EW-1 이후 기준으로 다시 확인하지 않은 항목은 이 요청서로 사내 환경에서 확인할 때 함께 본다
 - **BAT 6종은 Linux 클라우드 세션에서 실행하지 않았다.** 같은 동작의 `docker compose` 명령은 Linux에서 모두 검증했다. 아래는 사용자가 Windows PC에서 직접 확인할 항목이다.
 - `scripts\*.bat`은 모두 ASCII 영문 메시지, CRLF, BOM 없음이다(`chcp` 미사용). 한글 깨짐과 레이블 인식 문제 우려는 이 구성으로 해소했다. 실제 동작은 이 요청서로 확인한다.
 - 기대 결과 중 BAT 메시지는 BAT 최신 내용을 읽고 적은 것이고, 컨테이너 상태와 화면은 Linux에서 같은 동작을 검증한 값이다.
@@ -17,7 +17,7 @@
 
 ## `.env` 만들기 (비밀 값은 사용자가 직접 채우고 채팅이나 AI에 보내지 않는다)
 1. 저장소 루트에서 `copy .env.example .env`.
-2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 8개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
+2. `.env`를 편집기(VS Code 권장)로 열어 **비어 있는 Secret 10개**를 서로 **다른** 값으로 채운다: `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`, `SUPERSET_SERVICE_PASSWORD`, `SUPERSET_GUEST_ISSUER_PASSWORD`.
 3. 값 생성 예(호출마다 새 값): `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Python이 없으면 `powershell -NoProfile -Command "-join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })"`.
 4. **주의 문자:** 값은 영문, 숫자, `-`, `_`만 쓴다. `$`, `%`, `#`, 작은따옴표, 큰따옴표, 공백, `=`, 한글을 쓰지 않는다. 값 끝에 공백이 남지 않게 한다. 인코딩은 BOM 없는 UTF-8이나 ANSI로 저장한다(메모장의 "UTF-8(BOM 포함)"은 피한다).
 5. **접속 주소 기본값:** `FRONTEND_HOST=127.0.0.1`이 기본이라 이 PC의 브라우저에서만 접속된다. 같은 LAN의 다른 PC에서 접속하려면 `FRONTEND_HOST=0.0.0.0`으로 바꾸고 `scripts\restart-local.bat`을 실행한다. 단 그러면 Superset 관리자 로그인 화면도 LAN에 노출되고 Windows 방화벽 허용 창이 뜰 수 있다. 포트가 겹치면 `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT`를 바꾼다.
@@ -27,7 +27,7 @@
 | 순서 | 실행할 명령 (또는 BAT) | 기대 결과 | 실패 시 보낼 정보 |
 | --- | --- | --- | --- |
 | 1 | `scripts\validate-env.bat` | 마지막 줄 `[OK] .env check passed: all variable names exist and have values.` 문제가 있으면 `[MISSING] 변수이름`, `[EMPTY] 변수이름`이 나오고 `[FAIL] .env check failed: N missing, M empty.` | 콘솔 출력 전체(변수 이름만. 값은 보내지 않는다) |
-| 2 | `scripts\start-local.bat` | 이미지 빌드(첫 기동 몇 분), `docker compose ps` 표시. `db-bootstrap`, `migrate`, `superset-init`은 `Exited (0)`, `postgres`, `backend`, `frontend`, `superset`은 `healthy`. `backend`는 `migrate`가 끝난 뒤 시작한다. 마지막 줄 `[OK] Start requested. Next: scripts\health-check.bat` | `docker compose ps -a`와 `scripts\logs-local.bat db-bootstrap`, `…migrate`, `…superset-init`, `…backend`, `…superset`(각각 `--tail=200`) 출력 |
+| 2 | `scripts\start-local.bat` | 이미지 빌드(첫 기동 몇 분), `docker compose ps` 표시. `db-bootstrap`, `migrate`, `superset-init`은 `Exited (0)`(`superset-init`은 `unhealthy`가 아니다), `postgres`, `backend`, `frontend`, `superset`은 `healthy`. `backend`와 `superset-init`은 `migrate`가 끝난 뒤 시작한다. `superset-init` 로그(`scripts\logs-local.bat superset-init`)에 역할 5개(`bi_service`, `bi_guest_issuer`, `bi_author`, `bi_author_schema`, `bi_guest`)와 계정 2개 확인 줄, `점검 요약: 강제 복구 0건` 줄이 있고 비밀번호는 없다. 마지막 줄 `[OK] Start requested. Next: scripts\health-check.bat` | `docker compose ps -a`와 `scripts\logs-local.bat db-bootstrap`, `…migrate`, `…superset-init`, `…backend`, `…superset`(각각 `--tail=200`) 출력 |
 | 3 | `scripts\health-check.bat` | 첫 줄 `Target: http://localhost:5173/bi-wizard/`, 이어서 `[OK] portal page`, `[OK] API /health`, `[OK] API /health/db PostgreSQL`, `[OK] Superset /health`, 마지막 `[OK] All checks passed.` (Superset은 기동 후 1분쯤 걸릴 수 있어 실패하면 1분 뒤 재시도) | `[FAIL] …` 줄과 URL, `scripts\logs-local.bat frontend` 출력 |
 | 4 | 브라우저에서 `http://localhost:5173/bi-wizard/` (포트는 `.env`의 `FRONTEND_PORT`) | 제목 BI-Wizard, 표에 `API 정상 (HTTP 200)`, `DB 정상 (HTTP 200)`. 개발자 도구 콘솔에 오류가 없다(`favicon.ico` 404는 수정됨) | 화면 캡처(주소창 포함)와 콘솔 오류 |
 | 5 | 브라우저에서 `http://localhost:5173/bi-wizard/superset/` | 로그인 화면(`…/bi-wizard/superset/login/?next=…`)으로 이동한다. 좌상단 로고가 깨진 이미지로 보이는 것은 알려진 Superset 6.1.0 현상이다(`deploy-coordination.md` 13번). 콘솔에 Scarf(`apachesuperset.gateway.scarf.sh`) 이미지가 CSP로 차단됐다는 경고가 보이는 것은 의도된 동작이다. `SUPERSET_ADMIN_USER`(기본 `admin`)와 `SUPERSET_ADMIN_PASSWORD`로 로그인하면 홈(`…/superset/superset/welcome/`)이 열린다. Dashboards, Charts, Datasets, SQL Lab 이동이 된다. Settings → Database Connections에 `BI-Wizard (read-only)`가 있다 | 화면 캡처, 개발자 도구 Network 탭의 404 요청 목록(로고, service-worker.js, 404 오류 페이지 일러스트 외에 다른 것이 있는지) |

@@ -1,6 +1,6 @@
 # 04. 모듈 경계·기능↔Skill 대응·기능 단위 순서 (FU-1 범위)
 
-**상태: 승인(2026-10-11, 03b 6절)** — architect. 05~08 초안의 부록 A 변경 제안과 문서 간 불일치를 통합했다.
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 05~08 초안의 부록 A 변경 제안과 문서 간 불일치를 통합했다. **EW-1·EW-3·EW-4 구현 결과 반영(2026-10-12, EW-5): 사실(상태·이름·개수)만 갱신했고 승인된 결정은 바꾸지 않았다.**
 - Gate ③ MODULARIZE. 의존 결정: 브리프 5절 2·3·6·7·8(스텁 전제)·9·10·11번(`docs/gate-status.md`), 범위 `03b` 5절(FU-1), 승인 `03b` 6절, 실험 `03c`. 원문은 `03b n-n`·`03c X-n` 참조로만 건다.
 - [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [승인 필요]·AP는 `03b` 6-3 기준).
 - 표지: **[미답]** 사용자가 답하지 않아 기본값으로 쓴 곳 / **[제안]** 문서 작성자가 낸 안(모음은 §9-2) / **해소(03c A-27)** 열 표시 이름 갱신 확인됨(조건부 가능, 08 §2-3).
@@ -79,13 +79,13 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 ### 7-1. FU-1 내부 구현 순서
 | 순서 | 소단위 | 백엔드 → 프런트 | 선행 | 메모 |
 | --- | --- | --- | --- | --- |
-| 0 | 공통 기반 | core·auth 스텁(fail-closed)·오류 형식·`/health` 필드·시작 자가 점검·정적 `MetaData` → 셸·라우팅(STRIP=true 딥링크)·`config.ts` | EW-1, EW-3, EW-4(`03b` 5-4) | 모든 쓰기 API가 `current_user`에 의존. EW-1이 권한 전용 첫 revision `0002_bi_data_privileges`를 만든다(06 §6) |
+| 0 | 공통 기반 | core·auth 스텁(fail-closed)·오류 형식·`/health` 필드·시작 자가 점검·정적 `MetaData` → 셸·라우팅(STRIP=true 딥링크)·`config.ts` | EW-1, EW-3, EW-4(`03b` 5-4, 모두 구현·검증됨) | 모든 쓰기 API가 `current_user`에 의존. EW-1이 권한 전용 첫 revision `0002_bi_data_privileges`를 만들었다(구현됨, 06 §6) |
 | 1 | FU-1a | users·teams·team_members(revision `0003`), 최초 관리자 명령, `/api/me`·팀·사용자 → 팀 선택, S6 | 0 | 사람 역할 권한 시험 시작 |
 | 2 | FU-1b | datasets·dataset_columns(`0004`), `ddl`(등록 + `ds_` 생성 한 트랜잭션), 정의 버전 → S2, S3, Inspector | 1 | `bi-review` 7-4 첫 적용. 열 이름 노출은 `c_<번호>` + Superset 표시 이름(확인됨: 03c A-27, 08 §2-3). `dv_` 생성은 1d의 훅 등록 뒤부터라 1b 단독 단계는 `ds_`만 |
 | 3 | FU-1c | 행 조회, 칸 단위 값 비교 갱신(pg8000 `rowcount` 첫 시험), 붙여넣기 일괄 → 그리드, 붙여넣기 파서 | 2 | 1d와 병렬 가능: 1c는 `RowViewPort` 기본 구현(계산 열 없음)으로 시작하고 1d가 formula 구현으로 교체 |
 | 3 | FU-1d | formulas·formula_deps(`0005`), 파서·정적 검사·순환 검사, `dv_`(와 `de_`) 생성·정의 해시·시작 시 재생성, 미리보기, 수식 보기, 오류 칸, 뷰 점검 → 수식 편집기, S5 | 2 | 데이터셋마다 뷰 1개(수식 열이 없어도, 팀 열 포함)를 정의 변경 훅이 만든다(승인 `03b` 6-2) |
 | 4 | FU-1e | superset_*(`0006`), 서비스 계정 등록, 연결 uuid 등록, 입장권 발급(`rls` 빈 목록, 속도 제한) → S7, S8, S9 | 1d | 하위 경로(STRIP true/false) + Embedded 재검증, 지원 차트 6가지 시험(08 P5) |
-- EW 대응(`03b` 5-4): EW-1 계정 분리 = 0~1d의 DB 전제, EW-3 Superset 서비스·발급 계정과 EW-4 `bi_guest` = 1e의 전제(모두 Gate ④ 진입 전 완료), EW-5~7 = 문서·통합 검증·reviewer 점검. EW-2(업로드 상한)는 가져오기 단위로 넘긴다. 붙여넣기 요청 상한은 A안(1MiB 이하)으로 승인되어(`03b` 6-2) nginx `client_max_body_size` 변경은 FU-1에 없다.
+- EW 대응(`03b` 5-4): EW-1 계정 분리 = 0~1d의 DB 전제(구현·검증됨 2026-10-11), EW-3 Superset 서비스·발급 계정과 EW-4 `bi_guest` = 1e의 전제(구현·검증됨 2026-10-12, QA 독립 검증과 reviewer 차단 0건), EW-5 = 문서·하네스 정리(완료 2026-10-12), EW-6·7 = 통합 검증·reviewer 점검(완료 2026-10-12, QA 통과·reviewer 차단 0건). EW-2(업로드 상한)는 가져오기 단위로 넘긴다. 붙여넣기 요청 상한은 A안(1MiB 이하)으로 승인되어(`03b` 6-2) nginx `client_max_body_size` 변경은 FU-1에 없다.
 
 ### 7-2. FU-1 다음 단위 순서 제안 (세부 설계 없음, 의존 순서)
 | 단위 | 이유 |
@@ -102,7 +102,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 - X-26 주입 사례 10종 + 역슬래시 사례를 **회귀 시험으로 고정**. 완화책 3가지(세션 `standard_conforming_strings` 고정, 역슬래시·제어문자·NUL 거부, 생성 후 재읽기 비교·불일치 시 롤백)와 런타임 DDL `bi_app` 실행을 시험한다.
 - 인증 스텁 fail-closed(`bi-review` 7-5): 스위치 `AUTH_STUB_ENABLED`는 미설정이면 꺼짐(기본 false)이고, 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부함을 시험한다. 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별(config.js 변경 없음)하고 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다.
 - K6 핵심 함수 전부에 시험 사례가 있고 함수 추가가 사전 항목 1개로 끝난다. K7: 빈 칸은 미입력으로 유지되고 결과도 빈 값(`MIN`·`MAX`·`SUM`·`SUMTAG` 빈 칸 **전파 확정**, `03b` 6-1), 글자 비교는 대소문자 무시, 오류 칸은 뷰가 NULL을 돌려주고(계산 열은 저장되지 않음) 화면에서 구별 표시되며 점검 목록에 노출. K7 ㄷ의 "빈 값으로 저장"은 계산 열이 저장되지 않는 뷰 설계에서 이 뜻으로 읽는다(승인 `03b` 6-2).
-- **지원 차트 6가지(선, 막대, 표, 큰 숫자[추세 포함], 원형, 혼합[막대+선]) 모두 임베딩 화면에서 `bi_guest` 최소 권한으로 정상 표시**(`03b` 6-1, 08 P5). 추가 권한이 필요한 차트가 나오면 보고하고 멈춘다.
+- **지원 차트 6가지(선, 막대, 표, 큰 숫자[추세 포함], 원형, 혼합[막대+선]) 모두 임베딩 화면에서 `bi_guest` 최소 권한으로 정상 표시**(`03b` 6-1, 08 P5). 추가 권한이 필요한 차트가 나오면 보고하고 멈춘다. EW-4 QA에서 6가지 모두 통과했고(추가 권한 불필요) FU-1e에서 포털 화면으로 다시 시험한다.
 - K12 열 이름 방식 (나)는 서비스 계정 표시 이름 갱신이 확인됨(03c A-27, 조건부 가능: 전체 열 교체 `PUT`). 합격 기준은 08 P4.
 - 공통 완료 기준은 `feature-unit`, 권한 매트릭스·왕복 시험은 EW-1 완료 기준(`03b` 3-6 BY4)을 따른다. Superset 쪽 합격 기준 P1~P5는 08 §6.
 
@@ -114,14 +114,14 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | AP-1 | `bi-review` 7-2 확장: guest 권한 목록 파일 규칙 + 서버 코드의 입장권 직접 서명 금지 | 08 AP-1 | 승인됨 |
 | AP-2 | 가상 데이터셋 SQL을 `SELECT * FROM bi_data.<뷰>`로 고정, 서비스 계정만 등록 | 08 AP-2 | 승인됨 |
 | AP-5 | db-bootstrap 고정 SQL: `bi_owner`에 `public` CREATE, `bi_data` 소유자를 `bi_owner`로 | 06 AP-5 | 승인됨(EW-1) |
-| AP-9 | `bi_readonly` `statement_timeout` **30초 확정**(기준선과 다른 설정, 효과는 EW-1에서 확인) | 06 AP-9 = 08 AP-9 | 승인됨 |
+| AP-9 | `bi_readonly` `statement_timeout` **30초 확정**(기준선과 다른 설정, 효과 확인됨: EW-1 QA에서 `pg_sleep(31)`이 30.2초에 취소) | 06 AP-9 = 08 AP-9 | 승인됨(EW-1 구현) |
 | AP-10 | `bi-review` 7-4 문구: `Identity()` 암묵 시퀀스(`row_id`)를 "시퀀스 금지"의 예외로 명시(런타임 Alembic `Operations` 허용은 7-4에 이미 있어 06 AP-10 ②는 승인 항목이 아님) | 06 AP-10 | 승인됨 |
 | AP-11 | `03-migration-tool.md` D2 안전장치를 "정적 표 대상"으로 좁힘 | 06 AP-11 | 승인·반영 완료 |
-| AP-12 | backend → Superset 내부 주소는 compose 서비스 이름 기반 **코드 상수**(새 변수 없음), `SUPERSET_APP_ROOT`를 backend에 전달 | 08 AP-12 | 승인됨(적용 EW-3) |
-| AP-13 | 새 환경변수 `AUTH_STUB_ENABLED`(기본 꺼짐)와 운영 판별: `APP_ENV` 명시 설정 + 허용 목록(local·test) 안일 때만 시작 허용(fail-closed, §8) | 05 AP-1 | 승인됨(EW-1) |
+| AP-12 | backend → Superset 내부 주소는 compose 서비스 이름 기반 **코드 상수**(새 변수 없음), `SUPERSET_APP_ROOT`를 backend에 전달 | 08 AP-12 | 승인됨, 적용 완료(EW-3, 2026-10-12: `SUPERSET_INTERNAL_URL` 코드 상수와 `SUPERSET_APP_ROOT` 전달, HTTP 호출 코드는 FU-1e) |
+| AP-13 | 새 환경변수 `AUTH_STUB_ENABLED`(기본 꺼짐)와 운영 판별: `APP_ENV` 명시 설정 + 허용 목록(local·test) 안일 때만 시작 허용(fail-closed, §8) | 05 AP-1 | 승인됨, 스위치·시작 거부 구현됨(EW-1, `backend/app/config.py`. 스텁 로그인 기능은 FU-1a) |
 | AP-14 | 이 문서 부록 A의 이름·용어 추가·변경: `PERIOD_CONFLICT`·`WRITE_BUSY`와 05 오류 코드 사전, `de_`/`e_`, `row_id`·`team` 예약, `bi_author`/`bi_author_schema`, 셀 "오류 코드", `SUMTAG`, `RowViewPort`, 시작 자가 점검 항목 추가 | 05 AP-2, 06 §2, 07 §10, 08 §5 | 승인됨 |
 | AP-15 | 새 런타임 의존성: backend `lark`, frontend 라우터·AG Grid Community·Superset Embedded SDK. `httpx`는 승인됨 | 07 §10, 08 §7 | FU-1 착수 때 버전·라이선스 확인 후 요청 |
-| AP-16 | `superset-init` 확장(서비스·발급 계정, `bi_author*` 생성; `bi_guest`는 `03b` 4-2 Z2), 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD` 확정, 필요 시 compose `tmpfs`/`mem_limit`은 보고 후 적용 | 08 §7 | 승인됨(EW-3·EW-4) |
+| AP-16 | `superset-init` 확장(서비스·발급 계정, `bi_author*` 생성; `bi_guest`는 `03b` 4-2 Z2), 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD` 확정, 필요 시 compose `tmpfs`/`mem_limit`은 보고 후 적용 | 08 §7 | 승인됨, 적용 완료(EW-3·EW-4, 2026-10-12. 표식 계정 강제 복구는 `03b` 10-1) |
 | AP-17 | 에이전트 정의 모델 변경: `env-engineer`·`qa-engineer`·`frontend-dev` haiku → sonnet(`CLAUDE.md` 변경 이력에 사유 기록) | - | 승인됨(`03b` 6-1) |
 - 승인 항목이 아닌 것: 첫 관리자 서버 명령은 `03b` 5-2 K3 ㄷ로 결정됐고(새 환경변수 없음) 운영 서버에서 실행 가능한지만 운영자 확인 항목이다(`deploy-coordination.md` 35번). revision `downgrade`의 `op.drop_table`에 필요한 `DROP_APPROVED` 기록은 기존 D2 규칙의 적용일 뿐 새 승인이 아니다. 정규식 평가 의존성은 FU-1 밖(§10). 이 표에 없는 AP 번호는 결번이다: AP-3 정규식 의존성(후속), AP-4 위 설명, AP-6 해소(직접 서명 폴백 불채택), AP-7 브라우저 자동화 개발 의존성(필요해질 때), AP-8 작성자 계정 자동 생성(미채택).
 
@@ -135,7 +135,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 수식 | **오류 판정 구조 E-A 보조 뷰 `de_<번호>`** / 함수 `SUMTAG`·`[열 이름]` 문법 / `ROUND*` 자릿수 상수·`&` 숫자 자동 변환 불가·글자 대소 비교 제외 / 열 태그는 숫자 열에 하나 / 미리보기 20행·5초·사용자당 1건 + 전역 동시 상한 / 상수 부분식 오류는 C0가 상수 SELECT로 거부 / K7 ㄷ "오류 칸은 빈 값으로 저장"을 "뷰가 NULL을 돌려줌(계산 열은 저장하지 않음)"으로 읽는 재해석 | 07 §2-2·§3·§3-1·§5, 06 §3-4 |
 | 데이터 모델 | 필수·범위는 앱 검증 / `row_id` 둠 / 열 단위 UPDATE GRANT로 `team_id`·`kind` 불변을 DB가 강제, `type`은 계산 열 결과 형 때문에 갱신 허용(raw 열 type 변경 금지는 앱 규칙) / 열거는 `text` + CHECK, 제약 이름 규칙 / `teams.name` 유일 / 기준 날짜 열·`date_unit`은 행 0개일 때만 변경 / 정의 변경은 `datasets` 행 `FOR NO KEY UPDATE` 한 가지 잠금 / 행 쓰기에 `expected_version` 일치 요구 / 기준 날짜 열은 `required`로 취급 / `bi_data` 소유자 `bi_owner` | 06 §1~§3·§5·§6 |
 | API | `/health` 새 필드는 메모리 값(worker 1개 전제) / `E3`가 `embedded_uuid`를 모두에게 노출(입장권 요청은 포털 id만 받음) / `E1` 상태는 읽기 공개·`last_error`는 관리자 / `LAST_ADMIN` 보호 / 검사(D2) 실패도 200 / 스텁 쿠키 방식 / D6 응답에 원문 없음 / `WRITE_BUSY` 재시도 코드 / 기존 행 수정은 `expected` 필수 | 05 §1·§2·§3·§6 |
-| Superset | guest 조건부 2권한은 지원 차트에 필요하지 않을 때만 제외(`can_time_range`는 포함) / 발급 계정 REST(JWT) 2권한 / 작성자 역할 `bi_author`·`bi_author_schema` / 가상 데이터셋 이름 형식·공개 안내 문구 / 서비스 계정 이름 변경 금지 / 훅은 Superset 쪽 임베드 설정으로 확인 / 대시보드 PDF·이미지 내보내기는 서버가 못 막으며 불변식에 따라 수용 | 08 §2~§5 |
+| Superset | guest 조건부 2권한은 지원 차트에 필요하지 않을 때만 제외(`can_time_range`는 포함) / 발급 계정 REST(JWT) 2권한 / 작성자 역할 `bi_author`·`bi_author_schema` / 가상 데이터셋 이름 형식·공개 안내 문구 / 서비스 계정 이름 변경 금지 / 훅은 형식·`rls`·개수·유형·`user`만 거부하고 임베드 uuid 존재는 Superset 기본 검사가 확인(포털 등록 표 일치 검사는 FU-1e 이월) / 대시보드 PDF·이미지 내보내기는 서버가 못 막으며 불변식에 따라 수용 | 08 §2~§5 |
 
 ## 10. 기능 축소 기록 · 후속 기능 단위에서 결정
 "사용자 승인" 열은 `03b` 6-2로 모두 승인됐다(기능 축소 항목 전부 승인).
@@ -183,7 +183,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 수식 보기 / 미리보기 | 계산 열의 수식을 열 이름으로 풀어 읽기 전용 표시(AST에서 생성, `formulas.expression`은 보관용 원문) / 저장 전 일부 행 계산(뷰와 같은 변환기) | 07 §9 (결정 1-6, 2-3 W7) |
 | 정의 버전 / 정의 해시 | 데이터셋 정의 변경 번호(충돌 확인) / 뷰 SQL 구조 해시(시작 시 재생성 판단) | `datasets.def_version`, `datasets.def_hash` (결정 3-4, 2-3 W2) |
 | 정적 표 / 동적 객체 | Alembic이 관리하는 포털 표(`public`, 등록 표 포함) / 런타임 DDL이 만드는 `ds_`·`dv_`·`de_`(`bi_data`) | 소유 계정 `bi_owner` / `bi_app` (결정 2-3 W1, 3-2) |
-| 서비스 계정 / 발급 전용 계정 | Superset 데이터셋 등록·새로고침용 / 입장권 발급용(서로 분리) | `SUPERSET_SERVICE_USER`·`_PASSWORD` / `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 확정) |
+| 서비스 계정 / 발급 전용 계정 | Superset 데이터셋 등록·새로고침용 / 입장권 발급용(서로 분리) | `SUPERSET_SERVICE_USER`·`_PASSWORD` / `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 확정). 기본 계정 이름 `bi_service`·`bi_guest_issuer`, 역할은 같은 이름 하나씩(구현됨 EW-3) |
 | 입장권(guest token) / embedded uuid | 대시보드 임베드용 5분짜리 접속 허가, `rls`는 항상 빈 목록 / 관리자가 수동 등록하는 임베드 번호 | `superset_dashboards.embedded_uuid` (결정 4-2) |
 | 가상 데이터셋 | `dv_` 뷰를 읽는 Superset 데이터셋(읽기 쉬운 이름) | 이름 `[<팀 표시 이름>] <데이터셋 표시 이름>` (결정 3-3 Y6) |
 
@@ -211,5 +211,5 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | `dataset_status` | `active`만 (`archived`·`deleted`는 보관·삭제 단위가 CHECK를 바꿔 추가) |
 | `sync_status` | Superset 등록 동기화 상태(화면 문구 "동기 상태"): `pending`(등록 행이 없거나 갱신 필요), `registered`, `failed` |
 | API 오류 코드(05 §3) | 충돌 `CELL_CONFLICT`, `PASTE_CONFLICT`, `PERIOD_CONFLICT`, `DEFINITION_VERSION_MISMATCH`, 재시도 가능 `WRITE_BUSY`(행 쓰기 락 대기·교착). 나머지 코드는 05 §3 사전을 따른다 |
-| DB 계정·schema | `bi_owner`, `bi_app`, `bi_readonly`, `bi_data`, `public` (결정 3-2) |
-| Superset | `bi_guest`(guest 역할, 결정 4-2 Z2), 서비스 계정 / 발급 전용 계정(위), 작성자 역할 `bi_author`(Gamma 복사본)와 `bi_data` schema 보조 역할 `bi_author_schema` (08 §5) |
+| DB 계정·schema | `bi_owner`, `bi_app`, `bi_readonly`, `bi_data`, `public` (결정 3-2). 그 밖에 Superset 메타 DB `superset`과 소유 역할 `superset_meta`(03a). 모두 코드 상수이고 `db-bootstrap`이 만든다(구현됨 EW-1) |
+| Superset | `bi_guest`(guest 역할, 결정 4-2 Z2), 서비스 계정 / 발급 전용 계정(위)과 역할 `bi_service` / `bi_guest_issuer`, 작성자 역할 `bi_author`(Gamma 복사본)와 `bi_data` schema 보조 역할 `bi_author_schema` (08 §5). 구현된 권한 개수: `bi_service` 4, `bi_guest_issuer` 2, `bi_author_schema` 1, `bi_guest` 4, `bi_author` 6.1.0 Gamma 복사본 95, `Public` 0(EW-3·EW-4 QA 실측) |

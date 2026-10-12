@@ -1,6 +1,6 @@
 # 06. 데이터 모델·권한·마이그레이션 계획 (FU-1 범위)
 
-**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·enum은 04 부록 A를 그대로 쓴다. 코드·전체 DDL은 담지 않는다.
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 이름·enum은 04 부록 A를 그대로 쓴다. 코드·전체 DDL은 담지 않는다. EW-1 구현 결과 반영(2026-10-12, EW-5): §4-2·§6·§8의 상태 표기와 구현 위치만 갱신했고 승인된 설계는 바뀌지 않았다.
 - 의존 결정: 브리프 5절 2·3·8(스텁 전제)·9·11번, `03b` 2-2·2-3·2-6·3-2·3-4·3-6·4-1·4-3·5-2, 실험 `03c`. 사용자 결정은 바꾸지 않고 원문은 `03b n-n`으로만 건다.
 - [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [AP-n]은 `03b` 6-3 기준).
 - 표지: **[제안]** 이 문서가 처음 내는 안 / **[미답]** 사용자 답 없음 / **해소(03c A-27)** 열 표시 이름 갱신 확인됨(§7) / **[AP-n]** §8 승인 필요. 근거: `03c X-n` = 우리 환경(PostgreSQL 16.10) 실측(**확인됨**), 공식 문서는 REL_16_STABLE(16.15) 기준(마이너 차이), 그 밖은 **추정**.
@@ -86,7 +86,7 @@ dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets
 - **관리자는 팀 소속 역할 없이 데이터셋 정의·입력 권한이 없다**(승인 03b 6-2). 필요하면 그 팀의 `team_members`에 올라 그 역할로 한다.
 - Superset 차트 작성 계정은 관리자가 수동으로 만든다(03b 5-2 K11 ㄷ). 작성 권한 자체는 DB가 아니라 Superset 역할이다(08).
 
-### 4-2. DB 계정 권한 (구현은 Gate ④ 진입 전 EW-1, 03b 3-2·5-4)
+### 4-2. DB 계정 권한 (구현됨: EW-1, 2026-10-11, QA 11항목 통과·reviewer 차단 0건, 03b 3-2·5-4)
 | 계정 | 있는 권한 | 없는 권한·잔여 위험 | 근거 |
 | --- | --- | --- | --- |
 | `bi_owner` | 정적 표 소유(DDL·DML), `alembic_version`, `bi_data` 소유자(멤버십 없이도 `DROP` 가능), `bi_app`의 `INHERIT TRUE, SET FALSE` 멤버 | backend 런타임 접속 금지. `bi_data`에 객체를 만들지 않는다(만들면 `bi_readonly`가 못 읽음) | X-14, X-15 |
@@ -105,16 +105,16 @@ dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets
 | 행 쓰기 ↔ 정의 | 행 요청(C2~C4)은 dataset service 함수(잠금 + 버전 확인, 04 §5)로 `datasets` 행을 `FOR SHARE`로 잡고 `def_version`을 비교한다 [제안: 03b Y8의 정의 편집 범위 밖의 요구, 승인 03b 6-2] | 다르면 409(열 추가 때 열려 있던 그리드 입력도 409가 됨). 잠금 순서는 항상 **`datasets` 행 → `ds_` 행 → 동적 DDL**이라 정의 변경(`FOR NO KEY UPDATE`, SHARE 보유자를 기다림)과 행 쓰기 사이에 순서 역전 교착이 없다. `FOR SHARE`는 미시험이고 연속 `FOR SHARE`로 정의 변경 대기자가 굶으면 `DEFINITION_BUSY`가 되므로 1b·1c 첫 시험에 굶음 시나리오를 포함한다 |
 | `datasets.def_hash` | 마지막으로 뷰를 **성공적으로** 만든 정의의 해시(표시 이름 제외, 알고리즘은 07) | 시작 시 현재 정의의 해시와 비교해 다르면 재생성, 같으면 건너뜀(03c X-17). 실패하면 저장값이 안 바뀌어 다음 시작·재시도 때 다시 대상이 되고, 그 수가 `/health`의 `views_failed_count`(05). **`/health`의 새 필드와 실패 상세(사유·시각)는 프로세스 메모리 값이고 영속되는 것은 `def_hash` 표 값뿐**이며 상세는 로그에도 남긴다. uvicorn **worker 1개 전제**(`03a`)이고 worker를 늘리면 실패 상세를 표 필드로 옮기도록 재설계한다(07 §8) |
 
-## 6. 마이그레이션 계획 (구현은 EW-1·FU-1 단계, 03b 3-2·4-1)
+## 6. 마이그레이션 계획 (db-bootstrap·`0002`·틀은 구현됨 EW-1, 정적 표 revision은 FU-1 단계, 03b 3-2·4-1)
 | 항목 | 내용 | 출처·상태 |
 | --- | --- | --- |
-| db-bootstrap 사전 조건 | ① 역할 `bi_owner`·`bi_app`과 비밀번호(변수 승인됨) ② 빈 `bi_data`, **소유자 `bi_owner`** [제안: 03b에 소유자 명시 없음, X-15 구성] ③ `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`(승인됨, 반복 실행 안전) ④ `bi_owner`에 `public` CREATE **[AP-5]**(PostgreSQL 15 이후 기본 구성은 `PUBLIC`에 주지 않음, `pg16-ddl.sgml:3255`; `bi_app`의 `public` CREATE 거부는 03c X-15) | 03b 3-2, 4-1 Z0, 03c X-14·X-29 |
-| 첫 실제 revision `0002_bi_data_privileges`(권한 전용, **EW-1이 만든다**) | `GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app` → `GRANT USAGE ON SCHEMA bi_data TO bi_readonly` → `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`. 실질 `downgrade()`(REVOKE). 전부 `bi_owner`가 실행하는 보간 없는 고정 SQL | 03b 4-1 Z0, 6-4, 03c X-29 |
+| db-bootstrap 사전 조건 | ① 역할 `bi_owner`·`bi_app`과 비밀번호(변수 승인됨) ② 빈 `bi_data`, **소유자 `bi_owner`** [제안: 03b에 소유자 명시 없음, X-15 구성] ③ 이미 있는 `bi_owner`·`bi_app`은 매 기동 고정 문장 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE`로 속성을 다시 차단한다(구현됨 EW-8, 03b 14-1 ①) ④ `GRANT bi_app TO bi_owner WITH INHERIT TRUE, SET FALSE`(승인됨, 반복 실행 안전) ④ `bi_owner`에 `public` CREATE **[AP-5]**(PostgreSQL 15 이후 기본 구성은 `PUBLIC`에 주지 않음, `pg16-ddl.sgml:3255`; `bi_app`의 `public` CREATE 거부는 03c X-15) | 03b 3-2, 4-1 Z0, 7-1, 03c X-14·X-29. **구현됨(EW-1)**: `backend/bootstrap/roles.sql`에 ①~④와 함께 소급 승인된 `REVOKE ALL ON SCHEMA bi_data FROM PUBLIC`·`REVOKE CREATE ON SCHEMA public FROM PUBLIC`·`SET LOCAL log_min_error_statement = panic`이 있다 |
+| 첫 실제 revision `0002_bi_data_privileges`(권한 전용, **구현됨(EW-1)**: `backend/migrations/versions/20261011_0002_bi_data_privileges.py`) | `GRANT USAGE, CREATE ON SCHEMA bi_data TO bi_app` → `GRANT USAGE ON SCHEMA bi_data TO bi_readonly` → `ALTER DEFAULT PRIVILEGES FOR ROLE bi_app IN SCHEMA bi_data GRANT SELECT ON TABLES TO bi_readonly`. 실질 `downgrade()`(REVOKE). 전부 `bi_owner`가 실행하는 보간 없는 고정 SQL | 03b 4-1 Z0, 6-4, 03c X-29 |
 | 이후 revision | `0003`(1a) `users`·`teams`·`team_members`와 §2 명시 GRANT, `0004`(1b) `datasets`·`dataset_columns`(순환 FK는 `create_foreign_key`로 뒤에 추가), `0005`(1d) `formulas`·`formula_deps`, `0006`(1e) `superset_*`. 소단위마다 하나 | 04 §6·§7-1 |
 | `downgrade()` | 실질 구현: 권한 `REVOKE`, 기본 권한 `REVOKE`, 표 역순 삭제. `bi_data` schema·동적 객체·멤버십은 건드리지 않는다(D5 의미 변경 승인). 표 삭제의 `op.drop_table`은 `DROP_APPROVED`에 사용자 승인 기록이 필요하다(`test_migrations.py`) | 03b 3-2 ㄱ, D2 안전장치 |
-| `env.py` | `target_metadata`는 `core`의 정적 `MetaData` 하나(제약 이름 규칙 지정 [제안, 일반 지식]). `bi_data`용 `MetaData`는 별개 인스턴스이고 `env.py`가 가져오지 않는다. `include_schemas=False`(기본) + 안전망 `include_name`/`include_object`로 `bi_data` 제외. `compare_type=True` 유지 | 03c X-29 (`include_schemas=True`이고 필터가 없을 때만 `ds_*`가 `drop_table`로 제안됨) |
-| 점검 | `alembic check`(DB가 head, 종료 코드 0/255/1): ① 빈 DB 성공 ② `ds_1`·`dv_1`이 있는 DB도 성공 ③ 정적 모델 열을 지우면 255 ④ `DROP_APPROVED` 규칙. 권한은 `check`가 못 잡으므로 스냅샷 비교. `heads` 개수 1개 점검. `test_migrations.py`의 `get_heads()==["0001"]` 단정 갱신, `INTENTIONAL_NOOP`은 `{"0001"}` 유지 | 03c X-29 |
-| 왕복 시험 | 출발 = db-bootstrap 직후 DB, `bi_owner` 실행. 스냅샷(`public` 표·열·인덱스·제약, ACL, `pg_default_acl`, `bi_data` 권한) A → upgrade → B → downgrade → A → upgrade → B. 사전에 `bi_app`이 만든 `ds_1`·`dv_1`이 남는지 확인. schema ACL의 NULL/소유자 명시 차이는 정규화. 복원 대상 제외: db-bootstrap 산물(역할·멤버십·`bi_data`·`public` CREATE), 빈 `alembic_version` | 03c X-29, 03b 4-1 |
+| `env.py` | **구현됨(EW-1)**: `target_metadata`는 정적 `MetaData` 하나(현재 `backend/app/db_metadata.py`, 04의 `core` 소속, 제약 이름 규칙 지정 [제안, 일반 지식]). `bi_data`용 `MetaData`는 별개 인스턴스이고 `env.py`가 가져오지 않는다. `include_schemas=False`(기본) + 안전망 `include_name`/`include_object`로 `bi_data` 제외. `compare_type=True` 유지 | 03c X-29 (`include_schemas=True`이고 필터가 없을 때만 `ds_*`가 `drop_table`로 제안됨) |
+| 점검 | `alembic check`(DB가 head, 종료 코드 0/255/1): ① 빈 DB 성공 ② `ds_1`·`dv_1`이 있는 DB도 성공 ③ 정적 모델 열을 지우면 255 ④ `DROP_APPROVED` 규칙. 권한은 `check`가 못 잡으므로 스냅샷 비교. `heads` 개수 1개 점검. `test_migrations.py`의 head 단정은 `["0002"]`로 갱신됨(EW-1), `INTENTIONAL_NOOP`은 `{"0001"}` 유지 | 03c X-29 |
+| 왕복 시험 | 출발 = db-bootstrap 직후 DB, `bi_owner` 실행. 스냅샷(`public` 표·열·인덱스·제약, ACL, `pg_default_acl`, `bi_data` 권한) A → upgrade → B → downgrade → A → upgrade → B. 사전에 `bi_app`이 만든 `ds_1`·`dv_1`이 남는지 확인. schema ACL의 NULL/소유자 명시 차이는 정규화. 복원 대상 제외: db-bootstrap 산물(역할·멤버십·`bi_data`·`public` CREATE), 빈 `alembic_version` | 03c X-29, 03b 4-1. **구현됨(EW-1)**: `python -m migrations.roundtrip`(`backend/migrations/roundtrip.py`, QA 통과) |
 - D2 안전장치 문구 재서술은 **[AP-11]**(선택, 현행 유지도 가능). D6 Jenkins 적용은 보류(Docker 가능 여부 확인 후).
 
 ## 7. Superset에 노출되는 열 이름과 변경 영향 (K12 (나), 확인됨: 03c A-27)
@@ -130,8 +130,8 @@ Superset 열 이름 = 내부 이름 `c_<id>`(팀 열은 `team` 고정), 읽기 �
 ## 8. 승인 상태 (`03b` 6-3)
 | 번호 | 항목 | 시점 |
 | --- | --- | --- |
-| AP-5 | **승인**: db-bootstrap 고정 SQL 추가 — `bi_owner`에 `public` CREATE, `bi_data` 소유자 `bi_owner`(위 §6 ②) | 승인됨 |
-| AP-9 | **승인**: `bi_readonly` `statement_timeout` 30초(기준선과 다른 설정, 효과는 EW-1에서 확인) | 승인됨 |
+| AP-5 | **승인**: db-bootstrap 고정 SQL 추가 — `bi_owner`에 `public` CREATE, `bi_data` 소유자 `bi_owner`(위 §6 ②) | 승인됨, 구현됨(EW-1) |
+| AP-9 | **승인**: `bi_readonly` `statement_timeout` 30초(기준선과 다른 설정, 효과 확인됨: EW-1 QA에서 30.2초에 취소) | 승인됨, 구현됨(EW-1) |
 | AP-10 | **승인**: `bi-review` 7-4 문구 — 열에 연결된 `Identity()` 암묵 시퀀스를 "시퀀스 금지"의 예외로 명시(`row_id`가 의존). 런타임 Alembic `Operations` 허용은 7-4에 이미 있어 승인 대상이 아니다 | 승인됨 |
 | AP-11 | **승인·반영 완료**: `03-migration-tool.md` D2 안전장치를 "정적 표 대상"으로 좁힘 | 완료 |
 | - | revision `downgrade`의 `op.drop_table`에 필요한 `DROP_APPROVED` 기록: 기존 D2 규칙의 적용이며 새 승인이 아니다 | 각 revision 때 |

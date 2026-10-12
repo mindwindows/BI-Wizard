@@ -290,3 +290,122 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 ### 7-3. 세션 인계
 이 세션은 EW-1까지로 마무리한다. EW-3부터는 새 세션에서 시작하며 인계 내용은 `docs/gate-status.md` 맨 위 "다음 세션 인계" 절에 있다. 필요한 실험 기록은 `docs/research/`로 옮겼다.
 
+## 8. EW-3 착수 전 승인 (2026-10-12, 사용자)
+- **로컬 동기화:** `harness/setup`을 `origin/main`(`a7051d8`)으로 맞춘다(`git checkout -B`). `origin/harness/setup`(`7aeaa38`)에서 `a7051d8`로의 이동은 앞으로 가는 이동이므로 일반 push로 올리며 강제 push는 하지 않는다. 작업 브랜치는 계속 `harness/setup`이고 `claude/sharp-goldberg-hzsd6c`는 건드리지 않는다.
+- **발급 전용 계정 변수 이름 확정:** `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD`(Z3 후보를 확정, 04 AP-16과 08 §10과 같음).
+- **서비스 계정(`SUPERSET_SERVICE_USER`/`_PASSWORD`):** 생성 시점과 기본 사용자 이름 값은 적용 후 보고한다.
+- **`superset-init` 구현 방법:** Superset 이미지에 이미 있는 수단(CLI, flask shell)만 쓰고, 새 의존성이 생기는 방법은 쓰지 않는다. 택한 방법과 이유를 보고한다(A-22·A-26 해소).
+- **권한 목록:** 서비스 역할, 발급 역할, `bi_author` 권한 목록은 적용 전에 구체 내용을 보고하고 승인받는다.
+- **세션 인계:** EW-3는 새 세션에서 시작한다. `gate-status.md` 인계 절 맨 앞에 "세션 시작 시 첫 확인"(HEAD가 `origin/harness/setup` 최신과 같은지 확인, 다르면 동기화 승인부터, 동기화했다면 새 세션으로 재시작 안내)을 추가했다.
+
+## 9. EW-3 설계 승인과 결과 (2026-10-12, 사용자 승인, env-engineer 구현, QA·reviewer 검증)
+### 9-1. 승인된 설계(사용자)
+- **A.** `superset-init` 구현은 앱 컨텍스트 파이썬 스크립트 한 가지(`create_app()` + `security_manager`). fab CLI는 `create-role`이 없고 `create-user`가 비밀번호를 명령줄에 노출·비멱등이라 쓰지 않는다. 새 의존성 없음.
+- **B.** 역할·권한: `bi_service`(`can_read Dataset`, `can_write Dataset`, `schema_access` `[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`, `can_read SecurityRestApi`), `bi_guest_issuer`(`can_grant_guest_token`, `can_read SecurityRestApi`), `bi_author`(Gamma 복사본), `bi_author_schema`(`schema_access` 1개). 서비스·발급 계정은 관리자 역할 없이 해당 역할 하나만.
+- **C.** `bi_author`는 처음 만들 때만 Gamma에서 복사하고 이후는 차이(개수·이름)를 로그로만 알린다. 차이 확인은 `deploy-coordination.md` 38번과 `skills/local-environment/SKILL.md`의 "Superset 업그레이드 점검"에 점검 항목으로 둔다.
+- **D.** `superset-init`에 `depends_on: migrate`(`service_completed_successfully`)를 추가한다(`bi_data` USAGE는 0002가 주므로 새 설치의 순서 경쟁 방지).
+- 검증 추가: 빈 볼륨 새 설치와 기존 볼륨 재기동. `.env.example` 기본 사용자 이름(`bi_service`, `bi_guest_issuer`)은 적용 후 보고. backend 설정 로딩은 env-engineer가 맡았다(EW-1과 같은 파일·같은 시험 틀을 쓰고 업무 기능 코드가 아니라서).
+### 9-2. 적용 후 보고 항목(승인 목록 밖, 보안 강화·검사 강화, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 계정 이름 대소문자 무시 충돌 거부, 기존 계정 사전 검사(관리자·허용 밖 역할·표식 없는 역할 0개·이메일 충돌 거부) | `superset/ensure_accounts.py`, `scripts/ci-validate-env.sh` | 사람·관리자 계정 덮어쓰기 방지 | 해당 검사 블록 삭제 |
+| 저장된 비밀번호 해시 재검증 | `ensure_accounts.py` | FAB `reset_password`가 저장 실패를 삼킴 | 마지막 `check_password_hash` 삭제 |
+| FAB 매니저 로거 CRITICAL | `ensure_accounts.py` | `add_user`/`update_user` 실패 로그에 해시·SQL 파라미터 노출 방지(실제 노출 재현 후 차단 확인) | `setLevel` 줄 삭제 |
+| `bi_service` 금지 권한 가드, 목록 전체-또는-무 실패 | `bi_roles.py`, `ensure_roles.py` | 승인된 금지의 코드화 | 가드 삭제 |
+| `sync_permissions` 비동기 모드 거부, `test_request_context`로 `g.user` 설정, 관리자 대소문자 무시 조회 | `superset/sync_permissions.py` | Celery 없는 환경에서 조용한 미동작 방지, 명령이 요구하는 `g.user` | 해당 파일 삭제와 `init.sh` 줄 삭제 |
+| 새 파일 `bi_roles.py`(권한 목록 한 곳), `register_database.py`가 `DATABASE_NAME` 공유 | `superset/` | 이름 상수 중복 제거 | 상수 인라인 복원 |
+| backend Settings 검증(`SUPERSET_APP_ROOT` 형식, 이름 빈 값·공백 거부) | `backend/app/config.py` | 값이 있으면 엄격 검증 | 검증기 삭제 |
+| `ci-validate-env.sh` 검사 추가(필수 `:?` 형태, `migrate` 조건, 변수 전달 범위, 대소문자 이름 충돌)와 네거티브 시험 97개 | `scripts/` | 설정 누락·유출 방지 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 37·38번, 08 서술 갱신, 업그레이드 점검 절 신설, env-bootstrap 스킬 갱신 | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화 | - |
+- **정정:** 1차 수정에 들어갔던 "`bi_author` 권한이 0개면 Gamma에서 다시 복사" 분기는 권한 확대라 2차 수정에서 제거했다(0개면 경고만).
+### 9-3. 사용자 확인 대기(2건)
+1. **허용 밖 역할(예: Admin)이 붙은 서비스·발급 계정**: 현재 설계는 덮어쓰지 않고 `superset-init`을 exit 1로 중단한다(자동 복구 없음, 권한 상승이 남고 같은 실행의 다른 계정 복구도 건너뜀, `superset`은 `superset-init` 성공 뒤에만 시작하므로 재기동도 막힘으로 추정). 사람 계정 보호를 우선한 것이다. 대안은 서비스·발급 계정이 표식(이메일·이름)을 가진 경우에 한해 역할을 강제 복구하는 것이다. 운영 점검 항목은 `deploy-coordination.md` 37번에 적었다.
+2. **`superset-init` 소요**(새 설치 약 70~77초, 재기동 약 68초)로 `docker compose up` 전체 기동이 길어졌다. 허용하는지 확인(`superset` 기동 지연은 healthcheck `start_period`와 함께 EW-6에서 재점검).
+### 9-4. 확인된 사실(구현 중 실측)
+- `sync_permissions`는 `bi_readonly`에 `bi_data` USAGE가 없어도 `schema_access`를 만든다(schema 목록은 USAGE와 무관). 그래서 `migrate` 대기는 필수가 아니라 안전장치다.
+- `schema_access` 항목 이름은 `[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`. `can_grant_guest_token`은 `ADMIN_ONLY_PERMISSIONS`에 들어 있다. 새 비밀번호 2개는 해시로만 저장되어 `%` 금지가 필요 없다.
+- 작성자 계정이 `public` 가상 데이터셋 위에 차트를 만들 때 201인 현상은 08 §5에 기록된 Gamma 동작과 같다(FU-1에서는 수용).
+
+## 10. EW-3 확인 사항 결정과 EW-4 착수 (2026-10-12, 사용자)
+### 10-1. 9-3 확인 사항 결정
+1. **허용 밖 역할이 붙은 서비스·발급 계정:** 우리 시스템이 만든 표식(전용 이메일 `<이름>@localhost`·이름 `BI-Wizard`)이 있는 계정에 한해 허용 밖 역할(Admin 포함)을 제거하고 정해진 역할 하나로 **강제 복구**한다. 권한을 줄이는 방향이므로 **적용 후 보고**로 처리한다. 복구했을 때는 경고 로그를 남기고 `/health` 또는 점검용 출력에서 확인할 수 있게 한다. **표식이 없는 계정과 이름이 충돌하면 지금처럼 실패로 중단한다.**
+2. **`superset-init` 소요 시간(약 70초):** 허용한다.
+### 10-2. EW-4 착수(4라운드 Z1 ㄱ·ㄴ, Z2, Z3, Z4, Z5와 X-25 결과를 따른다)
+- `GUEST_ROLE_NAME=bi_guest`. 권한: X-25 필수 3개(`can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`) + `can_time_range Api`. 조건부 2개(`can_explore_json`, 퍼머링크 읽기)와 내보내기 권한은 넣지 않는다. 권한 목록은 `superset/bi_roles.py`에 모으고, 목록의 권한이 없으면 `superset-init`이 실패한다. `Public` 역할 권한 0개를 유지하고 시험한다. `PUBLIC_ROLE_LIKE`는 설정하지 않는다.
+- `GUEST_TOKEN_VALIDATOR_HOOK`: `rls`가 비어 있지 않으면 거부, 리소스 유형이 `dashboard`가 아니면 거부. **"포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅에 확장 지점만 두고 FU-1e로 이월**한다(`gate-status.md`에 기록).
+- backend는 `GUEST_TOKEN_JWT_SECRET`을 받지 않는다(직접 서명 금지, reviewer가 확인). `bi-review` 7-2를 AP-1·AP-2 범위로 확장한다.
+- 검증(qa-engineer): 승인된 6가지 차트(선, 막대, 표, 큰 숫자, 원형, 혼합)가 `bi_guest` 입장권으로 임베딩 화면에서 정상 표시되는지(추가 권한이 필요하면 권한을 추가하지 않고 보고), X-25 부정 시험 재현, 훅 거부 시험, `APP_PROXY_STRIP_PREFIX` true/false, 10-1의 1번 강제 복구 시험, EW-3 2차 수정분 4가지 재확인, 로그·`ps`·`docker inspect`의 비밀번호·토큰 0건.
+
+## 11. EW-4 결과 (2026-10-12, env-engineer 구현, qa-engineer·reviewer 검증)
+### 11-1. 구현 요약(승인 범위: 03b 4-2 Z1~Z5, 10-2)
+- `GUEST_ROLE_NAME=bi_guest`, 권한 4개(`can_read CurrentUserRestApi`·`Dashboard`·`Chart`, `can_time_range Api`), 목록은 `superset/bi_roles.py`. 목록의 권한이 Superset에 없으면 `superset-init` 실패. `Public` 권한 0개·`PUBLIC_ROLE_LIKE` 미설정·`GUEST_ROLE_NAME` 일치를 매 기동 확인하고 어기면 고치지 않고 실패. 입장권 유효 시간 기본 300초(변경 없음).
+- `GUEST_TOKEN_VALIDATOR_HOOK`(`superset_config.py`): 시그니처 `hook(body) -> bool`, 거짓이면 Superset이 400(`Guest token validation failed`). 거부 5가지: `rls`가 비어 있지 않음, 리소스가 정확히 1개가 아님, 유형이 `dashboard`가 아님, 리소스 id가 uuid 형식이 아님, `user` 누락. 예외는 삼키고 거부, 로그에는 사유 코드만. "포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e 이월(확장 지점 `_EXTRA_GUEST_TOKEN_CHECKS`).
+- backend에는 `GUEST_TOKEN_JWT_SECRET`을 주지 않는다(compose, `ci-validate-env.sh` 검사와 네거티브 시험, backend 코드에 JWT 흔적 0건: 직접 서명 금지).
+- 03b 10-1 강제 복구: 표식 있는 서비스·발급 계정의 허용 밖 역할을 제거하고 정해진 역할 하나로 복구, `경고:`와 `점검 요약: 강제 복구 N건` 로그. 표식 없는 계정과의 이름 충돌은 실패 중단.
+### 11-2. 적용 후 보고 항목(승인 목록 밖, 거부·검사 강화 방향, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 표식 있는 계정 강제 복구와 경고·점검 요약(03b 10-1 사용자 결정) | `superset/ensure_accounts.py` | 중단하면 권한 상승이 남고 다른 계정 복구도 건너뜀 | 복구 분기를 지우고 허용 밖 역할이면 `fail()` |
+| 훅의 리소스 id uuid 형식 검사(거부 방향) | `superset/superset_config.py` | Superset 기본 검사가 숫자 id·slug를 통과시킴(임베드 안 한 대시보드의 입장권 발급 가능) | `_is_uuid` 블록 삭제 |
+| `bi_guest` 금지 가드의 이름 조각 검사(내보내기·쓰기·Explore·SQL Lab·데이터 접근 계열) | `bi_roles.py`, `ensure_roles.py` | 정확한 쌍 목록으로 못 막는 계열 차단 | `GUEST_FORBIDDEN_*`와 `forbidden_reason` 분기 삭제 |
+| `Public` 0개·`PUBLIC_ROLE_LIKE`·`GUEST_ROLE_NAME` 불일치 시작 실패 | `ensure_roles.py` | 승인된 불변식의 코드화 | 0단계 블록 삭제 |
+| `ci-validate-env.sh` 검사 4종과 네거티브 시험(97→108개) | `scripts/` | backend·migrate에 JWT 비밀 없음, `GUEST_ROLE_NAME` 값, `PUBLIC_ROLE_LIKE` 미설정 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 39번 신설·37번 정정, 업그레이드 점검 절·권한 표 갱신, 08 §3·§4·§7, `bi-review` 7-2의 AP-1 구체화 항목 | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화 | - |
+- **reviewer O1 처리:** `bi-review` 7-2에 들어갔던 두 항목(`GUEST_TOKEN_JWT_EXP_SECONDS` 재정의 지적, 강제 복구 표식 규칙)은 AP-1·AP-2 범위를 넘어 **제거**했다. 리뷰 규칙으로 올릴지는 11-3의 승인 대상이다.
+### 11-3. 사용자 확인 대기(3건)
+1. **`bi-review` 7-2 확장 범위:** 위 두 항목(입장권 유효 시간 재정의 지적, 강제 복구는 표식 계정에 한정)을 리뷰 규칙으로 추가할지. 추가한다면 `CLAUDE.md` 변경 이력에도 기록한다. 현재는 AP-1 구체화(역할 이름 단일 출처, 금지 권한 가드, Public 0개, 훅 거부 5가지, backend에 JWT 비밀 없음)만 들어 있다.
+2. **`GUEST_TOKEN_JWT_EXP_SECONDS` 재정의 가드:** 현재 `ci-validate-env.sh`와 `ensure_roles.py` 모두 이 값을 막지 않는다(3600으로 바꿔도 `superset-init` 통과). 입장권 5분(Z5) 불변을 코드로 고정할지(정적 검사 또는 실제 적용값 300 확인 후 실패).
+3. **표식 없는 계정이 허용 역할 하나만 가진 경우:** 거부되지 않고 비밀번호가 재설정된다(EW-3부터의 동작, 03b 10-1의 "지금처럼"). "사람 계정 보호"와 어긋나므로 허용할지, 표식 없는 기존 계정은 역할과 무관하게 거부할지 정한다(`deploy-coordination.md` 37번에 한계로 기록).
+### 11-4. 확인된 사실
+- 훅은 발급 API(`POST /api/v1/security/guest_token/`)에서 `validate_guest_token_resources` 뒤 토큰 생성 전에 불린다. 유형이 `dashboard`가 아닌 요청은 Superset 스키마가 먼저 400으로 걸러 REST로는 훅에 닿지 않는다(훅 단독 호출로 확인).
+- 지원 차트 6가지는 `bi_guest` 4권한만으로 정상 표시된다(`can_explore_json`·퍼머링크 읽기 불필요). 그래도 `rose` 같은 레거시 유형은 지원 차트가 아니다(08 §3-1).
+- guest 요청마다 Superset 로그에 `Failed to add user to db session: Class 'werkzeug.local.LocalProxy' is not mapped` 경고가 남지만 기능 영향은 없다.
+
+## 12. EW-4 확인 3건 결정과 EW-5~7 착수 (2026-10-12, 사용자)
+### 12-1. 11-3 확인 사항 결정
+1. **`bi-review` 7-2 확장:** 두 항목(입장권 유효 시간 재정의 지적, 강제 복구는 표식 계정에 한정)을 추가한다. 이미 승인된 Z5와 10-1을 리뷰 규칙으로 옮기는 것이다. `CLAUDE.md` 변경 이력도 갱신한다.
+2. **`GUEST_TOKEN_JWT_EXP_SECONDS` 가드:** `superset-init`이 적용값을 확인해 300이 아니면 실패하게 한다. 값을 바꿔야 하면 사전 승인을 거쳐 가드 값과 함께 바꾼다.
+3. **표식 없는 기존 계정:** 역할과 관계없이 거부한다(비밀번호 재설정 없이 exit 1). 운영자 정리 절차를 `skills/local-environment`에 적는다. (03b 10-1의 "표식 없는 계정과 이름이 충돌하면 실패"를 허용 역할만 가진 경우까지 넓힌 것이며 EW-3의 알려진 한계를 해소한다.)
+### 12-2. 이어서 진행(사용자 지시)
+- **EW-5:** `CLAUDE.md`, 하네스 스킬·에이전트 문구, `gate-status.md`, 04~08의 EW 결과 반영 확인과 정리.
+- **EW-6:** qa-engineer 통합 검증. 빈 볼륨 새 설치부터 전체 기동, EW-1·3·4 핵심 항목 재확인(접속 계정, 권한 매트릭스, 역할·계정 멱등, 6가지 차트 임베딩, 훅 거부, 위 1~3번 가드), `docker stats`로 8GB 배분 대비 실측, `APP_PROXY_STRIP_PREFIX` true/false, 로그 비밀번호 0건. EW-3·4에서 QA 재실행 없이 넘긴 항목과 이월 항목을 모두 확인한다.
+- **EW-7:** reviewer 점검: 슈퍼유저 접속 없음, D3 예외 범위, Secret 로그 0건, 스텁 시작 거부, 승인 목록 밖 변경 여부.
+- EW-7까지 마친 뒤 커밋·푸시하고 보고한다. 필요 없어진 시험 이미지는 이름을 지정해 정리한다.
+
+## 13. EW-5~7 결과 (2026-10-12, env-engineer·architect 구현, qa-engineer·reviewer 검증)
+### 13-1. 구현 요약
+- 03b 12-1 반영: `bi-review` 7-2 두 항목 추가와 `CLAUDE.md` 변경 이력 갱신, `superset-init`이 `GUEST_TOKEN_JWT_EXP_SECONDS` 적용값을 확인해 300이 아니면 아무것도 바꾸기 전에 실패(`bi_roles.GUEST_TOKEN_EXP_SECONDS`), 표식 없는 기존 계정은 역할과 관계없이 거부(모든 계정을 변경 전에 검사, 하나라도 거부 대상이면 아무것도 바꾸지 않음). 운영자 정리 절차는 `skills/local-environment/SKILL.md`(표식 보정을 삭제보다 권장).
+- 04~08 EW 결과 반영과 하네스 문구 정리(합계 787줄).
+### 13-2. 적용 후 보고 항목(승인 목록 밖, 거부·검사 강화 방향, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 입장권 유효 시간 가드의 값 타입 엄격 검사(`"300"` 문자열·bool 거부) | `superset/ensure_roles.py` | 승인된 가드(12-1 2번)가 설정 실수로 우회되지 않게 | 해당 조건 삭제 |
+| `ci-validate-env.sh`: 주석이 아닌 줄에 `GUEST_TOKEN_JWT_EXP_SECONDS`가 나오면 실패(승인보다 약간 넓음, `globals().update` 같은 우회도 차단)와 네거티브 시험 4건(시험 112개) | `scripts/` | 5분 불변의 정적 보강 | 해당 블록과 시험 줄 삭제 |
+| 표식 있는 계정을 매 기동 `active = True`로 되살림(EW-3부터, 03b 9-1·9-2 목록에 명시 없었음) | `superset/ensure_accounts.py` | 서비스·발급 계정이 비활성이어서 입장권이 안 나오는 상태 방지. 표식 계정·역할 하나로 한정 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 37·39번, `skills/local-environment/SKILL.md`(정리 절차, 가드), `qa-verification` 정리 명령(`--profile test down` → `stop`·`rm -f postgres-test`), `windows-bat-verification.md`(역할 5개) | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화, 실행 중 전체 스택 종료 방지 | - |
+- 사전 승인 필수 범주(새 환경변수·새 의존성·기준선과 다른 설정·권한 확대·모델 변경)에 해당하는 변경은 없다(reviewer EW-7, 환경변수 30개 모두 승인 근거 확인, 모델 7개 sonnet).
+### 13-3. 사용자 확인 대기
+1. **`roles.sql`에서 기존 `bi_app`·`bi_owner`의 속성 재차단(reviewer R1):** db-bootstrap은 역할이 없을 때만 `NOSUPERUSER` 등으로 만든다. 이미 있는 역할에 사람이 슈퍼유저 속성을 주면 다시 막지 않는다. `ALTER ROLE bi_app/bi_owner NOSUPERUSER NOCREATEDB NOCREATEROLE` 고정 문장을 추가하면 권한 축소(적용 후 보고 가능, D3 예외 범위 안의 고정 문장)다. D3 예외 영역이라 적용하지 않았다. 적용하면 db-bootstrap·권한 매트릭스를 QA가 다시 확인해야 한다.
+2. **`superset` 컨테이너 종료 지연:** stop 때 10초 유예가 끝나야 종료된다(exit 137, gunicorn이 SIGTERM에 반응하지 않는 것으로 추정, 원인 미확인). 기능 영향은 없다. `stop_grace_period` 등 compose 변경은 사전 승인 대상이라 권고만 한다.
+3. **`superset-init`이 종료 뒤 `unhealthy`로 표시:** 이미지 HEALTHCHECK 상속으로 추정. 오해 소지가 있으나 기능 문제는 아니다. `healthcheck: disable: true` 같은 compose 변경은 사전 승인 대상이라 권고만 한다.
+### 13-4. 이월·미시험
+- FU-1 이월: 훅의 embedded uuid 등록 표 검사, 발급 API 사용자별 429, backend 시작 자가 점검(슈퍼유저·`CREATEROLE`·`CREATEDB` 거부, 03b BY3).
+- 미시험: BAT 6종 실행과 Jenkins 실제 실행(Gate ② 보류), guest 경로의 `statement_timeout`, SDK 갱신 실패 시 재시도와 만료 뒤 401 복구, 정적 표 권한 매트릭스의 실제 표 재확인(첫 실제 표 revision `0003` 이후).
+
+## 14. EW-5~7 확인 사항 결정과 FU-1 착수 준비 (2026-10-12, 사용자)
+### 14-1. 13-3 확인 사항 결정
+1. **`roles.sql` 속성 재차단:** 기존 `bi_app`·`bi_owner`에 고정 문장 `ALTER ROLE … NOSUPERUSER NOCREATEDB NOCREATEROLE`을 추가한다. 권한 축소이고 식별자는 고정 상수라 D3에 저촉되지 않는다. 적용 후 qa-engineer가 db-bootstrap 멱등성, 권한 매트릭스, 슈퍼유저 속성을 붙인 뒤 재기동하면 다시 차단되는지를 확인한다.
+2. **`superset` 종료 지연(10초, exit 137):** 변경하지 않고 알려진 현상으로 기록한다.
+3. **`superset-init` healthcheck 비활성화:** 종료 뒤 `unhealthy`로 표시되지 않게 한다. `depends_on` 동작에 영향이 없는지 QA가 확인한다.
+4. **에이전트 모델:** 현행(7개 모두 sonnet)을 유지한다. 모델 재판단은 필요 없다.
+5. **`ci-validate-env.sh`의 `GUEST_TOKEN_JWT_EXP_SECONDS` 검사 범위:** 그대로 수용한다(주석이 아닌 줄에 나오면 실패, `globals().update` 같은 우회도 차단).
+6. **CA 오버레이 로컬 이미지와 `ew3qa-orig-*` 원본:** 그대로 둔다.
+### 14-2. FU-1 착수 준비
+- FU-1은 새 세션에서 시작한다. `gate-status.md` 인계 절을 FU-1 착수 기준으로 갱신한다. 다음 할 일 첫 항목은 AP-15 의존성(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)의 버전·라이선스를 확인해 사용자 승인을 요청하는 것이다. FU-1 이월 항목(훅 uuid 검사, 발급 API 429, backend 시작 자가 점검, 정적 표 권한 매트릭스 재확인)과 FU-1 합격 기준 위치를 적는다.
+### 14-3. 구현·검증 결과 (EW-8)
+- **구현:** `backend/bootstrap/roles.sql`에 `bi_owner`·`bi_app`의 속성 재차단 고정 문장 2줄(psql 변수 보간 없음, 비밀번호 리터럴 4곳 규칙 불변), `compose.yml`의 `superset-init`에 `healthcheck: disable: true`, `ci-validate-env.sh` 정적 검사(재차단 문장 필수, healthcheck 비활성화 필수)와 네거티브 시험 4건(116개). 문서는 `deploy-coordination.md` 29·40번, `skills/local-environment/SKILL.md`, `AGENTS.md`, `README.md`, `windows-bat-verification.md`, 06 §6.
+- **qa-engineer 독립 검증(실패 0):** 정적 검사 통과와 변조 5종 거부, 빈 볼륨 새 설치(`superset-init` `Exited (0)`·`unhealthy` 아님, `superset`은 `superset-init` 종료 직후 시작·healthy), `superset-init` 강제 실패(`GUEST_TOKEN_JWT_EXP_SECONDS=3600`) 때도 `superset` 미기동(`depends_on` 불변), 재기동 3회 모두 같은 결과, 속성 재차단(`bi_app`·`bi_owner`에 `SUPERUSER CREATEDB CREATEROLE`을 붙인 뒤 재기동하면 `false`로 복귀, 붙어 있는 동안에는 실제로 `CREATE ROLE`이 성공), `db-bootstrap` 멱등·비밀번호 변경(네트워크 접속에서 새 값 성공·옛 값 실패)·빈 비밀번호 거부, 권한 매트릭스(전후 동일), EW-3·4 역할·계정·권한 스모크, 왕복 테스트, 로그·`ps`·`inspect` 비밀번호·토큰 0건.
+- **적용 후 보고 항목:** `bi_owner`·`bi_app` 속성 재차단 2줄(되돌리기: 두 줄과 주석, 정적 검사 필수 문장 2개와 시험 삭제), 정적 검사 강화와 네거티브 시험 4건. `superset-init` healthcheck 비활성화는 14-1 ③ 사용자 결정(되돌리기: 해당 3줄 삭제). 사전 승인 필수 범주 변경 없음.
+- **알려진 현상(변경 없음):** `superset` stop은 약 10.4초 걸리고 exit 137, `OOMKilled=false`(14-1 2번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다(지시 범위 밖, 속성 변조 후에도 `t`로 남는다). `bi_readonly`·`superset_meta`도 사람이 속성을 바꾸면 재차단되지 않는다(지시 범위 밖). `superset_meta`는 PUBLIC 기본 `CONNECT`로 앱 DB에 접속할 수 있다(기존 동작, 위반 아님).
+- **미시험:** `APP_PROXY_STRIP_PREFIX=true`(변경이 compose healthcheck·DB 계정에 한정되어 영향 없을 것으로 추정, EW-6에서 true/false 모두 확인된 상태), BAT 실행, Jenkins 실제 실행, 정적 표 권한(첫 실제 표 이후).
+
