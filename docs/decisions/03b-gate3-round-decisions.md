@@ -425,3 +425,23 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - 단위별 범위·담당·합격 기준·검증은 2026-10-12 제시안대로 승인. 순서는 구현 → 테스트 → 제품 Skill → QA → reviewer. 단위 0의 QA·reviewer를 마친 뒤 1a로 넘어가고, **1a를 마친 뒤 한 번 보고하고 멈춘다.**
 - 1a의 backend 시작 자가 점검은 슈퍼유저·`CREATEROLE`·`CREATEDB`와 함께 `REPLICATION`·`BYPASSRLS` 속성도 거부한다(EW-8 알려진 한계 대응).
 - 1a 뒤 정적 표 권한 매트릭스를 실제 표 기준(EW-1, 03c X-15)으로 재확인한다.
+
+## 16. FU-1 단위 0·1a 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 16-1. 결과
+- **단위 0:** QA 실패 0(pytest 165, 프런트 43, 정적 검사, compose 스모크, STRIP true/false 경로 표). reviewer 차단 0·중요 4건: enterprise 정적 검사 우회 보강(이름 패턴, lock `name`/`resolved`, fail-open 방지), 인증 조회 실패 로그 축소, 라우트 구조 시험 강화, HTTP 예외 변환 표 — 반영. 중요 2(05 §3에 없는 오류 코드 `BAD_REQUEST`·`METHOD_NOT_ALLOWED`)는 사용자 승인 대기(16-3).
+- **단위 1a:** revision `0003`, `access` 모듈 A1~A9, 스텁 어댑터와 DV1~DV3, 최초 관리자 명령(`python -m app.cli create-admin`), 시작 자가 점검(슈퍼유저·CREATEROLE·CREATEDB·REPLICATION·BYPASSRLS 거부), `/health` 새 필드, S1·S6 화면, `skills/permission-management`. QA 실패 0(pg 변형 포함 pytest 629, 왕복·`alembic check`, 실제 compose 스택, 5개 속성 거부 실측, 권한 매트릭스 `0003` 기준 재확인 통과). reviewer 차단 0.
+### 16-2. 적용 후 보고 항목(보안 강화·검사 강화, 새 변수·의존성 없음)
+- `create_db_engine`에 `hide_parameters=True`(`backend/app/db.py`, 되돌리기: 한 줄 삭제).
+- 인증 조회 실패 로그에서 트레이스백·예외 메시지 제거(`auth/current_user.py`, 되돌리기: `logger.error`→`logger.exception`).
+- `X-Request-ID` 입력 검증(안전 문자 64자)과 공개 라우터 시작 거부 가드(`core/request_id.py`, `auth/guard.py`).
+- enterprise·버전 고정 정적 검사 강화와 네거티브 시험(`scripts/`).
+- `migrations/roundtrip.py`의 열 단위 ACL 스냅샷 단계 추가(권한 확대 아님).
+### 16-3. 사용자 결정 대기
+1. 05 §3에 `BAD_REQUEST`(400·409·429 임시 매핑)·`METHOD_NOT_ALLOWED`(405) 추가 여부(계약 변경). 05 §1의 "400 형식 오류"와 구현의 422(깨진 JSON 포함) 통일 여부.
+2. DB 오류 때 `current_user`가 401로 닫는 동작(reviewer·QA 모두 지적): 503으로 구분할지(fail-closed 유지), 05에 근거 기록할지.
+3. A1 `memberships`에 팀 `is_active`를 넣을지, 비활성 팀/사용자에 대한 A8 소속 추가 금지 여부(현재 200).
+4. 사용자 표시 이름 100자·로그인 ID 200자 임시 상한의 계약 반영, 로그인 ID 대소문자 구분(8번 인증 결정 때 재검토), 한글 정렬 방식.
+5. `public_create=true`일 때 시작 거부로 올릴지(현재 경고).
+6. 05 §1 상태 코드 표기 정리, `deploy-coordination.md`에 "운영 env에서 `APP_ENV`는 local·test가 아니고 `AUTH_STUB_ENABLED=false`" 확인 항목 추가, CI에서 `pg` 변형 skip을 실패로 바꾸는 옵션(`REQUIRE_PG`).
+### 16-4. 미시험
+브라우저 화면(S1·S6)은 상태 코드·vitest까지만, Superset 연동, BAT 실행, HTTP 수동 동시 호출. nginx 접두를 떼는 프록시 뒤 SPA 딥링크 404(접두 밖 `/datasets/42`, STRIP true/false 동일)는 nginx fallback 변경 제안(NEEDS-APPROVAL)과 운영자 확인 항목으로 보류.

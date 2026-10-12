@@ -15,6 +15,10 @@
 - **에이전트 모델:** 7개 모두 sonnet, 모델 재판단은 필요 없다(03b 14-1 4번). 호출 시 모델을 바꾸지 않는다.
 - **알려진 현상:** `superset` 컨테이너는 stop 때 약 10초 뒤 exit 137로 종료된다(변경하지 않음, `deploy-coordination.md` 40번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다.
 
+### FU-1 진행 상황 (2026-10-12)
+- **단위 0(공통 기반)·1a(권한 관리) 구현·QA·reviewer 완료, 사용자 보고 대기.** QA 실패 0, reviewer 차단 0(중요 지적 반영). 상세와 사용자 결정 대기 항목은 `docs/decisions/03b` 16절.
+- 다음: 1b(데이터셋·열 정의, revision `0004`, `ddl` 모듈). 사용자 승인 뒤 시작한다.
+
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
 1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.
 2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
