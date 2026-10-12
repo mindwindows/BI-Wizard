@@ -51,9 +51,10 @@ class ErrorCode:
     SUPERSET_REJECTED = "SUPERSET_REJECTED"
     SUPERSET_UNAVAILABLE = "SUPERSET_UNAVAILABLE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
-    # 05 §3 사전에 없는 코드(계약 추가 제안): 라우터가 만드는 405와 그 밖의 4xx용.
-    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
-    BAD_REQUEST = "BAD_REQUEST"
+    # 임시: 계약 변경 승인 대기(05 §3 추가 제안). 05 §3 사전에 없는 코드다.
+    # 라우터가 만드는 405와, 상태만으로 사전 코드를 정할 수 없는 4xx(400·409·422·429 등)에 쓴다.
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"  # 임시: 계약 변경 승인 대기(05 §3 추가 제안)
+    BAD_REQUEST = "BAD_REQUEST"  # 임시: 계약 변경 승인 대기(05 §3 추가 제안)
 
 
 class FieldErrorCode:
@@ -116,13 +117,18 @@ def not_found() -> AppError:
 
 
 # HTTP 상태 코드 -> (오류 코드, 한국어 문구). HTTPException의 detail은 영어이거나
-# 내부 용어일 수 있어 응답에 쓰지 않고 이 표만 쓴다.
+# 내부 용어일 수 있어 응답에 쓰지 않고 이 표만 쓴다. 표 밖의 4xx는 BAD_REQUEST(임시), 5xx는
+# INTERNAL_ERROR다. 409·429는 상태만으로 사전 코드(ALREADY_EXISTS, PREVIEW_BUSY 등)를 고를 수
+# 없어 BAD_REQUEST로 두고, 업무 코드는 AppError로 정확한 코드를 던진다.
 _HTTP_STATUS_ERRORS: dict[int, tuple[str, str]] = {
     401: (ErrorCode.UNAUTHENTICATED, "로그인이 필요합니다."),
     403: (ErrorCode.FORBIDDEN, "이 작업을 할 권한이 없습니다."),
     404: (ErrorCode.NOT_FOUND, "요청한 대상을 찾을 수 없습니다."),
+    400: (ErrorCode.BAD_REQUEST, "요청을 처리할 수 없습니다."),
     405: (ErrorCode.METHOD_NOT_ALLOWED, "허용되지 않는 요청 방식입니다."),
+    409: (ErrorCode.BAD_REQUEST, "요청을 처리할 수 없습니다."),
     413: (ErrorCode.PAYLOAD_TOO_LARGE, "요청 크기가 너무 큽니다."),
+    429: (ErrorCode.BAD_REQUEST, "요청이 너무 많습니다. 잠시 후 다시 시도하세요."),
 }
 _INTERNAL_MESSAGE = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요."
 

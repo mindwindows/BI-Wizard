@@ -1,16 +1,19 @@
 """`current_user`(fail-closed), 권한 판정, 라우터 조립 규칙(공개 경로 밖은 모두 인증 필요)."""
 
+import logging
 import re
 from typing import Annotated
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.routing import Mount
 
-from app.auth import CurrentUser, CurrentUserDep, Identity, Membership, UserRecord
+from app.auth import CurrentUser, CurrentUserDep, Identity, Membership, UserRecord, current_user
 from app.auth.guard import PUBLIC_PATHS
 from app.auth.permissions import can_define, can_enter, is_admin, require_admin
-from app.main import create_app, register_routers
+from app.main import PROTECTED_ROUTERS, PUBLIC_ROUTERS, create_app, register_routers
 
 
 class FakeAdapter:
@@ -117,6 +120,33 @@ def test_reader_exception_is_401(app, client):
     app.state.identity_adapter = FakeAdapter("kim")
     app.state.user_reader = Broken()
     assert client.get("/api/_t/me").status_code == 401
+
+
+def test_lookup_failure_is_logged_without_identity_or_exception_detail(app, client, caplog):
+    """DB 오류도 401로 닫되 로그에는 예외 클래스 이름과 request_id만 남긴다."""
+
+    class Boom(Exception):
+        pass
+
+    class Broken:
+        def find_by_login_id(self, request, login_id):
+            raise Boom(f"SELECT ... WHERE login_id = '{login_id}' [parameters: ('{login_id}',)]")
+
+    app.state.identity_adapter = FakeAdapter("secret.login.id")
+    app.state.user_reader = Broken()
+    with caplog.at_level(logging.DEBUG):
+        response = client.get("/api/_t/me")
+    assert response.status_code == 401
+    records = [r for r in caplog.records if r.name == "app.auth.current_user"]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is None
+    assert "인증 조회 실패(401로 닫음)" in record.getMessage()
+    assert "Boom" in record.getMessage()
+    assert response.headers["X-Request-ID"] in record.getMessage()
+    for leaked in ("secret.login.id", "SELECT", "parameters", "Traceback"):
+        assert leaked not in caplog.text
 
 
 # --- 등록 상태 ---------------------------------------------------------------------------------
@@ -244,6 +274,108 @@ def test_nested_dependency_counts_as_protected(make_settings, sqlite_engine):
     app.include_router(router, prefix="/api")
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []
+
+
+# 정적 구조 검사. FastAPI 0.143은 `include_router`를 `_IncludedRouter`로 지연 포함해
+# `app.routes`에 APIRoute가 바로 나오지 않는다(상위 라우터 의존성도 요청 때 합쳐진다). 그래서
+# (1) `app.routes`를 `_IncludedRouter.effective_candidates()`로 펼쳐 유효 경로와 의존성 트리를
+# 훑고(비공개 API라 FastAPI를 올리면 이 시험이 먼저 깨진다 = 의도), (2) 같은 검사를
+# `PUBLIC_ROUTERS`/`PROTECTED_ROUTERS` 목록으로 새 앱을 조립해 한 번 더 돌린다.
+# 펼치기가 아무것도 못 찾는 경우를 막으려고 개수 하한도 확인한다.
+
+# 개발 전용(app_debug=True)으로만 열리는 문서 경로. 공개 경로가 아니며 운영에서는 없어야 한다.
+DEBUG_ONLY_PATHS = frozenset({"/api/docs", "/api/openapi.json", "/docs/oauth2-redirect"})
+
+
+def _flatten(routes):
+    for route in routes:
+        if hasattr(route, "effective_candidates"):
+            yield from _flatten(route.effective_candidates())
+        else:
+            yield route
+
+
+def _has_current_user(dependant) -> bool:
+    return any(dep.call is current_user or _has_current_user(dep) for dep in dependant.dependencies)
+
+
+def structural_violations(app: FastAPI) -> list[str]:
+    """`PUBLIC_PATHS`·`DEBUG_ONLY_PATHS` 밖에서 current_user가 없는 라우트, Mount 등을 돌려준다."""
+    violations = []
+    for route in _flatten(app.routes):
+        original = getattr(route, "original_route", route)
+        path = getattr(route, "path", None)
+        if isinstance(original, Mount) or not (
+            isinstance(original, APIRoute) or path in DEBUG_ONLY_PATHS
+        ):
+            violations.append(f"허용되지 않는 라우트 종류: {type(original).__name__} {path}")
+        elif isinstance(original, APIRoute) and path not in PUBLIC_PATHS:
+            if route.dependant is None or not _has_current_user(route.dependant):
+                violations.append(f"current_user 없음: {path}")
+    return violations
+
+
+def test_structure_every_non_public_api_route_has_current_user(make_settings, sqlite_engine):
+    app = create_app(make_settings(), engine=sqlite_engine)
+    register_routers(app, public=(), protected=(_protected_router(),))
+    assert structural_violations(app) == []
+    paths = {getattr(r, "path", None) for r in _flatten(app.routes)}
+    assert {"/api/_t/me", "/api/_t/write", "/api/health"} <= paths  # 펼치기가 비어 있지 않음
+
+
+def test_structure_real_router_lists(make_settings, sqlite_engine):
+    """실제 PUBLIC_ROUTERS/PROTECTED_ROUTERS로 조립한 앱도 같은 규칙을 지킨다."""
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    register_routers(app, public=PUBLIC_ROUTERS, protected=PROTECTED_ROUTERS)
+    assert structural_violations(app) == []
+    effective = {r.path for r in _flatten(app.routes) if isinstance(r.original_route, APIRoute)}
+    expected = {
+        f"/api{route.path}"
+        for router in (*PUBLIC_ROUTERS, *PROTECTED_ROUTERS)
+        for route in router.routes
+    }
+    assert effective == expected
+
+
+def test_structure_check_detects_missing_current_user_and_mount(make_settings, sqlite_engine):
+    app = create_app(make_settings(), engine=sqlite_engine)
+    stray = APIRouter()
+
+    @stray.get("/stray")
+    def stray_read() -> dict:
+        return {}
+
+    app.include_router(stray, prefix="/api")
+    assert structural_violations(app) == ["current_user 없음: /api/stray"]
+
+    app.mount("/static", FastAPI())
+    violations = structural_violations(app)
+    assert any("Mount" in v for v in violations)
+
+
+def test_structure_check_detects_include_in_schema_false_route(make_settings, sqlite_engine):
+    app = create_app(make_settings(), engine=sqlite_engine)
+    hidden = APIRouter()
+
+    @hidden.get("/hidden", include_in_schema=False)
+    def hidden_read() -> dict:
+        return {}
+
+    app.include_router(hidden, prefix="/api")
+    assert structural_violations(app) == ["current_user 없음: /api/hidden"]
+
+
+def test_docs_only_in_debug(make_settings, sqlite_engine):
+    """`/api/docs`·`/api/openapi.json`은 개발 전용(app_debug)이다. 운영에서는 없어야 한다."""
+    prod = create_app(make_settings(APP_DEBUG="false"), engine=sqlite_engine)
+    assert {getattr(r, "path", None) for r in _flatten(prod.routes)}.isdisjoint(DEBUG_ONLY_PATHS)
+    with TestClient(prod) as client:
+        for path in ("/api/docs", "/api/openapi.json"):
+            assert client.get(path).status_code == 404
+    dev = create_app(make_settings(APP_DEBUG="true"), engine=sqlite_engine)
+    assert structural_violations(dev) == []
+    assert DEBUG_ONLY_PATHS & {getattr(r, "path", None) for r in dev.routes}
+    assert not DEBUG_ONLY_PATHS & PUBLIC_PATHS
 
 
 def test_public_paths_are_exactly_health(make_settings, sqlite_engine):

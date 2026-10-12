@@ -54,6 +54,7 @@ def create_db_engine(settings: Settings) -> Engine:
     return create_engine(
         build_database_url(settings, "app"),
         pool_pre_ping=True,
+        hide_parameters=True,  # 오류 메시지·로그에 SQL 파라미터 값(login_id 등)을 넣지 않는다.
         pool_size=5,
         max_overflow=0,
         connect_args={"timeout": 5},

@@ -78,13 +78,30 @@ def test_safe_incoming_request_id_is_kept(client):
     assert response.headers["X-Request-ID"] == "abc-123_X.y"
 
 
-@pytest.mark.parametrize("bad", ["a b", "x" * 65, "a;b", "한글"])
+@pytest.mark.parametrize("bad", ["a b", "x" * 65, "a;b"])
 def test_unsafe_incoming_request_id_is_replaced(client, bad):
-    try:
-        response = client.get("/api/health", headers={"X-Request-ID": bad})
-    except UnicodeEncodeError:  # 헤더로 보낼 수 없는 값은 클라이언트 단계에서 이미 막힌다.
-        return
+    response = client.get("/api/health", headers={"X-Request-ID": bad})
     assert response.headers["X-Request-ID"] != bad
+
+
+def test_request_id_length_boundary(client):
+    ok = "x" * 64
+    assert client.get("/api/health", headers={"X-Request-ID": ok}).headers["X-Request-ID"] == ok
+    too_long = "x" * 65
+    replaced = client.get("/api/health", headers={"X-Request-ID": too_long})
+    assert replaced.headers["X-Request-ID"] != too_long
+
+
+def test_non_ascii_request_id_is_replaced(client):
+    """한글 헤더는 latin-1로 보낼 수 없으므로 원시 바이트(UTF-8)로 직접 보낸다."""
+    response = client.get(
+        "/api/health",
+        headers=[(b"x-request-id", "한글".encode())],  # type: ignore[arg-type]
+    )
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"].isascii()
+    assert "한글" not in response.headers["X-Request-ID"]
+    assert len(response.headers["X-Request-ID"]) >= 16
 
 
 def test_app_error_format(client):
@@ -104,6 +121,41 @@ def test_method_not_allowed_uses_error_format(client):
 def test_http_exception_uses_error_format_without_detail(client):
     error = _assert_error_shape(client.get("/api/_t/http-error"), "FORBIDDEN", 403)
     assert "English" not in error["message"]
+
+
+# HTTPException 상태 -> (오류 코드, 상태). 05 §3 사전에 있는 상태는 사전 코드로 간다.
+# BAD_REQUEST·METHOD_NOT_ALLOWED는 사전에 없는 임시 코드(계약 변경 승인 대기)다.
+HTTP_STATUS_TABLE = [
+    (400, "BAD_REQUEST"),
+    (401, "UNAUTHENTICATED"),
+    (403, "FORBIDDEN"),
+    (404, "NOT_FOUND"),
+    (405, "METHOD_NOT_ALLOWED"),
+    (409, "BAD_REQUEST"),
+    (413, "PAYLOAD_TOO_LARGE"),
+    (418, "BAD_REQUEST"),
+    (429, "BAD_REQUEST"),
+    (500, "INTERNAL_ERROR"),
+    (502, "INTERNAL_ERROR"),
+    (503, "INTERNAL_ERROR"),
+]
+
+
+@pytest.mark.parametrize(("status", "code"), HTTP_STATUS_TABLE)
+def test_http_exception_status_table(make_settings, sqlite_engine, status, code):
+    app = create_app(make_settings(), engine=sqlite_engine)
+    router = APIRouter()
+
+    @router.get("/_t/raise")
+    def raise_it():
+        raise HTTPException(status_code=status, detail="English internal detail SELECT")
+
+    app.include_router(router, prefix="/api")
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.get("/api/_t/raise")
+    error = _assert_error_shape(response, code, status)
+    assert "English" not in response.text and "SELECT" not in response.text
+    assert error["details"] == {}
 
 
 def test_validation_error_is_converted(client):
