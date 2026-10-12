@@ -59,9 +59,10 @@ NGX_SUPERSET_ROOT="$_bw_superset"
 NGX_BACKEND_PORT="$_bw_backend_port"
 
 # 포털 정적 파일/SPA fallback 배치:
-#  - 하위 경로가 있으면 접두 아래에서만 SPA fallback(index.html)을 하고, 접두 밖 루트는 정적 자산만 서빙한다
-#    (그 외 경로는 404). 앞단 프록시가 접두를 떼고 넘기는 경우에도 정적 자산(/, /assets/, /config.js)은 서빙된다.
-#  - 하위 경로가 비어 있으면(루트 배포) 루트가 곧 포털이므로 루트에서 SPA fallback을 한다.
+#  - 접두 아래(${APP_BASE_PATH}/)와 접두 밖 루트 모두 SPA fallback(index.html)을 한다. 앞단 프록시가 접두를 떼고
+#    넘기는 딥링크(예: /datasets/42)도 index.html로 응답한다(사용자 결정 2026-10-12, docs/decisions/03b 17-1).
+#    부작용: 접두 밖 임의 경로도 200 HTML이다(수용됨). /api/ 와 /assets/ 는 별도 location(정규식)이 먼저 잡아
+#    API는 backend의 JSON 오류, 없는 정적 자산은 404를 유지한다.
 if [ -n "$_bw_base" ]; then
   NGX_BASE_REDIRECT="location = ${_bw_base} { return 301 ${_bw_base}/; }"
   NGX_PORTAL_LOCATION=$(
@@ -74,7 +75,7 @@ location ${_bw_base}/ {
     }
 CONF
   )
-  NGX_ROOT_TRY='try_files $uri $uri/index.html =404;'
+  NGX_ROOT_TRY='try_files $uri $uri/index.html /index.html;'
 else
   NGX_BASE_REDIRECT=""
   NGX_PORTAL_LOCATION=""

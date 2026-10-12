@@ -85,7 +85,7 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
   docker compose up -d            # 바뀐 환경변수의 frontend, backend가 다시 만들어진다
   docker compose logs backend     # "받는 API 접두=" 로그와 접근 로그의 경로로 확인
   ```
-- 정적 파일 규칙: 하위 경로가 있으면 `${APP_BASE_PATH}/` **아래에서만** SPA fallback(없는 경로도 `index.html`)을 한다. 접두 밖 루트 경로는 정적 자산(`/`, `/index.html`, `/config.js`, `/assets/…`)만 서빙하고 나머지는 404다(앞단이 접두를 떼고 넘겨도 정적 자산은 서빙된다). 접두 없이 잘못 나간 요청이 200 HTML에 가려지지 않게 하려는 것이다. `APP_BASE_PATH`가 빈 값(루트 배포)이면 루트에서 SPA fallback을 한다.
+- 정적 파일 규칙: `${APP_BASE_PATH}/` 아래와 접두 밖 루트 모두 SPA fallback(없는 경로도 `index.html` 200)을 한다. 앞단이 접두를 떼고 넘기는 딥링크(`/datasets/42`)를 살리려는 결정이다(2026-10-12, `docs/decisions/03b` 17-1). 부작용으로 접두 밖 임의 경로(`/nope`)도 200 HTML이다. `/api/…`는 backend(없는 경로는 JSON 404), `/assets/…` 누락은 404, `/nginx-health`·`/config.js`는 그대로다.
 - `X-Forwarded-Proto/Host`: 이 nginx는 로컬 재현용이라 클라이언트가 보낸 값을 그대로 Superset에 전달한다. 앞단 프록시 없이 쓸 때 덮어쓰는 방법은 `frontend/nginx/templates/default.conf.template` 주석을 본다(새 변수 없음).
 - 프런트 코드는 `${basePath}/api/…`(호스트 없는 상대경로)로 호출한다. `basePath`는 컨테이너 시작 때 만들어지는 `config.js`(`window.__APP_CONFIG__`)에서 온다. 정적 파일은 접두가 있어도(유지 전달) 없어도(떼고 전달) 서빙된다.
 - 실제 하위 경로 값과 프록시의 접두 처리 방식은 웹서버 배포 때 관리자와 정한다(`docs/deploy-coordination.md`). 값을 바꿀 때는 `.env`만 고친다.
