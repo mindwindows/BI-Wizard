@@ -14,7 +14,7 @@
 | 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·사용자 표시 이름 100·로그인 ID 200(03b 17-1 결정 4)·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
 | 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`, **사용자 조회 중 DB 장애는 503 `SERVICE_UNAVAILABLE`로 로그아웃(401)과 구분하며 접근은 닫혀 있다(03b 17-1 결정 2)**. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
 | 권한 표기 | `공개` 인증 불필요 / `읽기` 인증된 활성 사용자 전부(타 팀 포함) / `관리자` `users.is_admin` / `정의(팀)` 그 데이터셋 팀의 `definer`(관리자라도 팀 소속이 아니면 불가 [제안, 06 §4-1]) / `입력(팀)` 그 팀의 `entry` 또는 `definer` **[미답: 정의 담당자 입력 가부, 06 §4-1]** / `스텁` 스텁이 켜진 환경에서만 존재 | 03b 1-3, 5-2 K2, 06 §4 |
-| 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`. 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
+| 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`(본문을 JSON으로 읽지 못한 형식 오류는 `field`가 오류 위치 번호 문자열이다). 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
 | 상태 코드 | 형식 오류(깨진 JSON·잘못된 쿼리·경로 형식 포함)와 규칙 위반은 모두 422 `VALIDATION_ERROR`로 통일(03b 17-1 결정 1, 400은 쓰지 않음) / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 405 `METHOD_NOT_ALLOWED` / 502·503 Superset 불가·DB 장애 `SERVICE_UNAVAILABLE` / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
 | 목록 | 쿼리 `limit`(기본 50, 최대 200)·`offset`, 응답 `{items, total, limit, offset}`. 그리드의 부분 로딩은 AG Grid Community 지원 확인 뒤 적용(Enterprise 방식 금지) | [미답] |
 | 동시성 | 정의를 바꾸거나 행을 쓰는 요청은 `expected_version`(읽은 `def_version`)을 싣는다. 기존 행의 칸 수정은 칸마다 `expected` 키가 **필수**다(값 `null` = 빈 칸이었음, 키 생략·`expected` 전체 `null`은 422로 가드 우회를 막는다). 이미 같은 값이면 200. 모든 쓰기 성공 응답에 새 `def_version` | 03b 3-4 Y8, 06 §5, 03c X-24 |
@@ -106,7 +106,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | `UNAUTHENTICATED` · `USER_NOT_REGISTERED` · `USER_INACTIVE` · `FORBIDDEN` | 401·403 | - | 신원 없음 / 미등록 / 비활성 / 권한 부족 |
 | `METHOD_NOT_ALLOWED` | 405 | - | 허용되지 않는 메서드(03b 17-1 결정 1) |
 | `SERVICE_UNAVAILABLE` | 503 | - | DB 등 내부 의존 장애(재시도 가능, 로그아웃과 구분, 접근은 닫힘, 03b 17-1 결정 2). Superset 불가는 `SUPERSET_UNAVAILABLE` |
-| `TARGET_INACTIVE` | 409 | `field` | 비활성 팀·사용자에 소속 추가·변경 시도(A8, 03b 17-1 결정 3. 코드 이름은 구현 제안) |
+| `TARGET_INACTIVE` | 409 | `field` = `team` 또는 `user`(둘 다 비활성이면 `team`) | 비활성 팀·사용자에 소속 추가·변경 시도(A8, 03b 17-1 결정 3. 코드 이름은 구현 제안, 값은 구현 기준으로 확정) |
 | `NOT_FOUND` · `ROW_NOT_FOUND` | 404 | - | 대상 없음 / 행 없음(C3) |
 | `VALIDATION_ERROR` | 422 | `fields[]` | 필수·범위·형 등 입력 규칙 위반 |
 | `ALREADY_EXISTS` | 409 | `field` | 유일 값 중복(팀 코드·이름, 로그인 ID, 데이터셋·열 이름, uuid) |
