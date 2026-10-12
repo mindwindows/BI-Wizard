@@ -16,6 +16,7 @@
 | 권한 표기 | `공개` 인증 불필요 / `읽기` 인증된 활성 사용자 전부(타 팀 포함) / `관리자` `users.is_admin` / `정의(팀)` 그 데이터셋 팀의 `definer`(관리자라도 팀 소속이 아니면 불가 [제안, 06 §4-1]) / `입력(팀)` 그 팀의 `entry` 또는 `definer` **[미답: 정의 담당자 입력 가부, 06 §4-1]** / `스텁` 스텁이 켜진 환경에서만 존재 | 03b 1-3, 5-2 K2, 06 §4 |
 | 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`(본문을 JSON으로 읽지 못한 형식 오류는 `field`가 오류 위치 번호 문자열이다). 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
 | 상태 코드 | 형식 오류(깨진 JSON·잘못된 쿼리·경로 형식 포함)와 규칙 위반은 모두 422 `VALIDATION_ERROR`로 통일(03b 17-1 결정 1, 400은 쓰지 않음) / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 405 `METHOD_NOT_ALLOWED` / 502·503 Superset 불가·DB 장애 `SERVICE_UNAVAILABLE` / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
+| 잘림 표시 | 응답이 항목 수 상한에서 잘리면 `details.truncated: true`와 전체 건수 `details.total`을 함께 준다(검증 오류 `details.fields[]`는 200건, 충돌 `details.conflicts[]`는 1,000건에서 자름). 화면은 "일부만 표시됨"을 안내한다(03b 19-1 결정 4) | 03b 19-1 |
 | 목록 | 쿼리 `limit`(기본 50, 최대 200)·`offset`, 응답 `{items, total, limit, offset}`. 그리드의 부분 로딩은 AG Grid Community 지원 확인 뒤 적용(Enterprise 방식 금지) | [미답] |
 | 동시성 | 정의를 바꾸거나 행을 쓰는 요청은 `expected_version`(읽은 `def_version`)을 싣는다. 기존 행의 칸 수정은 칸마다 `expected` 키가 **필수**다(값 `null` = 빈 칸이었음, 키 생략·`expected` 전체 `null`은 422로 가드 우회를 막는다). 이미 같은 값이면 200. 모든 쓰기 성공 응답에 새 `def_version` | 03b 3-4 Y8, 06 §5, 03c X-24 |
 | 충돌 | HTTP 409 + 코드: `CELL_CONFLICT`·`PASTE_CONFLICT`·`DEFINITION_VERSION_MISMATCH`(04 후보) + `PERIOD_CONFLICT` **[제안, 04 A-3에 반영됨]**. `details`는 §3 표 | [미답] |
@@ -46,8 +47,8 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ### 2-2. 데이터셋·열 정의 — `dataset` · `dataset-definition`
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
 | --- | --- | --- | --- | --- | --- |
-| B1 | GET `/datasets` | 읽기 | `team_id?` + 목록 | 200 Dataset 목록. 정렬: 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름(03b 2-4). 동기 상태는 E1에서 받아 화면이 결합(04 §3: dataset은 superset을 읽지 않음) | - |
-| B2 | POST `/datasets` | 정의(`team_id` 팀) | `{team_id, name, date_unit: "day"\|"month"\|"year"}` | 201 Dataset 상세. 등록 + `ds_`·`dv_` 생성이 한 트랜잭션(06 §3-5), 커밋 뒤 Superset 백그라운드 동기화 요청(등록 행이 없으면 E1이 `pending`으로 표시) | 409 `ALREADY_EXISTS`(팀 안 이름), 422, 503 `DEFINITION_BUSY` |
+| B1 | GET `/datasets` | 읽기 | `team_id?` + 목록 | 200 Dataset 목록. 정렬: 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름(03b 2-4, 이름순은 한글 가나다순, 03b 19-1 결정 2. A2·A5도 이름순). 동기 상태는 E1에서 받아 화면이 결합(04 §3: dataset은 superset을 읽지 않음) | - |
+| B2 | POST `/datasets` | 정의(`team_id` 팀) | `{team_id, name, date_unit: "day"\|"month"\|"year"}` | 201 Dataset 상세. 등록 + `ds_`·`dv_` 생성이 한 트랜잭션(06 §3-5), 커밋 뒤 Superset 백그라운드 동기화 요청(등록 행이 없으면 E1이 `pending`으로 표시) | 409 `ALREADY_EXISTS`(팀 안 이름), 409 `TARGET_INACTIVE`(`details.field=team`, 비활성 팀의 데이터셋 생성 불가, 03b 19-1 결정 1), 422, 503 `DEFINITION_BUSY` |
 | B3 | GET `/datasets/{id}` | 읽기 | - | 200 Dataset 상세 | 404 |
 | B4 | PATCH `/datasets/{id}` | 정의(팀) | `{expected_version, name?, date_unit?, base_date_column_id?}` | 200 Dataset 상세 | 409 `DEFINITION_VERSION_MISMATCH`(`details.current_version`), 422 `DATASET_HAS_ROWS`(날짜 단위·기준 날짜 열은 행 0개일 때만, 06 §3-3), 422(기준 열은 `raw` `date` 열만), 409 `ALREADY_EXISTS`(팀 안 이름), 503 `DEFINITION_BUSY` |
 | B5 | POST `/datasets/{id}/columns` | 정의(팀) | `{expected_version, display_name, type, required?, rules?, tag?, position?}` (원본 열만. 계산 열은 D4) | 201 `{column, def_version}` | 409 `DEFINITION_VERSION_MISMATCH`·`ALREADY_EXISTS`(열 이름), 422 `VALIDATION_ERROR`(예약어·금지 문자·길이), 503 `DEFINITION_BUSY` |

@@ -18,6 +18,7 @@
 ### FU-1 진행 상황 (2026-10-12)
 - **단위 0(공통 기반)·1a(권한 관리) 구현·QA·reviewer 완료, 사용자 보고 대기.** QA 실패 0, reviewer 차단 0(중요 지적 반영). 상세와 사용자 결정 대기 항목은 `docs/decisions/03b` 16절.
 - 1a 결정 7건 반영(`docs/decisions/03b` 17절): 405·503 `SERVICE_UNAVAILABLE`·409 `TARGET_INACTIVE`·422 통일, `team_is_active`, 길이 상한 계약화, `public_create` 시작 거부, nginx 루트 SPA fallback, `REQUIRE_PG`. 이어서 1b·1c 진행 중(1c 완료 후 보고).
+- **1b·1c 결정 5건 반영(`docs/decisions/03b` 19절):** 비활성 팀 데이터셋 생성 409, 이름순(가나다) 정렬, 이름 변경 잠금 서술(06 §5), `details.truncated`, 화면 문제 7건. 이어서 QA 독립 재검증과 스크린샷 교체, 그다음 1d(수식 열, `lark` 1.3.1) 진행 중이며 1d 완료 후 보고한다.
 - **단위 1b(데이터셋·열 정의)·1c(입력 그리드) 구현·QA·reviewer 완료(2026-10-12), 사용자 보고 대기.** QA 실패 0(1b: 실제 PG pytest 1194, 1c: 1548→수정 후 1554 통과, skip 0), reviewer 차단 0·중요 지적 반영. 상세는 `docs/decisions/03b` 18절. 다음은 1d(formulas·formula_deps, revision `0005`, 수식 엔진, `lark` 1.3.1 설치)이며 사용자 승인 뒤 시작한다.
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
