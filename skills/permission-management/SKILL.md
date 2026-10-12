@@ -9,9 +9,9 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 관리자가 팀을 만들고, 사용자를 사전 등록하고, 사용자를 팀에 정의 담당자(`definer`) 또는 입력자(`entry`)로 넣고 빼며, 비활성화한다. 모든 사용자는 자기 정보와 소속 팀을 본다. 인증된 모든 사용자는 모든 팀의 데이터를 열람할 수 있고(별도 역할 값 없음), 관리자는 팀 소속 역할이 없으면 데이터셋 정의·입력 권한이 없다(06 §4-1).
 
 ## 2. 사용 조건 / 사전 요구사항
-- `local-environment` 통과(`migrate`가 `0003`까지 적용). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
+- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0004`로 데이터셋 표가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
 - 로그인 방식(미결정 8번)이 정해지기 전에는 **인증 스텁**으로만 신원을 만든다. 스텁은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 켜진다(그 밖이면 backend가 시작하지 않는다).
-- 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`.
+- 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`. **사용자를 조회하는 중에 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다**(로그아웃과 구분하며 접근은 계속 닫혀 있다. 모든 보호 경로가 같다). 신원 어댑터 자체의 예외는 기존대로 401이다.
 - 최초 관리자는 아래 서버 명령으로 만든다(화면·API로는 만들 수 없다: 관리자가 한 명도 없기 때문).
 
 ## 3. 입력
@@ -24,18 +24,18 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 | A4 `PATCH /api/teams/{team_id}` | `name?`, `is_active?`(보낸 것만 바꾼다. 빈 본문은 변경 없이 200) |
 | A6 `POST /api/users` | `login_id`(필수, 1~200자, 정규화·대소문자 변환 없음, 유일), `display_name`(필수, 1~100자), `is_admin?`(기본 false) |
 | A7 `PATCH /api/users/{user_id}` | `display_name?`, `is_admin?`, `is_active?`. `login_id`는 바꿀 수 없다 |
-| A8 `PUT /api/teams/{team_id}/members/{user_id}` | `role`: `definer` 또는 `entry`(소속이 없으면 추가, 있으면 역할 변경) |
-| A9 `DELETE /api/teams/{team_id}/members/{user_id}` | 없음 |
+| A8 `PUT /api/teams/{team_id}/members/{user_id}` | `role`: `definer` 또는 `entry`(소속이 없으면 추가, 있으면 역할 변경). **비활성 팀이나 비활성 사용자에게는 추가도 역할 변경도 거부**한다(409 `TARGET_INACTIVE`) |
+| A9 `DELETE /api/teams/{team_id}/members/{user_id}` | 없음. 비활성 팀·사용자의 소속 해제는 허용한다 |
 | 서버 명령 | `--login-id`, `--display-name` (아래 5절) |
 
-사용자 표시 이름 100자와 로그인 ID 200자 상한은 계약(05 §1)에 없어 임시로 둔 값이다(계약 보완 대기).
+길이 상한은 계약(05 §1)이다: 팀 이름 50자, 사용자 표시 이름 100자, 로그인 ID 200자. 로그인 ID는 대소문자를 구분한다(8번 인증 결정 때 재검토).
 
 ## 4. 출력
-- A1 `GET /api/me` 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, role}]}`
+- A1 `GET /api/me` 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, team_is_active, role}]}` (비활성 팀 소속도 나오며 `team_is_active`로 알려 준다. 화면은 작업 팀 선택에서 비활성 팀을 거른다)
 - A2·A5 200 `{items, total, limit, offset}`. 팀 항목 `{id, code, name, is_active}`(팀 이름순), 사용자 항목 `{id, login_id, display_name, is_admin, is_active, memberships[{team_id, role}]}`(표시 이름순)
 - A3 201 팀, A4 200 팀, A6 201 사용자(`memberships` 빈 목록), A7 200 사용자, A8 200 `{team_id, user_id, role}`, A9 204
 - 오류는 모두 `{"error": {"code", "message", "details", "request_id"}}`이고 `message`는 한국어다.
-  - 409 `ALREADY_EXISTS` + `details.field`(`code`, `name`, `login_id`), 409 `LAST_ADMIN`(마지막 활성 관리자의 관리자 해제·비활성화 거부), 404 `NOT_FOUND`(없는 팀·사용자·소속), 422 `VALIDATION_ERROR`(`details.fields[{field, code, message}]`)
+  - 409 `ALREADY_EXISTS` + `details.field`(`code`, `name`, `login_id`), 409 `LAST_ADMIN`(마지막 활성 관리자의 관리자 해제·비활성화 거부), 409 `TARGET_INACTIVE` + `details.field`(`team` 또는 `user`, 둘 다 비활성이면 `team`을 먼저 알린다), 404 `NOT_FOUND`(없는 팀·사용자·소속. 비활성 확인보다 먼저), 422 `VALIDATION_ERROR`(`details.fields[{field, code, message}]`. 깨진 JSON·잘못된 쿼리·경로 형식도 400이 아니라 이 코드다), 405 `METHOD_NOT_ALLOWED`, 503 `SERVICE_UNAVAILABLE`(DB 장애)
 - 저장 위치: `users`, `teams`, `team_members`(DB 권한은 6절). 팀 이름이 실제로 바뀌면 **커밋 뒤** 팀 단위 동기화를 요청한다(`DatasetSyncPort.request_team_sync`). 구현체는 FU-1e(Superset 가상 데이터셋 이름 갱신)이고 지금은 아무것도 하지 않는 기본 구현이며, 요청이 실패해도 응답은 그대로다(오류 클래스 이름만 로그).
 
 ## 5. 실행 방법
@@ -112,11 +112,13 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 | 403 `USER_NOT_REGISTERED` | 로그인 ID가 `users`에 없음 | 관리자가 A6으로 등록하거나 `seed-stub-users`/`create-admin` |
 | 403 `USER_INACTIVE` | 비활성 사용자 | 다른 관리자가 A7로 `is_active=true` |
 | 403 `FORBIDDEN` | 관리자가 아님 | A3~A9는 관리자만 |
+| 503 `SERVICE_UNAVAILABLE` | 사용자 조회 중 DB 연결·운영 오류(로그아웃이 아니다) | `docker compose ps postgres`, `docker compose logs backend`의 `사용자 조회 중 DB 장애(503으로 닫음): <예외 클래스>`(login_id·SQL은 로그에 없다). DB가 돌아오면 같은 요청이 다시 된다 |
+| 409 `TARGET_INACTIVE` | A8 대상 팀 또는 사용자가 비활성 | `details.field`가 `team`이면 A4로 팀을 다시 사용 중으로, `user`이면 A7로 사용자를 다시 활성화한 뒤 소속을 지정한다 |
 | 409 `LAST_ADMIN` | 활성 관리자가 이 사람 하나뿐 | 다른 사용자를 먼저 관리자로 지정(A6/A7) |
 | 409 `ALREADY_EXISTS` | `details.field`가 가리키는 값이 이미 있음 | 다른 코드·이름·로그인 ID를 쓴다(로그인 ID는 대소문자 구분) |
 | `create-admin` 종료 2 | 입력 오류 또는 같은 로그인 ID의 기존 일반·비활성 사용자 | 메시지 확인. 기존 사용자는 화면·API로 바꾼다 |
 | `create-admin` 종료 1 | DB 접속·표 없음 | `docker compose ps`, `logs migrate backend`(`0003` 적용 여부) |
-| backend가 시작하지 않음 | 시작 자가 점검 거부 또는 스텁 설정 거부 | `docker compose logs backend`의 메시지(`시작하지 않는다: …`). 속성 이름만 나오고 비밀은 나오지 않는다 |
+| backend가 시작하지 않음 | 시작 자가 점검 거부(`bi_app`의 위험 속성, **`bi_app`에 `public` schema CREATE 권한이 있음** 등) 또는 스텁 설정 거부 | `docker compose logs backend`의 메시지(`시작하지 않는다: …`). 속성 이름만 나오고 비밀은 나오지 않는다 |
 | 응답 문제 추적 | | 오류 본문 `request_id`로 `docker compose logs backend`를 찾는다 |
 
 ### 화면에 나오는 오류 문구 (error.code 분기, 서버 message는 알 수 없는 4xx만 사용)
@@ -130,8 +132,8 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 | NETWORK_ERROR / INTERNAL_ERROR | 서버 연결 실패 / 예기치 않은 오류 + 문의 번호(`request_id`) |
 
 ## 8. 검증 방법
-- 자동(DB 없이, `docker build --target test backend`와 같다): `pytest`. API 시험은 SQLite로 돌고 `pg` 변형은 건너뛴다.
-- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
+- 자동(DB 없이, `docker build --target test backend`와 같다): `pytest`. API 시험은 SQLite로 돌고 `pg` 변형은 건너뛴다. **CI에서 건너뛰어 통과처럼 보이는 일을 막으려면 시험을 실행하는 환경에 `REQUIRE_PG=1`을 준다**: PostgreSQL 시험 환경(접속 정보·tmpfs 시험 DB)이 없을 때 `pg` 변형이 건너뛰지 않고 **실패**한다. 미설정이면 건너뛴다. `.env`·`.env.example`·compose에는 넣지 않는 시험 실행용 옵션이다.
+- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501, `users`·`teams`·`team_members`·`datasets`·`dataset_columns`), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
 ```
 docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
@@ -140,8 +142,8 @@ docker run --rm --network bi-wizard_default --env-file .env -e POSTGRES_HOST=pos
 docker compose --profile test stop postgres-test && docker compose --profile test rm -f postgres-test
 ```
 (네트워크 이름은 compose 프로젝트 이름에 따른다: `docker network ls`. 이 시험은 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`*_PASSWORD`가 필요하다. 시험 DB는 새 DB여야 한다: 시험이 `users`·`teams`·`team_members`의 행을 지운다.)
-- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003`이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`의 표·열 단위 권한 상태를 확인한다.
-- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, DV1~DV3 × 역할(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
+- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`·`0004`의 표·열 단위 권한 상태(0004 한 단계 내림 포함)를 확인한다.
+- 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), DV1~DV3 × 역할(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
 - 수동: 위 스텁 curl로 관리자 로그인 후 팀 만들기 → 사용자 등록 → 소속 지정 → `/api/me`(해당 사용자)로 소속 확인, 마지막 관리자 해제 시 409.
 - 프런트:
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
@@ -151,5 +153,5 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 
 ## 9. 연관 Skill
 - `local-environment`: 환경 기동·마이그레이션 왕복·`/health` 필드·스텁 스위치(`AUTH_STUB_ENABLED`) 설정, 시작 자가 점검 실패 대응
-- `dataset-definition`(예정, FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다
+- `dataset-definition`(FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
 - `dashboard-link`(예정, FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고, 대시보드 연결·입장권 발급에 이 모듈의 신원·권한을 쓴다

@@ -13,13 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.access import service
 from app.access.schemas import (
-    LIST_LIMIT_DEFAULT,
-    LIST_LIMIT_MAX,
     MemberOut,
     MemberRoleIn,
     MembershipMe,
     MeOut,
-    Page,
     TeamCreate,
     TeamOut,
     TeamUpdate,
@@ -30,6 +27,7 @@ from app.access.schemas import (
 from app.auth import CurrentUserDep
 from app.auth.permissions import require_admin
 from app.core.deps import get_session
+from app.core.pagination import LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, Page
 from app.core.ports import DatasetSyncPort, run_sync_request
 
 router = APIRouter(tags=["access"])
@@ -57,7 +55,11 @@ def get_me(user: CurrentUserDep) -> MeOut:
         is_admin=user.is_admin,
         memberships=[
             MembershipMe(
-                team_id=m.team_id, team_code=m.team_code, team_name=m.team_name, role=m.role
+                team_id=m.team_id,
+                team_code=m.team_code,
+                team_name=m.team_name,
+                team_is_active=m.team_is_active,
+                role=m.role,
             )
             for m in user.memberships
         ],

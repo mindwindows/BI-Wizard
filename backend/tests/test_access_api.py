@@ -33,9 +33,22 @@ def test_me_returns_profile_and_memberships(api, world):
         "is_active": True,
         "is_admin": False,
         "memberships": [
-            {"team_id": world.team_a, "team_code": "team_a", "team_name": "A팀", "role": "definer"}
+            {
+                "team_id": world.team_a,
+                "team_code": "team_a",
+                "team_name": "A팀",
+                "team_is_active": True,
+                "role": "definer",
+            }
         ],
     }
+
+
+def test_me_memberships_report_team_is_active(api, db, world):
+    """비활성 팀 소속도 나오고 `team_is_active`로 알려 준다(작업 팀 선택에서 화면이 거른다)."""
+    assert api("admin", "PATCH", f"/api/teams/{world.team_a}", json={"is_active": False})
+    memberships = api("definer", "GET", "/api/me").json()["memberships"]
+    assert [(m["team_id"], m["team_is_active"]) for m in memberships] == [(world.team_a, False)]
 
 
 def test_me_for_admin_without_team_has_empty_memberships(api, world):
@@ -431,6 +444,77 @@ def test_put_member_errors(api, world):
             "admin", "PUT", f"/api/teams/{world.team_a}/members/99999", json={"role": "entry"}
         ).status_code
         == 404
+    )
+
+
+def _members(db, team_id):
+    return sorted(
+        (r["user_id"], r["role"]) for r in db.rows(team_members) if r["team_id"] == team_id
+    )
+
+
+def test_put_member_to_inactive_team_is_409_target_inactive(api, db, world):
+    api("admin", "PATCH", f"/api/teams/{world.team_b}", json={"is_active": False})
+    before = _members(db, world.team_b)
+    for user in ("viewer", "other"):  # 추가(viewer)와 기존 소속의 역할 변경(other) 모두 거부
+        response = api(
+            "admin",
+            "PUT",
+            f"/api/teams/{world.team_b}/members/{world.ids[user]}",
+            json={"role": "definer"},
+        )
+        error = err(response)
+        assert response.status_code == 409 and error["code"] == "TARGET_INACTIVE", user
+        assert error["details"] == {"field": "team"}
+        assert "SELECT" not in response.text
+    assert _members(db, world.team_b) == before
+
+
+def test_put_member_for_inactive_user_is_409_target_inactive(api, db, world):
+    path = f"/api/teams/{world.team_a}/members/{world.ids['inactive']}"
+    before = _members(db, world.team_a)
+    response = api("admin", "PUT", path, json={"role": "entry"})
+    error = err(response)
+    assert response.status_code == 409 and error["code"] == "TARGET_INACTIVE"
+    assert error["details"] == {"field": "user"}
+    assert _members(db, world.team_a) == before
+    # 활성으로 되돌리면 다시 가능하다.
+    api("admin", "PATCH", f"/api/users/{world.ids['inactive']}", json={"is_active": True})
+    assert api("admin", "PUT", path, json={"role": "entry"}).status_code == 200
+
+
+def test_put_member_reports_team_first_when_both_are_inactive(api, db, world):
+    api("admin", "PATCH", f"/api/teams/{world.team_b}", json={"is_active": False})
+    response = api(
+        "admin",
+        "PUT",
+        f"/api/teams/{world.team_b}/members/{world.ids['inactive']}",
+        json={"role": "entry"},
+    )
+    assert err(response)["details"] == {"field": "team"}
+
+
+def test_missing_target_is_404_before_inactive_check(api, world):
+    api("admin", "PATCH", f"/api/teams/{world.team_b}", json={"is_active": False})
+    path = f"/api/teams/{world.team_b}/members/99999"
+    assert api("admin", "PUT", path, json={"role": "entry"}).status_code == 404
+
+
+def test_delete_member_is_allowed_for_inactive_team_and_user(api, db, world):
+    """해제(A9)는 비활성 대상에도 허용한다."""
+    api("admin", "PATCH", f"/api/teams/{world.team_b}", json={"is_active": False})
+    assert (
+        api(
+            "admin", "DELETE", f"/api/teams/{world.team_b}/members/{world.ids['other']}"
+        ).status_code
+        == 204
+    )
+    api("admin", "PATCH", f"/api/users/{world.ids['entry']}", json={"is_active": False})
+    assert (
+        api(
+            "admin", "DELETE", f"/api/teams/{world.team_a}/members/{world.ids['entry']}"
+        ).status_code
+        == 204
     )
 
 

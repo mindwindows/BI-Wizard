@@ -150,6 +150,107 @@ def test_lookup_failure_is_logged_without_identity_or_exception_detail(app, clie
         assert leaked not in caplog.text
 
 
+# --- DB 장애는 503 (03b 17-1 결정 2): 로그아웃(401)과 구분하되 접근은 닫혀 있다 ----
+
+
+def _db_errors():
+    from sqlalchemy.exc import InterfaceError, OperationalError
+    from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+    sql = "SELECT users.id FROM users WHERE users.login_id = %s"
+    return [
+        OperationalError(sql, ("secret.login.id",), Exception("connection refused")),
+        InterfaceError(sql, ("secret.login.id",), Exception("closed")),
+        PoolTimeoutError("QueuePool limit of size 5 overflow 0 reached"),
+        ConnectionRefusedError("[Errno 111] secret.login.id"),
+    ]
+
+
+@pytest.mark.parametrize("error", _db_errors(), ids=lambda e: type(e).__name__)
+def test_db_failure_in_user_lookup_is_503_not_401(app, client, caplog, error):
+    class Down:
+        def find_by_login_id(self, request, login_id):
+            raise error
+
+    app.state.identity_adapter = FakeAdapter("secret.login.id")
+    app.state.user_reader = Down()
+    with caplog.at_level(logging.DEBUG):
+        response = client.get("/api/_t/me")
+    assert response.status_code == 503
+    assert _code(response) == "SERVICE_UNAVAILABLE"
+    assert response.json()["error"]["details"] == {}
+    # 로그: 클래스 이름과 request_id만. login_id, SQL, 파라미터, 트레이스백 없음.
+    records = [r for r in caplog.records if r.name == "app.auth.current_user"]
+    assert len(records) == 1 and records[0].exc_info is None
+    assert type(error).__name__ in records[0].getMessage()
+    assert response.headers["X-Request-ID"] in records[0].getMessage()
+    for leaked in ("secret.login.id", "SELECT", "users", "parameters", "Traceback", "refused"):
+        assert leaked not in caplog.text
+        assert leaked not in response.text
+
+
+def test_db_failure_does_not_open_access_for_write_routes(app, client):
+    class Down:
+        def find_by_login_id(self, request, login_id):
+            raise _db_errors()[0]
+
+    app.state.identity_adapter = FakeAdapter("kim")
+    app.state.user_reader = Down()
+    for method, path in (
+        ("get", "/api/_t/me"),
+        ("post", "/api/_t/write"),
+        ("get", "/api/_t/admin"),
+    ):
+        response = getattr(client, method)(path)
+        assert (response.status_code, _code(response)) == (503, "SERVICE_UNAVAILABLE"), path
+
+
+def test_adapter_failure_stays_401_even_if_it_is_a_db_error(app, client):
+    """신원 어댑터 자체의 예외는 DB 장애로 보지 않고 기존대로 401 fail-closed다."""
+
+    class Broken:
+        def identify(self, request):
+            raise _db_errors()[0]
+
+    app.state.identity_adapter = Broken()
+    app.state.user_reader = FakeReader({})
+    assert client.get("/api/_t/me").status_code == 401
+
+
+def test_non_db_reader_failure_stays_401(app, client):
+    class Broken:
+        def find_by_login_id(self, request, login_id):
+            raise ValueError("알 수 없는 팀 역할")
+
+    app.state.identity_adapter = FakeAdapter("kim")
+    app.state.user_reader = Broken()
+    assert client.get("/api/_t/me").status_code == 401
+
+
+def test_every_protected_route_is_503_when_db_is_down(make_settings, broken_engine, caplog):
+    """실제 DB 조회기(DbUserReader)가 연결에 실패하면 /api/me 외 모든 보호 경로도 같다."""
+    from urllib.parse import quote
+
+    from app.auth.stub import STUB_COOKIE
+
+    settings = make_settings(AUTH_STUB_ENABLED="true", APP_ENV="test")
+    app = create_app(settings, engine=broken_engine)
+    checked = []
+    with TestClient(app) as client, caplog.at_level(logging.DEBUG):
+        client.cookies.set(STUB_COOKIE, quote("secret.login.id", safe=""))
+        for path, operations in app.openapi()["paths"].items():
+            if path in PUBLIC_PATHS or path.startswith("/api/dev/"):
+                continue
+            for method in operations:
+                url = _PATH_PARAM.sub("1", path)
+                response = client.request(method, url)
+                checked.append(f"{method.upper()} {path}")
+                assert response.status_code == 503, (method, path)
+                assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert "GET /api/me" in checked and len(checked) >= 9
+    assert "secret.login.id" not in caplog.text
+
+
 # --- 등록 상태 ----
 
 
@@ -190,8 +291,8 @@ def test_require_admin(app, client):
 
 
 def test_permission_functions():
-    definer = Membership(1, "a", "A팀", "definer")
-    entry = Membership(2, "b", "B팀", "entry")
+    definer = Membership(1, "a", "A팀", True, "definer")
+    entry = Membership(2, "b", "B팀", True, "entry")
     user = _user(memberships=(definer, entry))
     assert can_define(user, 1) and not can_define(user, 2) and not can_define(user, 3)
     assert can_enter(user, 1) and can_enter(user, 2) and not can_enter(user, 3)
@@ -248,10 +349,18 @@ ACCESS_PATHS = {
 }
 
 
-def test_real_app_routes_are_public_health_plus_access(make_settings, sqlite_engine):
-    """실제 앱의 경로는 공개 경로 2개와 권한 관리(A1~A9)뿐이고, 스텁이 꺼져 있으면 /dev/*가 없다."""
+DATASET_PATHS = {
+    "/api/datasets",
+    "/api/datasets/{dataset_id}",
+    "/api/datasets/{dataset_id}/columns",
+    "/api/datasets/{dataset_id}/columns/{col_id}",
+}
+
+
+def test_real_app_routes_are_public_health_plus_access_and_dataset(make_settings, sqlite_engine):
+    """경로는 공개 2개와 A1~A9·B1~B6뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
     app = create_app(make_settings(), engine=sqlite_engine)
-    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS
+    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []
 

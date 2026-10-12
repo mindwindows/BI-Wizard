@@ -26,13 +26,25 @@ class DbUserReader:
             if user is None:
                 return None
             rows = conn.execute(
-                select(teams.c.id, teams.c.code, teams.c.name, team_members.c.role)
+                select(
+                    teams.c.id,
+                    teams.c.code,
+                    teams.c.name,
+                    teams.c.is_active,
+                    team_members.c.role,
+                )
                 .join(team_members, team_members.c.team_id == teams.c.id)
                 .where(team_members.c.user_id == user.id)
                 .order_by(teams.c.name, teams.c.id)
             ).all()
         memberships = tuple(
-            Membership(team_id=r.id, team_code=r.code, team_name=r.name, role=_role(r.role))
+            Membership(
+                team_id=r.id,
+                team_code=r.code,
+                team_name=r.name,
+                team_is_active=bool(r.is_active),
+                role=_role(r.role),
+            )
             for r in rows
         )
         return UserRecord(

@@ -17,14 +17,10 @@ from pydantic import (
 from app.core.text import has_control_chars, normalize_text
 from app.db_metadata import TEAM_CODE_PATTERN
 
-# 표시 이름 길이 상한. 팀 50자는 05 §1이 정했다. 사용자 표시 이름(100)과 로그인 ID(200)는
-# 05에 상한이 없어 데이터셋·열 상한(100)과 맞춘 임시 값이다(계약 보완 요청 대상).
+# 표시 이름 길이 상한(05 §1, 03b 17-1 결정 4): 팀 50자, 사용자 표시 이름 100자, 로그인 ID 200자.
 TEAM_NAME_MAX = 50
 USER_DISPLAY_NAME_MAX = 100
 LOGIN_ID_MAX = 200
-
-LIST_LIMIT_DEFAULT = 50
-LIST_LIMIT_MAX = 200
 
 _TEAM_CODE = re.compile(TEAM_CODE_PATTERN)
 
@@ -102,6 +98,7 @@ class MembershipMe(BaseModel):
     team_id: int
     team_code: str
     team_name: str
+    team_is_active: bool
     role: Role
 
 
@@ -138,10 +135,3 @@ class MemberOut(BaseModel):
     team_id: int
     user_id: int
     role: Role
-
-
-class Page[T](BaseModel):
-    items: list[T]
-    total: int
-    limit: int
-    offset: int

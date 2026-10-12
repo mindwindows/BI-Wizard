@@ -1,6 +1,7 @@
 """정적 표 DB 권한·제약 시험(06 §2 매트릭스, 03b 3-6 BY4). 실제 PostgreSQL(tmpfs 시험 DB) 필요.
 
-0003 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수 없음을 확인한다.
+0003·0004 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
+없음을 확인한다.
 권한 판정은 `has_table_privilege`/`has_column_privilege`로 전부 대조하고, 대표 동작은 실제로 실행해
 거부 코드(42501)와 제약 위반 코드(23xxx)를 확인한다.
 """
@@ -15,19 +16,28 @@ from sqlalchemy.orm import Session
 
 from app.access import repo, service
 from app.core.errors import AppError
-from app.db_metadata import team_members, teams, users
+from app.db_metadata import dataset_columns, datasets, team_members, teams, users
 
 INSUFFICIENT_PRIVILEGE = "42501"
 CHECK_VIOLATION = "23514"
 UNIQUE_VIOLATION = "23505"
 FOREIGN_KEY_VIOLATION = "23503"
 
-TABLES = {"users": users, "teams": teams, "team_members": team_members}
+TABLES = {
+    "users": users,
+    "teams": teams,
+    "team_members": team_members,
+    "datasets": datasets,
+    "dataset_columns": dataset_columns,
+}
 # bi_app의 표 단위 권한(has_table_privilege). UPDATE는 열 단위라 표 단위로는 없다.
 TABLE_PRIVILEGES = {
     "users": {"SELECT", "INSERT"},
     "teams": {"SELECT", "INSERT"},
     "team_members": {"SELECT", "INSERT", "DELETE"},
+    # 0004: 삭제는 FU-1에 없다(DELETE 없음). UPDATE는 열 단위다.
+    "datasets": {"SELECT", "INSERT"},
+    "dataset_columns": {"SELECT", "INSERT"},
 }
 ALL_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
 # bi_app이 UPDATE할 수 있는 열(06 §2). 나머지 열은 불변이다.
@@ -35,6 +45,10 @@ UPDATABLE = {
     "users": {"display_name", "is_admin", "is_active"},
     "teams": {"name", "is_active"},
     "team_members": {"role"},
+    # team_id·created_by·created_at·id 불변(팀 열이 뷰에 상수로 들어간다), dataset_id·kind·id 불변.
+    # dataset_columns.type은 계산 열 결과 형이 바뀔 때 갱신해야 해서 허용한다(원본 열은 앱 규칙).
+    "datasets": {"name", "date_unit", "base_date_column_id", "status", "def_version", "def_hash"},
+    "dataset_columns": {"display_name", "type", "required", "rules", "tag", "position"},
 }
 
 
@@ -80,6 +94,17 @@ def test_bi_app_column_update_privileges_are_exactly_the_mutable_columns(conn, t
         assert column_privilege(conn, "bi_app", table, col.name, "UPDATE") is expected, col.name
         # 모든 열을 읽고 쓸(INSERT) 수 있다. 시퀀스 권한은 필요 없다(IDENTITY).
         assert column_privilege(conn, "bi_app", table, col.name, "SELECT")
+
+
+def test_immutable_columns_are_exactly_the_ones_without_update_privilege():
+    """06 §2: 불변 열의 목록을 시험에 못 박는다(DB가 불변을 강제하는 열)."""
+    all_columns = {name: {c.name for c in table.c} for name, table in TABLES.items()}
+    immutable = {name: all_columns[name] - UPDATABLE[name] for name in TABLES}
+    assert immutable["datasets"] == {"id", "team_id", "created_by", "created_at"}
+    assert immutable["dataset_columns"] == {"id", "dataset_id", "kind"}
+    assert immutable["users"] == {"id", "login_id", "created_at"}
+    assert immutable["teams"] == {"id", "code", "created_at"}
+    assert immutable["team_members"] == {"team_id", "user_id"}
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -136,6 +161,123 @@ def _prepare(owner: Engine) -> dict[str, int]:
         ).scalar_one()
         c.execute(insert(team_members).values(team_id=tid, user_id=uid, role="entry"))
     return {"user": uid, "team": tid}
+
+
+def _prepare_datasets(owner: Engine) -> dict[str, int]:
+    """팀·사용자와 데이터셋 둘, 첫 데이터셋의 열 둘(둘째 데이터셋의 열 하나)을 만든다."""
+    ids = _prepare(owner)
+    with owner.begin() as c:
+        first = c.execute(
+            insert(datasets)
+            .values(
+                team_id=ids["team"],
+                name="D1",
+                date_unit="month",
+                created_by=ids["user"],
+                def_hash="h",
+            )
+            .returning(datasets.c.id)
+        ).scalar_one()
+        second = c.execute(
+            insert(datasets)
+            .values(
+                team_id=ids["team"],
+                name="D2",
+                date_unit="day",
+                created_by=ids["user"],
+                def_hash="h",
+            )
+            .returning(datasets.c.id)
+        ).scalar_one()
+
+        def column(dataset_id, name, column_type="date", kind="raw", **extra):
+            return c.execute(
+                insert(dataset_columns)
+                .values(
+                    dataset_id=dataset_id,
+                    display_name=name,
+                    type=column_type,
+                    kind=kind,
+                    position=0,
+                    **extra,
+                )
+                .returning(dataset_columns.c.id)
+            ).scalar_one()
+
+        col = column(first, "C1")
+        col2 = column(first, "C2", "number")
+        other_col = column(second, "C1")
+    return {**ids, "ds": first, "ds2": second, "col": col, "col2": col2, "other_col": other_col}
+
+
+def test_bi_app_allowed_dataset_operations(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_datasets(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        new_dataset = c.execute(
+            insert(datasets)
+            .values(
+                team_id=ids["team"],
+                name="D3",
+                date_unit="year",
+                created_by=ids["user"],
+                def_hash="h",
+            )
+            .returning(datasets.c.id)
+        ).scalar_one()
+        # 허용된 열만 UPDATE(기준 날짜 열은 같은 데이터셋의 열이어야 한다).
+        c.execute(
+            update(datasets)
+            .where(datasets.c.id == ids["ds"])
+            .values(
+                name="새 이름",
+                date_unit="year",
+                base_date_column_id=ids["col"],
+                status="active",
+                def_version=2,
+                def_hash="h2",
+            )
+        )
+        column_id = c.execute(
+            insert(dataset_columns)
+            .values(
+                dataset_id=new_dataset,
+                display_name="A",
+                type="choice",
+                kind="raw",
+                required=True,
+                rules={"options": ["가", "나"]},
+                tag=None,
+                position=0,
+            )
+            .returning(dataset_columns.c.id)
+        ).scalar_one()
+        c.execute(
+            update(dataset_columns)
+            .where(dataset_columns.c.id == column_id)
+            .values(
+                display_name="B",
+                type="text",
+                required=False,
+                rules={"max_length": 3},
+                tag="t",
+                position=4,
+            )
+        )
+        # 정의 변경 직렬화 잠금과 행 쓰기 잠금은 열 단위 UPDATE 권한만으로 실행된다(06 §5).
+        c.execute(select(datasets.c.id).with_for_update(key_share=True)).all()
+        c.execute(select(datasets.c.id).with_for_update(read=True)).all()
+    row = _read_dataset(pg_owner_engine, ids["ds"])
+    assert (row["name"], row["date_unit"], row["base_date_column_id"], row["def_version"]) == (
+        "새 이름",
+        "year",
+        ids["col"],
+        2,
+    )
+
+
+def _read_dataset(engine: Engine, dataset_id: int):
+    with engine.connect() as c:
+        return c.execute(select(datasets).where(datasets.c.id == dataset_id)).mappings().one()
 
 
 def test_bi_app_allowed_operations(pg_owner_engine, pg_app_engine, clean_pg):
@@ -207,6 +349,62 @@ def test_bi_app_denied_operations(pg_owner_engine, pg_app_engine, clean_pg, make
     assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
 
 
+# 0004 표의 거부: 불변 열(team_id·created_by·created_at·id, dataset_id·kind·id)과 DELETE.
+DENIED_DATASETS = [
+    pytest.param(
+        lambda i: update(datasets).where(datasets.c.id == i["ds"]).values(team_id=i["team"]),
+        id="datasets.team_id",
+    ),
+    pytest.param(
+        lambda i: update(datasets).where(datasets.c.id == i["ds"]).values(created_by=i["user"]),
+        id="datasets.created_by",
+    ),
+    pytest.param(
+        lambda i: update(datasets).where(datasets.c.id == i["ds"]).values(created_at=func.now()),
+        id="datasets.created_at",
+    ),
+    pytest.param(lambda i: update(datasets).values(id=999), id="datasets.id"),
+    pytest.param(lambda i: delete(datasets).where(datasets.c.id == i["ds2"]), id="datasets.delete"),
+    pytest.param(
+        lambda i: (
+            update(dataset_columns)
+            .where(dataset_columns.c.id == i["col"])
+            .values(dataset_id=i["ds2"])
+        ),
+        id="dataset_columns.dataset_id",
+    ),
+    pytest.param(
+        lambda i: (
+            update(dataset_columns).where(dataset_columns.c.id == i["col"]).values(kind="formula")
+        ),
+        id="dataset_columns.kind",
+    ),
+    pytest.param(lambda i: update(dataset_columns).values(id=999), id="dataset_columns.id"),
+    pytest.param(
+        lambda i: delete(dataset_columns).where(dataset_columns.c.id == i["col"]),
+        id="dataset_columns.delete",
+    ),
+]
+
+
+@pytest.mark.parametrize("make_statement", DENIED_DATASETS)
+def test_bi_app_denied_dataset_operations(pg_owner_engine, pg_app_engine, clean_pg, make_statement):
+    ids = _prepare_datasets(pg_owner_engine)
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(make_statement(ids))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+
+
+def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
+    for table in ("datasets", "dataset_columns"):
+        with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+            c.execute(sa.schema.DDL(f"TRUNCATE TABLE {table}"))
+        assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(sa.schema.DDL("ALTER TABLE datasets ADD COLUMN evil text"))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+
+
 def test_bi_readonly_cannot_read_static_tables(pg_owner_engine, pg_readonly_engine, clean_pg):
     _prepare(pg_owner_engine)
     for table in (users, teams, team_members):
@@ -256,6 +454,109 @@ def test_unique_and_role_constraints(pg_owner_engine, pg_app_engine, clean_pg):
         FOREIGN_KEY_VIOLATION,
         "fk_team_members_team_id_teams",
     )
+
+
+def test_dataset_constraints(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_datasets(pg_owner_engine)
+
+    def fails(statement, code, name):
+        with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+            c.execute(statement)
+        assert sqlstate(error.value) == code and name in str(error.value.orig), error.value
+
+    def new_dataset(**values):
+        base = dict(team_id=ids["team"], name="N", date_unit="day", created_by=ids["user"])
+        return insert(datasets).values(**{**base, "def_hash": "h", **values})
+
+    def new_column(**values):
+        base = dict(dataset_id=ids["ds"], display_name="N", type="text", kind="raw", position=0)
+        return insert(dataset_columns).values(**{**base, **values})
+
+    # 팀 안 데이터셋 이름 유일(다른 팀은 같은 이름 가능, 아래 두 번째 팀으로 확인)
+    fails(new_dataset(name="D1"), UNIQUE_VIOLATION, "uq_datasets_team_id_name")
+    fails(new_dataset(date_unit="week"), CHECK_VIOLATION, "ck_datasets_date_unit")
+    fails(new_dataset(status="archived"), CHECK_VIOLATION, "ck_datasets_status")
+    fails(new_dataset(team_id=99999), FOREIGN_KEY_VIOLATION, "fk_datasets_team_id_teams")
+    fails(new_dataset(created_by=99999), FOREIGN_KEY_VIOLATION, "fk_datasets_created_by_users")
+    # 열: 데이터셋 안 표시 이름 유일, 열거 CHECK, 계산 열은 필수·선택 목록 형이 아님
+    fails(
+        new_column(display_name="C1"),
+        UNIQUE_VIOLATION,
+        "uq_dataset_columns_dataset_id_display_name",
+    )
+    fails(new_column(type="reference"), CHECK_VIOLATION, "ck_dataset_columns_type")
+    fails(new_column(kind="query"), CHECK_VIOLATION, "ck_dataset_columns_kind")
+    fails(
+        new_column(kind="formula", required=True),
+        CHECK_VIOLATION,
+        "ck_dataset_columns_formula_shape",
+    )
+    fails(
+        new_column(kind="formula", type="choice"),
+        CHECK_VIOLATION,
+        "ck_dataset_columns_formula_shape",
+    )
+    fails(
+        new_column(dataset_id=99999),
+        FOREIGN_KEY_VIOLATION,
+        "fk_dataset_columns_dataset_id_datasets",
+    )
+    with pg_app_engine.begin() as c:  # 원본 열은 필수·선택 목록 가능, 계산 열은 선택 목록 아닌 형
+        c.execute(new_column(display_name="필수", required=True))
+        c.execute(new_column(display_name="선택", type="choice", rules={"options": ["a"]}))
+        c.execute(new_column(display_name="계산", kind="formula", type="number"))
+    # 같은 이름은 다른 데이터셋에서 가능하다.
+    with pg_app_engine.begin() as c:
+        c.execute(new_column(dataset_id=ids["ds2"], display_name="C2"))
+        team2 = c.execute(
+            insert(teams).values(code="t9", name="T9").returning(teams.c.id)
+        ).scalar_one()
+        c.execute(new_dataset(team_id=team2, name="D1"))
+
+
+def test_base_date_column_must_belong_to_the_same_dataset(pg_owner_engine, pg_app_engine, clean_pg):
+    """복합 FK: 다른 데이터셋의 열을 기준 날짜 열로 지정할 수 없다(NULL은 허용)."""
+    ids = _prepare_datasets(pg_owner_engine)
+
+    def set_base(value):
+        return update(datasets).where(datasets.c.id == ids["ds"]).values(base_date_column_id=value)
+
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(set_base(ids["other_col"]))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    assert "fk_datasets_id_dataset_columns" in str(error.value.orig)
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(set_base(99999))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    with pg_app_engine.begin() as c:
+        c.execute(set_base(ids["col"]))
+        c.execute(set_base(None))
+
+
+def test_rules_column_stores_sql_null_and_jsonb(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_datasets(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        c.execute(
+            update(dataset_columns)
+            .where(dataset_columns.c.id == ids["col"])
+            .values(rules={"min": "0", "options": ["가"]})
+        )
+        c.execute(
+            update(dataset_columns)
+            .where(dataset_columns.c.id == ids["col2"])
+            .values(rules=sa.null())
+        )
+    with pg_owner_engine.connect() as c:
+        rows = {
+            r.id: r.rules for r in c.execute(select(dataset_columns.c.id, dataset_columns.c.rules))
+        }
+        assert rows[ids["col"]] == {"min": "0", "options": ["가"]} and rows[ids["col2"]] is None
+        kind = c.execute(
+            select(sa.func.jsonb_typeof(dataset_columns.c.rules)).where(
+                dataset_columns.c.id == ids["col"]
+            )
+        ).scalar_one()
+        assert kind == "object"
 
 
 def test_not_null_defaults(pg_app_engine, clean_pg):

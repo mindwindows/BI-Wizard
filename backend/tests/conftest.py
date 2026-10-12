@@ -1,6 +1,6 @@
 import os
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -9,14 +9,24 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, delete, insert
+from sqlalchemy import Engine, create_engine, delete, event, insert, update
 from sqlalchemy.engine import URL
 from sqlalchemy.pool import StaticPool
 
+from app import ddl
 from app.config import Settings, get_settings
 from app.core.startup_check import StartupReport
+from app.dataset.hashing import structure_hash
 from app.db import build_database_url, create_db_engine
-from app.db_metadata import metadata, team_members, teams, users
+from app.db_metadata import (
+    DYNAMIC_SCHEMA,
+    dataset_columns,
+    datasets,
+    metadata,
+    team_members,
+    teams,
+    users,
+)
 from app.main import create_app
 from tests.api_helpers import World, build_world, make_caller
 
@@ -50,6 +60,24 @@ _PG_REQUIRED = (
     "POSTGRES_READONLY_PASSWORD",
 )
 _BACKEND = Path(__file__).resolve().parent.parent
+
+# CI 전용 시험 옵션(03b 17-1 결정 7): `REQUIRE_PG=1`이면 PostgreSQL 시험 환경이 없을 때 `pg` 변형을
+# 건너뛰지 않고 **실패**시킨다(건너뛰어서 통과처럼 보이는 일을 막는다). 시험을 실행하는 환경에서만
+# 읽으며 `.env`·`.env.example`·compose에는 넣지 않는다. 미설정이면 기존처럼 건너뛴다.
+REQUIRE_PG_NAME = "REQUIRE_PG"
+_REQUIRE_PG = os.environ.get(REQUIRE_PG_NAME, "") == "1"
+
+
+def require_pg_enabled(environ: Mapping[str, str]) -> bool:
+    """`REQUIRE_PG=1`로 켜졌는가(정확히 문자열 "1"만 켠다)."""
+    return environ.get(REQUIRE_PG_NAME, "") == "1"
+
+
+def pg_unavailable(reason: str, *, require: bool | None = None) -> None:
+    """PG 시험을 할 수 없을 때 `REQUIRE_PG=1`이면 실패, 아니면 건너뛴다(항상 예외를 올린다)."""
+    if _REQUIRE_PG if require is None else require:
+        pytest.fail(f"{reason} (REQUIRE_PG=1이라 건너뛰지 않고 실패로 처리한다)", pytrace=False)
+    pytest.skip(reason)
 
 
 @pytest.fixture(autouse=True)
@@ -151,7 +179,7 @@ def pg_env() -> PgEnv:
     """
     missing = [name for name in _PG_REQUIRED if not _PG_ENV[name]]
     if missing:
-        pytest.skip("PostgreSQL 시험 환경이 없다(POSTGRES_* 환경변수, tmpfs 시험 DB 필요)")
+        pg_unavailable("PostgreSQL 시험 환경이 없다(POSTGRES_* 환경변수, tmpfs 시험 DB 필요)")
     env = PgEnv(dict(_PG_ENV))
     try:
         owner = create_engine(
@@ -160,9 +188,9 @@ def pg_env() -> PgEnv:
         with owner.connect() as conn:
             fsync = conn.execute(sa.select(sa.func.current_setting("fsync"))).scalar_one()
     except Exception as exc:
-        pytest.skip(f"PostgreSQL 시험 DB에 접속하지 못했다({type(exc).__name__})")
+        pg_unavailable(f"PostgreSQL 시험 DB에 접속하지 못했다({type(exc).__name__})")
     if fsync != "off":
-        pytest.skip("tmpfs 시험 DB(compose profile test, fsync=off)가 아니라서 건너뛴다")
+        pg_unavailable("tmpfs 시험 DB(compose profile test, fsync=off)가 아니다")
     with pytest.MonkeyPatch.context() as mp:
         env.apply(mp)
         command.upgrade(Config(str(_BACKEND / "alembic.ini")), "head")
@@ -206,8 +234,19 @@ def pg_readonly_engine(pg_env: PgEnv) -> Iterator[Engine]:
     engine.dispose()
 
 
-def clear_static_tables(engine: Engine) -> None:
+def drop_dynamic_tables(engine: Engine) -> None:
+    """`bi_data`의 `ds_*` 표를 모두 지운다(시험 정리 전용: schema 소유자 `bi_owner`로 실행)."""
     with engine.begin() as conn:
+        for name in sa.inspect(conn).get_table_names(schema=DYNAMIC_SCHEMA):
+            sa.Table(name, sa.MetaData(), schema=DYNAMIC_SCHEMA).drop(conn)
+
+
+def clear_static_tables(engine: Engine) -> None:
+    drop_dynamic_tables(engine)
+    with engine.begin() as conn:
+        conn.execute(update(datasets).values(base_date_column_id=None))  # 순환 FK 해제
+        conn.execute(delete(dataset_columns))
+        conn.execute(delete(datasets))
         conn.execute(delete(team_members))
         conn.execute(delete(teams))
         conn.execute(delete(users))
@@ -231,6 +270,62 @@ class Db:
     kind: str
     engine: Engine
     writer: Engine
+    # SQLite 시험 변형에서 기준 날짜 열 규칙 DDL(PostgreSQL 전용)을 대신한 호출 기록.
+    period_calls: list[tuple[str, int, int]] = field(default_factory=list)
+
+    def add_dataset(
+        self, team_id: int, name: str, created_by: int, *, date_unit: str = "day"
+    ) -> int:
+        """데이터셋 행과 원본 표를 직접 만든다(API를 거치지 않는 시험 준비용)."""
+        with self.writer.begin() as conn:
+            dataset_id = conn.execute(
+                insert(datasets)
+                .values(
+                    team_id=team_id,
+                    name=name,
+                    date_unit=date_unit,
+                    created_by=created_by,
+                    def_hash=structure_hash([]),
+                )
+                .returning(datasets.c.id)
+            ).scalar_one()
+        with self.engine.begin() as conn:
+            ddl.create_dataset_table(conn, dataset_id)
+        return dataset_id
+
+    def add_column(
+        self,
+        dataset_id: int,
+        display_name: str,
+        column_type: str = "number",
+        *,
+        required: bool = False,
+        position: int = 0,
+    ) -> int:
+        with self.writer.begin() as conn:
+            column_id = conn.execute(
+                insert(dataset_columns)
+                .values(
+                    dataset_id=dataset_id,
+                    display_name=display_name,
+                    type=column_type,
+                    kind="raw",
+                    required=required,
+                    position=position,
+                )
+                .returning(dataset_columns.c.id)
+            ).scalar_one()
+        with self.engine.begin() as conn:
+            ddl.add_raw_column(conn, dataset_id, column_id, column_type)
+        return column_id
+
+    def add_rows(self, dataset_id: int, count: int = 1) -> None:
+        """원본 표에 빈 행을 넣는다(`row_id`만)."""
+        rows = sa.table(
+            ddl.dataset_table_name(dataset_id), sa.column("row_id"), schema=DYNAMIC_SCHEMA
+        )
+        with self.engine.begin() as conn:
+            conn.execute(insert(rows), [{"row_id": n} for n in range(1, count + 1)])
 
     def add_user(
         self,
@@ -275,8 +370,33 @@ def db(request: pytest.FixtureRequest) -> Iterator[Db]:
         engine = create_engine(
             "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
         )
+
+        # 동적 객체 schema를 흉내 낸다: 연결마다 메모리 DB를 `bi_data`로 붙인다(원본 표 생성·열 추가
+        # DDL이 SQLite에서도 동작). 기준 날짜 열 규칙(NOT NULL 변경·CHECK·유일 인덱스)은 SQLite가
+        # 지원하지 않아 아래에서 호출 기록으로 대신한다. 실제 동작은 `pg` 변형과 test_ddl.py가 본다.
+        @event.listens_for(engine, "connect")
+        def _attach(dbapi_connection, _record) -> None:
+            dbapi_connection.execute(f"ATTACH DATABASE ':memory:' AS {DYNAMIC_SCHEMA}")
+
         metadata.create_all(engine)
-        yield Db("sqlite", engine, engine)
+        sqlite_db = Db("sqlite", engine, engine)
+        # 시험 안의 `monkeypatch`와 같은 인스턴스를 써서 되돌리는 순서가 꼬이지 않게 한다.
+        patch = request.getfixturevalue("monkeypatch")
+        patch.setattr(
+            ddl,
+            "add_period_rules",
+            lambda conn, dataset_id, column_id, unit: sqlite_db.period_calls.append(
+                (f"add:{unit}", dataset_id, column_id)
+            ),
+        )
+        patch.setattr(
+            ddl,
+            "drop_period_rules",
+            lambda conn, dataset_id, column_id: sqlite_db.period_calls.append(
+                ("drop", dataset_id, column_id)
+            ),
+        )
+        yield sqlite_db
         engine.dispose()
         return
     request.getfixturevalue("clean_pg")

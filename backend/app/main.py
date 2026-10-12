@@ -18,9 +18,10 @@ from app.auth.stub import build_stub_adapter
 from app.auth.stub import router as stub_router
 from app.config import Settings, get_settings
 from app.core.errors import register_error_handlers
-from app.core.ports import DatasetSyncPort, NoopDatasetSync
+from app.core.ports import DatasetSyncPort, DefinitionHooks, NoopDatasetSync
 from app.core.request_id import RequestIdMiddleware
 from app.core.startup_check import run_startup_checks
+from app.dataset.router import router as dataset_router
 from app.db import create_db_engine
 from app.health import router as health_router
 
@@ -35,7 +36,7 @@ API_PREFIX = "/api"
 # - 개발: 인증 스텁이 켜진 설정에서만 붙는 `/dev/*`(DV1~DV3). `guard.DEV_STUB_PATHS` 밖의
 #   경로는 거부한다.
 PUBLIC_ROUTERS: tuple[APIRouter, ...] = (health_router,)
-PROTECTED_ROUTERS: tuple[APIRouter, ...] = (access_router,)
+PROTECTED_ROUTERS: tuple[APIRouter, ...] = (access_router, dataset_router)
 DEV_ROUTERS: tuple[APIRouter, ...] = (stub_router,)
 
 
@@ -58,6 +59,7 @@ def create_app(
     settings: Settings | None = None,
     engine: Engine | None = None,
     dataset_sync: DatasetSyncPort | None = None,
+    definition_hooks: DefinitionHooks | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level)
@@ -101,6 +103,8 @@ def create_app(
         build_stub_adapter(settings) if settings.auth_stub_enabled else None
     )
     app.state.dataset_sync = dataset_sync or NoopDatasetSync()
+    # 정의 변경 훅 등록부(04 §3). 1b에는 등록된 훅이 없다. formula 모듈이 1d에서 등록한다.
+    app.state.definition_hooks = definition_hooks or DefinitionHooks()
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
     register_routers(app, dev=DEV_ROUTERS if settings.auth_stub_enabled else ())

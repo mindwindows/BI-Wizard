@@ -3,9 +3,40 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Protocol
 
+from sqlalchemy.orm import Session
+
 logger = logging.getLogger(__name__)
+
+
+class DefinitionChangeHook(Protocol):
+    """데이터셋 정의 변경 훅(04 §3, §5). formula 모듈이 1d에서 등록해 수식·의존·뷰를 만든다.
+
+    정의 변경 진입점이 **같은 트랜잭션 안에서**(행 잠금 → 버전 확인 → 열 변경 뒤, `def_hash` 기록
+    전에) 부른다. 새 열 `id`가 이미 있는 상태이며, 예외를 올리면 열 변경과 동적 DDL까지
+    전부 롤백된다.
+    """
+
+    def __call__(self, session: Session, dataset_id: int) -> None: ...
+
+
+class DefinitionHooks:
+    """정의 변경 훅 등록부. 등록 순서대로 부른다. 1b에는 등록된 훅이 없다(no-op 지점)."""
+
+    def __init__(self) -> None:
+        self._hooks: list[Callable[[Session, int], None]] = []
+
+    def register(self, hook: Callable[[Session, int], None]) -> None:
+        self._hooks.append(hook)
+
+    def run(self, session: Session, dataset_id: int) -> None:
+        for hook in self._hooks:
+            hook(session, dataset_id)
+
+    def __len__(self) -> int:
+        return len(self._hooks)
 
 
 class DatasetSyncPort(Protocol):
@@ -32,6 +63,16 @@ class NoopDatasetSync:
 
     def request_team_sync(self, team_id: int) -> None:
         return None
+
+
+def run_dataset_sync_request(port: DatasetSyncPort, dataset_id: int) -> None:
+    """데이터셋 동기화를 요청하되 실패해도 예외를 밖으로 내지 않는다(커밋 뒤라 응답은 확정됐다)."""
+    try:
+        port.request_dataset_sync(dataset_id)
+    except Exception as exc:
+        logger.error(
+            "데이터셋 동기화 요청 실패: %s (dataset_id=%s)", type(exc).__name__, dataset_id
+        )
 
 
 def run_sync_request(port: DatasetSyncPort, team_id: int) -> None:

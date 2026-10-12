@@ -1,17 +1,29 @@
-"""권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱. 1a 범위(A1~A9, DV1~DV3).
+"""권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱. A1~A9, B1~B6, DV1~DV3.
 
-역할: 관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음.
-1a 엔드포인트는 팀 범위 판정이 없다(관리자 전용 또는 인증된 읽기)라 정의 담당자·입력자·
-다른 팀 구성원·비소속 읽기는 같은 결과여야 한다. 팀 범위 판정은 1b 이후 엔드포인트가 더한다.
+역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
+- 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
+- 관리자(admin): `users.is_admin`만.
+- 정의(definer): **그 데이터셋 팀의 정의 담당자**만. 관리자라도 팀 소속 정의 담당자가 아니면 거부
+  (06 §4-1)하므로 `admin`·`entry`·`other`·`viewer`는 모두 403이다.
 """
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from fastapi.testclient import TestClient
 
 from app.auth.guard import PUBLIC_PATHS
+from app.db_metadata import (
+    DYNAMIC_SCHEMA,
+    dataset_columns,
+    datasets,
+    team_members,
+    teams,
+    users,
+)
 from app.main import create_app
 from tests.api_helpers import World, make_caller
 from tests.conftest import Db
@@ -19,11 +31,19 @@ from tests.conftest import Db
 ROLES = ["admin", "definer", "entry", "other", "viewer", "inactive", None]
 READERS = {"admin", "definer", "entry", "other", "viewer"}  # 인증된 활성 사용자
 
-# (ID, 메서드, 경로 템플릿, 경로 만들기, 본문 만들기, 관리자 성공 코드, 관리자 전용 여부)
-Endpoint = tuple[str, str, str, Callable[[World], str], Callable[[World], Any], int, bool]
+# 누가 성공하는가: 읽기 / 관리자 / 그 데이터셋 팀의 정의 담당자
+READER, ADMIN, DEFINER = "reader", "admin", "definer"
+
+
+def allowed_roles(who: str) -> set[str]:
+    return {READER: READERS, ADMIN: {"admin"}, DEFINER: {"definer"}}[who]
+
+
+# (ID, 메서드, 경로 템플릿, 경로 만들기, 본문 만들기, 성공 코드, 누가 성공하는가)
+Endpoint = tuple[str, str, str, Callable[[World], str], Callable[[World], Any], int, str]
 ENDPOINTS: list[Endpoint] = [
-    ("A1", "GET", "/api/me", lambda w: "/api/me", lambda w: None, 200, False),
-    ("A2", "GET", "/api/teams", lambda w: "/api/teams", lambda w: None, 200, False),
+    ("A1", "GET", "/api/me", lambda w: "/api/me", lambda w: None, 200, READER),
+    ("A2", "GET", "/api/teams", lambda w: "/api/teams", lambda w: None, 200, READER),
     (
         "A3",
         "POST",
@@ -31,7 +51,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: "/api/teams",
         lambda w: {"code": "new_team", "name": "새 팀"},
         201,
-        True,
+        ADMIN,
     ),
     (
         "A4",
@@ -40,9 +60,9 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: f"/api/teams/{w.team_b}",
         lambda w: {"name": "바뀐 B팀"},
         200,
-        True,
+        ADMIN,
     ),
-    ("A5", "GET", "/api/users", lambda w: "/api/users", lambda w: None, 200, True),
+    ("A5", "GET", "/api/users", lambda w: "/api/users", lambda w: None, 200, ADMIN),
     (
         "A6",
         "POST",
@@ -50,7 +70,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: "/api/users",
         lambda w: {"login_id": "fresh", "display_name": "새 사용자"},
         201,
-        True,
+        ADMIN,
     ),
     (
         "A7",
@@ -59,7 +79,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: f"/api/users/{w.ids['viewer']}",
         lambda w: {"display_name": "바뀐 이름"},
         200,
-        True,
+        ADMIN,
     ),
     (
         "A8",
@@ -68,7 +88,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: f"/api/teams/{w.team_b}/members/{w.ids['viewer']}",
         lambda w: {"role": "entry"},
         200,
-        True,
+        ADMIN,
     ),
     (
         "A9",
@@ -77,43 +97,108 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: f"/api/teams/{w.team_a}/members/{w.ids['entry']}",
         lambda w: None,
         204,
-        True,
+        ADMIN,
+    ),
+    ("B1", "GET", "/api/datasets", lambda w: "/api/datasets", lambda w: None, 200, READER),
+    (
+        "B2",
+        "POST",
+        "/api/datasets",
+        lambda w: "/api/datasets",
+        lambda w: {"team_id": w.team_a, "name": "새 데이터셋", "date_unit": "month"},
+        201,
+        DEFINER,
+    ),
+    (
+        "B3",
+        "GET",
+        "/api/datasets/{dataset_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "B4",
+        "PATCH",
+        "/api/datasets/{dataset_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}",
+        lambda w: {"expected_version": 1, "name": "바뀐 이름"},
+        200,
+        DEFINER,
+    ),
+    (
+        "B5",
+        "POST",
+        "/api/datasets/{dataset_id}/columns",
+        lambda w: f"/api/datasets/{w.dataset_id}/columns",
+        lambda w: {"expected_version": 1, "display_name": "새 열", "type": "text"},
+        201,
+        DEFINER,
+    ),
+    (
+        "B6",
+        "PATCH",
+        "/api/datasets/{dataset_id}/columns/{col_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}/columns/{w.column_id}",
+        lambda w: {"expected_version": 1, "display_name": "바뀐 열"},
+        200,
+        DEFINER,
     ),
 ]
 
 
+@pytest.fixture
+def mworld(db: Db, world: World) -> World:
+    """매트릭스용 세계: 기본 세계에 A팀 데이터셋(정의 버전 1)과 원본 열 하나를 더한다."""
+    dataset_id = db.add_dataset(world.team_a, "기존 데이터셋", world.ids["definer"])
+    column_id = db.add_column(dataset_id, "기존 열", "number")
+    return replace(world, dataset_id=dataset_id, column_id=column_id)
+
+
 @pytest.mark.parametrize("role", ROLES, ids=lambda r: r or "anonymous")
 @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=lambda e: e[0])
-def test_endpoint_by_role(api, db: Db, world: World, endpoint: Endpoint, role):
-    _, method, _template, make_path, make_body, admin_success, admin_only = endpoint
-    body = make_body(world)
-    response = api(role, method, make_path(world), **({"json": body} if body is not None else {}))
+def test_endpoint_by_role(api, db: Db, mworld: World, endpoint: Endpoint, role):
+    _, method, _template, make_path, make_body, success, who = endpoint
+    body = make_body(mworld)
+    response = api(role, method, make_path(mworld), **({"json": body} if body is not None else {}))
     if role is None:
         assert (response.status_code, response.json()["error"]["code"]) == (401, "UNAUTHENTICATED")
     elif role == "inactive":
         assert (response.status_code, response.json()["error"]["code"]) == (403, "USER_INACTIVE")
-    elif admin_only and role != "admin":
-        assert (response.status_code, response.json()["error"]["code"]) == (403, "FORBIDDEN")
+    elif role in allowed_roles(who):
+        assert response.status_code == success, response.text
     else:
-        assert role in READERS or role == "admin"
-        assert response.status_code == admin_success
+        assert (response.status_code, response.json()["error"]["code"]) == (403, "FORBIDDEN")
 
 
-def test_admin_only_endpoints_do_not_change_data_for_non_admins(api, db: Db, world: World):
+def _snapshot(db: Db):
+    inspector = sa.inspect(db.engine)
+    dynamic = {
+        name: sorted(c["name"] for c in inspector.get_columns(name, schema=DYNAMIC_SCHEMA))
+        for name in inspector.get_table_names(schema=DYNAMIC_SCHEMA)
+    }
+    return (
+        db.rows(users, users.c.id),
+        db.rows(teams, teams.c.id),
+        db.rows(team_members),
+        db.rows(datasets, datasets.c.id),
+        db.rows(dataset_columns, dataset_columns.c.id),
+        dynamic,
+    )
+
+
+def test_denied_requests_do_not_change_data(api, db: Db, mworld: World):
     """403은 응답만이 아니라 실제로 아무것도 바뀌지 않았다는 뜻이어야 한다."""
-    from app.db_metadata import team_members, teams, users
-
-    def snapshot():
-        return (db.rows(users, users.c.id), db.rows(teams, teams.c.id), db.rows(team_members))
-
-    before = snapshot()
-    for _id, method, _template, make_path, make_body, _code, admin_only in ENDPOINTS:
-        if not admin_only:
+    before = _snapshot(db)
+    for _id, method, _template, make_path, make_body, _code, who in ENDPOINTS:
+        if who == READER:
             continue
-        body = make_body(world)
-        for role in ("definer", "entry", "other", "viewer", "inactive", None):
-            api(role, method, make_path(world), **({"json": body} if body is not None else {}))
-    assert snapshot() == before
+        body = make_body(mworld)
+        humans = ("admin", "definer", "entry", "other", "viewer")
+        for role in (*[r for r in humans if r not in allowed_roles(who)], "inactive", None):
+            api(role, method, make_path(mworld), **({"json": body} if body is not None else {}))
+    assert _snapshot(db) == before
 
 
 def test_matrix_covers_every_protected_route(stub_settings, sqlite_engine):

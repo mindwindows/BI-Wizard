@@ -13,6 +13,7 @@ class Membership:
     team_id: int
     team_code: str
     team_name: str
+    team_is_active: bool
     role: TeamRole
 
 

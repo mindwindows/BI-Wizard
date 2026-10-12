@@ -17,11 +17,13 @@ import re
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -34,6 +36,7 @@ from sqlalchemy import (
     func,
     true,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 # 제약·인덱스 이름 규칙(autogenerate가 같은 이름을 만들게 한다).
 NAMING_CONVENTION = {
@@ -91,6 +94,62 @@ team_members = Table(
     PrimaryKeyConstraint("team_id", "user_id"),
     CheckConstraint("role IN ('definer', 'entry')", name="role"),
     Index("ix_team_members_user_id", "user_id"),
+)
+
+# --- 데이터셋·열 정의 표(06 §2, revision 0004) ----
+# 열거 값은 PostgreSQL enum이 아니라 `text` + 이름 있는 CHECK다(06 §1). 값 추가는 CHECK 교체로 한다.
+DATE_UNITS = ("day", "month", "year")
+DATASET_STATUSES = ("active",)  # archived·deleted는 보관·삭제 단위가 CHECK를 바꿔 추가한다
+COLUMN_TYPES = ("text", "number", "date", "boolean", "choice")
+COLUMN_KINDS = ("raw", "formula")
+
+datasets = Table(
+    "datasets",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("team_id", Integer, ForeignKey("teams.id"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("date_unit", Text, nullable=False),
+    # NULL = 기준 날짜 열 없음. 같은 데이터셋의 열만 가리키도록 아래 복합 FK가 보장한다.
+    Column("base_date_column_id", Integer, nullable=True),
+    Column("status", Text, nullable=False, server_default="active"),
+    Column("def_version", Integer, nullable=False, server_default="1"),
+    # 1d 전에는 구조 해시, 1d부터 뷰 DDL 해시(06 §5).
+    Column("def_hash", Text, nullable=False),
+    Column("created_by", Integer, ForeignKey("users.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("team_id", "name"),
+    CheckConstraint("date_unit IN ('day', 'month', 'year')", name="date_unit"),
+    CheckConstraint("status IN ('active')", name="status"),
+    # 순환 FK(datasets <-> dataset_columns)라 표 생성 뒤에 추가한다(use_alter). SQLite 시험용
+    # create_all에서는 만들지 않는다(`ddl_if`); 실제 DB에서는 revision 0004가 만든다.
+    ForeignKeyConstraint(
+        ["id", "base_date_column_id"],
+        ["dataset_columns.dataset_id", "dataset_columns.id"],
+        name="fk_datasets_id_dataset_columns",
+        use_alter=True,
+    ).ddl_if(**_PG_ONLY),
+)
+
+dataset_columns = Table(
+    "dataset_columns",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id"), nullable=False),
+    Column("display_name", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("required", Boolean, nullable=False, server_default=false()),
+    # number {min, max, decimals} / text {max_length} / date {min, max} / choice {options[]}
+    Column("rules", JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    Column("tag", Text, nullable=True),
+    Column("position", Integer, nullable=False),
+    UniqueConstraint("dataset_id", "id"),  # 복합 FK(datasets.base_date_column_id)의 대상
+    UniqueConstraint("dataset_id", "display_name"),
+    CheckConstraint("type IN ('text', 'number', 'date', 'boolean', 'choice')", name="type"),
+    CheckConstraint("kind IN ('raw', 'formula')", name="kind"),
+    # 계산 열은 필수일 수 없고 선택 목록 형이 아니다. 원본 열은 제한 없음.
+    CheckConstraint("kind = 'raw' OR (NOT required AND type <> 'choice')", name="formula_shape"),
 )
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).

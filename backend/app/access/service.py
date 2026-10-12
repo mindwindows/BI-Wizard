@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.access import repo
-from app.core.errors import already_exists, last_admin, not_found
+from app.core.errors import already_exists, last_admin, not_found, target_inactive
 
 _TEAM_MESSAGES = {
     "code": "이미 사용 중인 팀 코드입니다.",
@@ -173,8 +173,15 @@ def _single_with_memberships(session: Session, row: Any) -> dict[str, Any]:
 
 
 def set_member(session: Session, team_id: int, user_id: int, role: str) -> dict[str, Any]:
-    if repo.get_team(session, team_id) is None or repo.get_user(session, user_id) is None:
+    team = repo.get_team(session, team_id)
+    user = repo.get_user(session, user_id)
+    if team is None or user is None:
         raise not_found()
+    # 비활성 팀·사용자에 대한 추가·역할 변경은 거부한다(해제 A9는 허용). 팀을 먼저 본다.
+    if not team["is_active"]:
+        raise target_inactive("team")
+    if not user["is_active"]:
+        raise target_inactive("user")
     try:
         repo.set_member_role(session, team_id, user_id, role)
         session.commit()

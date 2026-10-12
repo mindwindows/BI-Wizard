@@ -10,7 +10,8 @@
 3. `bi_data` 객체 종류: 표·뷰·인덱스·제약만 있어야 한다. 열이 소유한 `Identity` 시퀀스
    (`row_id`)는 예외(AP-10). 독립 시퀀스·함수·그 밖의 타입·구체화 뷰 등은 거부한다
    (03c X-15 권한 상승 경로).
-4. 정적 `MetaData`의 표와 열이 DB에 있는지. alembic head와의 일치 확인은 대신하지 않는다:
+4. `bi_app`이 `public` schema에 `CREATE` 권한을 가지면 거부(03b 17-1 결정 5, 이전에는 경고).
+5. 정적 `MetaData`의 표와 열이 DB에 있는지. alembic head와의 일치 확인은 대신하지 않는다:
    `bi_app`은 `alembic_version`을 읽을 수 없다(06 §4-2, 의도된 권한). `migrate` 서비스가 성공해야
    backend가 시작하는 compose 순서(D4)가 head 적용을 보장하고, 여기서는 표·열 존재로 확인한다.
 
@@ -299,9 +300,12 @@ def collect_report(conn: Connection) -> StartupReport:
         public_create=read_public_create(conn), db_timezone=read_db_timezone(conn)
     )
     if report.public_create:
-        # 시작을 막지는 않지만 `bi_app`이 public에 객체를 만들 수 있다는 뜻이다(06 §4-2 기대:
-        # false).
-        logger.warning("bi_app이 public schema에 CREATE 권한을 가지고 있다(예상은 없음).")
+        # `bi_app`이 public에 객체를 만들 수 있으면 정적 표 영역에 임의 객체를 둘 수 있다
+        # (06 §4-2 기대: false). 03b 17-1 결정 5: 경고가 아니라 시작 거부다.
+        raise StartupCheckError(
+            "bi_app이 public schema에 CREATE 권한을 가지고 있어 시작하지 않는다"
+            "(PUBLIC의 CREATE 회수 여부를 확인하세요)."
+        )
     return report
 
 

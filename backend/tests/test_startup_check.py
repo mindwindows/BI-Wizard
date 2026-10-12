@@ -25,6 +25,7 @@ from app.core.startup_check import (
     unexpected_dynamic_objects,
 )
 from app.main import create_app
+from tests.conftest import pg_unavailable
 
 REAL_RUN_STARTUP_CHECKS = run_startup_checks  # conftest의 자동 대역이 되돌려지기 전의 실제 함수
 
@@ -203,6 +204,49 @@ class FlakyEngine:
         return False
 
 
+def _stub_other_checks(monkeypatch, *, public_create: bool):
+    for name in (
+        "check_role_attributes",
+        "check_standard_conforming_strings",
+        "check_bi_data_objects",
+        "check_static_tables",
+    ):
+        monkeypatch.setattr(sc, name, lambda conn: None)
+    monkeypatch.setattr(sc, "read_public_create", lambda conn: public_create)
+    monkeypatch.setattr(sc, "read_db_timezone", lambda conn: "Asia/Seoul")
+
+
+def test_public_create_true_refuses_start(monkeypatch):
+    """`bi_app`이 public에 CREATE 권한이 있으면 경고가 아니라 시작 거부다(03b 17-1 결정 5)."""
+    _stub_other_checks(monkeypatch, public_create=True)
+    with pytest.raises(StartupCheckError, match="public") as error:
+        collect_report(object())
+    assert "시작하지 않는다" in str(error.value)
+
+
+def test_public_create_false_passes_and_is_reported(monkeypatch):
+    _stub_other_checks(monkeypatch, public_create=False)
+    report = collect_report(object())
+    assert report.public_create is False and report.db_timezone == "Asia/Seoul"
+
+
+def test_public_create_refusal_is_not_retried(monkeypatch):
+    _stub_other_checks(monkeypatch, public_create=True)
+    engine = FlakyEngine(failures=0)
+    with pytest.raises(StartupCheckError, match="public"):
+        run_startup_checks(engine, attempts=5, sleep=lambda _: pytest.fail("재시도하면 안 된다"))
+    assert engine.calls == 1
+
+
+def test_app_start_is_refused_when_public_create_is_true(make_settings, sqlite_engine, monkeypatch):
+    monkeypatch.setattr("app.main.run_startup_checks", REAL_RUN_STARTUP_CHECKS)
+    _stub_other_checks(monkeypatch, public_create=True)
+    app = create_app(make_settings(), engine=sqlite_engine)
+    with pytest.raises(StartupCheckError, match="public"):
+        with TestClient(app):
+            pytest.fail("public CREATE 권한이 있으면 요청을 받기 전에 중단되어야 한다")
+
+
 def test_retries_only_connection_problems_then_succeeds(monkeypatch):
     monkeypatch.setattr(sc, "collect_report", lambda conn: StartupReport(public_create=False))
     sleeps = []
@@ -285,6 +329,26 @@ def test_pg_bi_app_passes_all_checks(pg_app_engine):
     assert (report.views, report.views_failed_count) == (0, 0)
 
 
+def test_pg_public_create_grant_refuses_start(pg_env, pg_app_engine):
+    """실제 DB: 슈퍼유저가 임시로 public CREATE를 주면 시작 점검이 거부하고, 회수하면 통과한다."""
+    user, password = pg_env.values["POSTGRES_USER"], pg_env.values["POSTGRES_PASSWORD"]
+    if not (user and password):
+        pg_unavailable("슈퍼유저 접속 정보(POSTGRES_USER/PASSWORD)가 없다")
+    admin = sa.create_engine(pg_env.url(user, password), poolclass=sa.pool.NullPool)
+    try:
+        with admin.begin() as conn:
+            conn.execute(sa.text("GRANT CREATE ON SCHEMA public TO bi_app"))
+        try:
+            with pytest.raises(StartupCheckError, match="public"):
+                run_startup_checks(pg_app_engine, attempts=1)
+        finally:
+            with admin.begin() as conn:
+                conn.execute(sa.text("REVOKE CREATE ON SCHEMA public FROM bi_app"))
+        assert run_startup_checks(pg_app_engine, attempts=1).public_create is False
+    finally:
+        admin.dispose()
+
+
 def test_pg_run_startup_checks_from_engine(pg_app_engine):
     assert run_startup_checks(pg_app_engine, attempts=1).public_create is False
 
@@ -301,7 +365,7 @@ def test_pg_superuser_connection_is_refused(pg_env):
     """이미지 슈퍼유저로 접속하면 SUPERUSER 등 속성 때문에 거부된다(실제 pg_roles 질의 확인)."""
     user, password = pg_env.values["POSTGRES_USER"], pg_env.values["POSTGRES_PASSWORD"]
     if not (user and password):
-        pytest.skip("슈퍼유저 접속 정보(POSTGRES_USER/PASSWORD)가 없다")
+        pg_unavailable("슈퍼유저 접속 정보(POSTGRES_USER/PASSWORD)가 없다")
     engine = sa.create_engine(pg_env.url(user, password), poolclass=sa.pool.NullPool)
     try:
         with engine.connect() as conn, pytest.raises(StartupCheckError) as error:

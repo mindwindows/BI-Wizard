@@ -33,6 +33,15 @@ DROP_APPROVED: dict[str, str] = {
         "03b 15-2, 06 §6 downgrade 표 역순 삭제 3개: "
         "team_members, teams, users. 정적 표 대상, 동적 객체 아님)"
     ),
+    # 0004 downgrade()의 op.drop_constraint 1개(순환 FK)와 op.drop_table 2개(dataset_columns,
+    # datasets)는 06 §6의 표 역순 삭제다. 새 승인이 아니라 기존 D2 규칙의 적용이며, Gate ③ 06 §6
+    # 승인(2026-10-11)과 FU-1 계획 승인(03b 15-2, 2026-10-12), 1b 진행 지시(03b 17-2)에 포함된다.
+    "20261012_0004_datasets_columns.py": (
+        "DROP 확인: 사용자 승인 (2026-10-11 Gate ③ 06 §6 승인, 2026-10-12 FU-1 계획 승인 "
+        "03b 15-2, 1b 진행 03b 17-2, 06 §6 downgrade 표 역순 삭제: 순환 FK "
+        "fk_datasets_id_dataset_columns 해제, dataset_columns, datasets. "
+        "정적 표 대상, 동적 객체 아님)"
+    ),
 }
 
 # D5: upgrade/downgrade가 비어 있는 revision은 원칙적으로 미구현으로 본다.
@@ -136,15 +145,16 @@ def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0003"]
+    assert heads == ["0004"]
 
 
-def test_revision_chain_baseline_privileges_then_access_tables():
+def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     script = ScriptDirectory.from_config(_alembic_config())
-    assert [r.revision for r in script.walk_revisions()] == ["0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()] == ["0004", "0003", "0002", "0001"]
     assert script.get_revision("0001").down_revision is None
     assert script.get_revision("0002").down_revision == "0001"
     assert script.get_revision("0003").down_revision == "0002"
+    assert script.get_revision("0004").down_revision == "0003"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -333,8 +343,29 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
     )
     assert "GRANT SELECT, INSERT, UPDATE (name, is_active) ON teams TO bi_app" in upgrade_sql
     assert "GRANT SELECT, INSERT, UPDATE (role), DELETE ON team_members TO bi_app" in upgrade_sql
+    # 0004: 데이터셋·열 정의 표, 순환 FK(표 생성 뒤 추가), 명시 GRANT(열 단위 UPDATE, DELETE 없음).
+    for table in ("datasets", "dataset_columns"):
+        assert f"CREATE TABLE {table} (" in upgrade_sql
+    assert upgrade_sql.index("CREATE TABLE dataset_columns (") < upgrade_sql.index(
+        "ADD CONSTRAINT fk_datasets_id_dataset_columns FOREIGN KEY(id, base_date_column_id)"
+    )
+    assert "REFERENCES dataset_columns (dataset_id, id)" in upgrade_sql
+    assert (
+        "GRANT SELECT, INSERT, UPDATE (name, date_unit, base_date_column_id, status, "
+        "def_version, def_hash) ON datasets TO bi_app"
+    ) in upgrade_sql
+    assert (
+        "GRANT SELECT, INSERT, UPDATE (display_name, type, required, rules, tag, position) "
+        "ON dataset_columns TO bi_app"
+    ) in upgrade_sql
     command.downgrade(config, "head:base", sql=True)
     downgrade_sql = capsys.readouterr().out
+    assert downgrade_sql.index("DROP CONSTRAINT fk_datasets_id_dataset_columns") < (
+        downgrade_sql.index("DROP TABLE dataset_columns")
+    )
+    assert downgrade_sql.index("DROP TABLE dataset_columns") < downgrade_sql.index(
+        "DROP TABLE datasets"
+    )
     assert "alembic_version" in downgrade_sql
     assert "REVOKE USAGE, CREATE ON SCHEMA bi_data FROM bi_app" in downgrade_sql
     assert "REVOKE USAGE ON SCHEMA bi_data FROM bi_readonly" in downgrade_sql
@@ -394,16 +425,53 @@ def test_access_tables_revision_has_real_downgrade_and_explicit_grants():
     assert [name for name, _ in drops] == ["team_members", "teams", "users"]
 
 
-def test_access_revision_matches_static_metadata():
-    """revision이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
+def _dataset_revision() -> Path:
+    return next(p for p in _revision_files() if "_0004_" in p.name)
+
+
+def test_revisions_create_exactly_the_static_metadata_tables():
+    """revision들이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
     from app.db_metadata import metadata
 
     created = [
         n.args[0].value
-        for n in ast.walk(_function(_parse(_access_revision()), "upgrade"))
+        for path in (_access_revision(), _dataset_revision())
+        for n in ast.walk(_function(_parse(path), "upgrade"))
         if isinstance(n, ast.Call) and _call_name(n) == "create_table"
     ]
     assert sorted(created) == sorted(metadata.tables)
+
+
+def test_dataset_revision_has_real_downgrade_explicit_grants_and_late_circular_fk():
+    """0004: 순환 FK는 표 생성 뒤에 추가하고 downgrade는 FK를 먼저 끊고 역순으로 지운다."""
+    tree = _parse(_dataset_revision())
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    upgrade_calls = [
+        _call_name(n) for n in ast.walk(_function(tree, "upgrade")) if isinstance(n, ast.Call)
+    ]
+    assert upgrade_calls.count("create_table") == 2
+    assert upgrade_calls.count("create_foreign_key") == 1
+    ordered = [c for c in upgrade_calls if c in {"create_table", "create_foreign_key"}]
+    assert ordered == ["create_table", "create_table", "create_foreign_key"]
+    grants = _execute_args(_dataset_revision(), "upgrade")
+    assert len(grants) == 2 and all(g.startswith("GRANT SELECT, INSERT, UPDATE (") for g in grants)
+    assert all(g.endswith(" TO bi_app") for g in grants)
+    joined = " ".join(grants).upper()
+    assert "PUBLIC" not in joined and "BI_READONLY" not in joined and "DELETE" not in joined
+    # 불변 열은 UPDATE 권한 목록에 없다.
+    assert "team_id" not in grants[0] and "created_by" not in grants[0]
+    assert "dataset_id" not in grants[1] and "kind" not in grants[1].split("UPDATE")[1]
+    downgrade_calls = [
+        (_call_name(n), n.args[0].value if n.args and isinstance(n.args[0], ast.Constant) else None)
+        for n in ast.walk(_function(tree, "downgrade"))
+        if isinstance(n, ast.Call)
+    ]
+    assert downgrade_calls == [
+        ("drop_constraint", "fk_datasets_id_dataset_columns"),
+        ("drop_table", "dataset_columns"),
+        ("drop_table", "datasets"),
+    ]
 
 
 def test_static_metadata_constraint_names_follow_convention():
@@ -428,6 +496,22 @@ def test_static_metadata_constraint_names_follow_convention():
     assert "CONSTRAINT fk_team_members_user_id_users FOREIGN KEY" in ddl["team_members"]
     index_names = {i.name for t in metadata.tables.values() for i in t.indexes}
     assert index_names == {"ix_team_members_user_id"}
+    # 0004 표: 열거는 text + 이름 있는 CHECK, 이름 유일 범위는 팀(데이터셋 이름)·데이터셋(열 이름).
+    assert "CONSTRAINT uq_datasets_team_id_name UNIQUE (team_id, name)" in ddl["datasets"]
+    assert "CONSTRAINT ck_datasets_date_unit CHECK" in ddl["datasets"]
+    assert "CONSTRAINT ck_datasets_status CHECK" in ddl["datasets"]
+    assert "CONSTRAINT fk_datasets_team_id_teams FOREIGN KEY" in ddl["datasets"]
+    assert "CONSTRAINT fk_datasets_created_by_users FOREIGN KEY" in ddl["datasets"]
+    assert "fk_datasets_id_dataset_columns" not in ddl["datasets"]  # 순환 FK는 뒤에 추가한다
+    cols = ddl["dataset_columns"]
+    assert "CONSTRAINT uq_dataset_columns_dataset_id_id UNIQUE (dataset_id, id)" in cols
+    assert (
+        "CONSTRAINT uq_dataset_columns_dataset_id_display_name UNIQUE (dataset_id, display_name)"
+        in cols
+    )
+    for name in ("type", "kind", "formula_shape"):
+        assert f"CONSTRAINT ck_dataset_columns_{name} CHECK" in cols
+    assert "rules JSONB" in cols
 
 
 def test_team_code_check_matches_python_pattern():
