@@ -12,9 +12,9 @@ from urllib.parse import quote
 
 from sqlalchemy.engine import URL
 
+from bi_roles import DATABASE_NAME  # ensure_roles.py의 schema_access 이름과 같은 값을 공유한다.
 from superset.app import create_app
 
-DATABASE_NAME = "BI-Wizard (read-only)"
 NAMES = ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_READONLY_PASSWORD")
 
 values = {name: os.environ.get(name, "") for name in NAMES}

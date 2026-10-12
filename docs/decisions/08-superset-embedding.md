@@ -11,7 +11,7 @@
 | 버전·경로 | Superset `6.1.0` 고정, 내부 코드 수정 금지. 하위 경로 `SUPERSET_APP_ROOT`, 프록시는 접두를 떼지 않고 전달(접두 없으면 404). 로고 이중 접두 등은 알려진 문제 | `03a`, DC 3·13 |
 | 같은 origin | 포털과 Superset이 같은 호스트의 하위 경로여야 한다. 다른 origin이면 Embedded(`/embedded/`)까지 차단되어 `frame_options`/CSP 변경(기준선 이탈, 별도 승인)이 필요하다. 운영자 협의 중 | X-18 확인됨, DC 9 |
 | 작성 화면 | 새 창 링크 + 별도 로그인(iframe 도입 없음, 8번 뒤 자동 로그인 연동이 목표, X-19는 그때). 팀 필터는 모든 대시보드가 같은 기본값으로 시작하고 소속 팀 기본값은 도입하지 않는다 | `03b` 3-1 Y3, 4-1 Z13·Z14 |
-| 주체 | `Admin`(임베드 켜기·`allowed_domains` 수동, 서버에 두지 않음) / 서비스 계정 §2(`SUPERSET_SERVICE_USER`·`_PASSWORD` 승인됨) / 발급 전용 계정 §4(`SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD` 후보) / `bi_guest` §3 / 작성자 §5. 서비스·발급 계정·역할 생성은 `superset-init` 확장(AP-16 승인, 적용 시점에 보고) | `03b` 3-6, 4-7 |
+| 주체 | `Admin`(임베드 켜기·`allowed_domains` 수동, 서버에 두지 않음) / 서비스 계정 §2(`SUPERSET_SERVICE_USER`·`_PASSWORD` 승인됨) / 발급 전용 계정 §4(`SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD` 확정) / `bi_guest` §3 / 작성자 §5. 서비스·발급 계정·역할 생성은 `superset-init` 확장(AP-16 승인, 적용 시점에 보고) | `03b` 3-6, 4-7 |
 
 ## 2. 서비스 계정: 가상 데이터셋 등록
 | 항목 | 내용 | 출처·상태 |
@@ -23,7 +23,7 @@
 ### 2-1. 등록 흐름 (멱등)
 | 순서 | 단계 | 비고 |
 | --- | --- | --- |
-| 0 | `superset-init`(관리자 권한)이 `bi_data`가 있는 상태에서 `POST /database/{id}/sync_permissions/` → 그 뒤 서비스 역할에 `schema_access` 부여 | 새 schema의 `schema_access`는 첫 데이터셋 생성이나 이 호출 때 생겨, 부여 전에 해야 한다(X-22 확인됨). `superset-init`은 `db-bootstrap`만 기다리고 `migrate`는 기다리지 않으며(compose 의존 순서), `bi_readonly`의 `bi_data` USAGE는 마이그레이션 0002가 부여한다(06 §6). `bi_readonly`에 USAGE가 없을 때 이 호출이 schema를 보는지는 확인하지 못함 → EW-3에서 실행 순서를 정한다 **[확인 대기]**. 역할을 만드는 구현 방법도 **[확인 대기]** |
+| 0 | `superset-init`(관리자 권한)이 `bi_data`가 있는 상태에서 `POST /database/{id}/sync_permissions/` → 그 뒤 서비스 역할에 `schema_access` 부여 | 새 schema의 `schema_access`는 첫 데이터셋 생성이나 이 호출 때 생겨, 부여 전에 해야 한다(X-22 확인됨). `bi_readonly`의 `bi_data` USAGE는 마이그레이션 0002가 부여한다(06 §6). **해소(EW-3 구현, 2026-10-12):** `superset-init`은 `db-bootstrap`과 `migrate` 완료를 모두 기다린다(순서 경쟁 방지, 순환 없음). 실행 순서는 `register_database → sync_permissions → 역할 4개 → 계정 2개`다. 구현 방법은 Superset 이미지 안의 앱 컨텍스트 파이썬 스크립트(`superset/sync_permissions.py` 등, `SyncPermissionsCommand`를 `test_request_context`에서 관리자를 `g.user`로 두고 직접 실행, REST·CLI·새 의존성 없음)다. **EW-3 실측:** `bi_readonly`에 USAGE가 없는 상태(`migrate` 전)에서도 `sync_permissions`가 `bi_data`의 `schema_access`를 만들었다(schema 목록은 USAGE와 무관). 그래서 `migrate` 대기는 필수 조건이 아니라 안전장치다 |
 | 1 | 서비스 계정 로그인 + CSRF 토큰 (§2-2) | |
 | 2 | `GET` 필터(database·schema·이름)로 조회. 있으면 4~5단계만 | `superset_dataset_id`가 있으면 그 번호를 먼저 쓴다 [제안] |
 | 3 | 없으면 `POST /dataset/`(`table_name`=표시 이름, `sql`, schema `bi_data`) → 201. 422(중복)면 2단계로 | 동시 `POST` 3개는 201 하나·422 둘(X-22). 열은 자동 인식(X-13) |
@@ -42,7 +42,7 @@
 ## 3. guest 역할 `bi_guest`
 | 항목 | 내용 | 출처·상태 |
 | --- | --- | --- |
-| 생성 | `superset-init`이 매 기동 멱등으로: 조회 → 없으면 생성 → 권한 목록 통째 교체 → 재읽기 비교. 목록은 저장소 고정 파일. 구현 방법 **[확인 대기]** | `03b` 4-2 Z2, X-20(통째 교체 확인됨) |
+| 생성 | `superset-init`이 매 기동 멱등으로: 조회 → 없으면 생성 → 권한 목록 통째 교체 → 재읽기 비교. 목록은 저장소 고정 파일(`superset/bi_roles.py`). 구현 방법은 EW-3에서 정했다(앱 컨텍스트 파이썬 스크립트, §2-1 0행). `bi_guest`는 EW-4에서 같은 방식으로 추가할 예정이다 | `03b` 4-2 Z2, X-20(통째 교체 확인됨) |
 | 필수 3개 | `can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart` | X-25 확인됨 |
 | 기간 필터 1개 | `can_time_range Api`(없으면 `/api/v1/time_range/` 403으로 기간 팝업 APPLY 비활성). 안내문이 시간 필터를 요구하므로 FU-1 목록에 넣는다 [제안] | X-25 확인됨 |
 | 조건부 2개 | `can_explore_json Superset`(레거시 차트 유형), `can_read DashboardPermalinkRestApi`(permalink 필터 복원). **FU-1 기본은 미포함**: 지원 차트 6가지(§3-1)에 필요하지 않을 때만 제외를 유지하고(`rose` 같은 레거시 유형은 지원 차트가 아님), 필요해지면 보고하고 멈춘다(`03b` 6-1). `native_filters`는 추가 권한 없이 동작 | X-25 확인됨 |
@@ -98,8 +98,8 @@
 | AP-1 | `bi-review` 7-2 확장 | guest 권한 목록 파일 규칙(금지 권한 없음, `Public` 0개 시험)과 서버 코드의 입장권 직접 서명 금지 | 승인됨 |
 | AP-2 | 가상 데이터셋 SQL 고정 | `SELECT * FROM bi_data.<뷰>` 고정, 서비스 계정만 등록 | 승인됨 |
 | AP-9 | `bi_readonly` `statement_timeout` | 30초 확정(06), EW-1에서 효과 확인 | 승인됨 |
-| AP-12 | backend → Superset 주소 | 내부 주소는 compose 서비스 이름 기반 코드 상수(새 변수 없음), `SUPERSET_APP_ROOT`를 backend에 전달 | 승인됨, 적용 EW-3 |
-| - | 이름 확정·구현 시점 | 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 승인으로 확정). `GUEST_ROLE_NAME=bi_guest`·`GUEST_TOKEN_VALIDATOR_HOOK`은 승인됨이며 적용 시점(EW-4)에 보고, `superset-init` 확장도 AP-16으로 승인(적용 시점에 보고) | EW-3·EW-4 |
+| AP-12 | backend → Superset 주소 | 내부 주소는 compose 서비스 이름 기반 코드 상수(새 변수 없음), `SUPERSET_APP_ROOT`를 backend에 전달 | 승인됨, 적용 완료(EW-3, 2026-10-12) |
+| - | 이름 확정·구현 시점 | 발급 전용 계정 변수 이름 `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 승인으로 확정). `GUEST_ROLE_NAME=bi_guest`·`GUEST_TOKEN_VALIDATOR_HOOK`은 승인됨이며 적용 시점(EW-4)에 보고, `superset-init` 확장도 AP-16으로 승인(적용 시점에 보고) | EW-3 적용 완료(2026-10-12, 계정·역할 생성 포함), EW-4 대기 |
 | - | 의존성·값 | frontend Embedded SDK는 FU-1 착수 때 버전·라이선스 확인 후 요청(AP-15, 04 §9-1), `httpx`는 승인됨. 속도 제한 한도 값 | FU-1e |
 
 ## 8. 후속 기능 단위에서 결정

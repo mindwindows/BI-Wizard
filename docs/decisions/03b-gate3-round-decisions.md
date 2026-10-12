@@ -297,3 +297,32 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - **`superset-init` 구현 방법:** Superset 이미지에 이미 있는 수단(CLI, flask shell)만 쓰고, 새 의존성이 생기는 방법은 쓰지 않는다. 택한 방법과 이유를 보고한다(A-22·A-26 해소).
 - **권한 목록:** 서비스 역할, 발급 역할, `bi_author` 권한 목록은 적용 전에 구체 내용을 보고하고 승인받는다.
 - **세션 인계:** EW-3는 새 세션에서 시작한다. `gate-status.md` 인계 절 맨 앞에 "세션 시작 시 첫 확인"(HEAD가 `origin/harness/setup` 최신과 같은지 확인, 다르면 동기화 승인부터, 동기화했다면 새 세션으로 재시작 안내)을 추가했다.
+
+## 9. EW-3 설계 승인과 결과 (2026-10-12, 사용자 승인, env-engineer 구현, QA·reviewer 검증)
+### 9-1. 승인된 설계(사용자)
+- **A.** `superset-init` 구현은 앱 컨텍스트 파이썬 스크립트 한 가지(`create_app()` + `security_manager`). fab CLI는 `create-role`이 없고 `create-user`가 비밀번호를 명령줄에 노출·비멱등이라 쓰지 않는다. 새 의존성 없음.
+- **B.** 역할·권한: `bi_service`(`can_read Dataset`, `can_write Dataset`, `schema_access` `[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`, `can_read SecurityRestApi`), `bi_guest_issuer`(`can_grant_guest_token`, `can_read SecurityRestApi`), `bi_author`(Gamma 복사본), `bi_author_schema`(`schema_access` 1개). 서비스·발급 계정은 관리자 역할 없이 해당 역할 하나만.
+- **C.** `bi_author`는 처음 만들 때만 Gamma에서 복사하고 이후는 차이(개수·이름)를 로그로만 알린다. 차이 확인은 `deploy-coordination.md` 38번과 `skills/local-environment/SKILL.md`의 "Superset 업그레이드 점검"에 점검 항목으로 둔다.
+- **D.** `superset-init`에 `depends_on: migrate`(`service_completed_successfully`)를 추가한다(`bi_data` USAGE는 0002가 주므로 새 설치의 순서 경쟁 방지).
+- 검증 추가: 빈 볼륨 새 설치와 기존 볼륨 재기동. `.env.example` 기본 사용자 이름(`bi_service`, `bi_guest_issuer`)은 적용 후 보고. backend 설정 로딩은 env-engineer가 맡았다(EW-1과 같은 파일·같은 시험 틀을 쓰고 업무 기능 코드가 아니라서).
+### 9-2. 적용 후 보고 항목(승인 목록 밖, 보안 강화·검사 강화, 새 변수·의존성 없음)
+| 내용 | 위치 | 이유 | 되돌리는 방법 |
+| --- | --- | --- | --- |
+| 계정 이름 대소문자 무시 충돌 거부, 기존 계정 사전 검사(관리자·허용 밖 역할·표식 없는 역할 0개·이메일 충돌 거부) | `superset/ensure_accounts.py`, `scripts/ci-validate-env.sh` | 사람·관리자 계정 덮어쓰기 방지 | 해당 검사 블록 삭제 |
+| 저장된 비밀번호 해시 재검증 | `ensure_accounts.py` | FAB `reset_password`가 저장 실패를 삼킴 | 마지막 `check_password_hash` 삭제 |
+| FAB 매니저 로거 CRITICAL | `ensure_accounts.py` | `add_user`/`update_user` 실패 로그에 해시·SQL 파라미터 노출 방지(실제 노출 재현 후 차단 확인) | `setLevel` 줄 삭제 |
+| `bi_service` 금지 권한 가드, 목록 전체-또는-무 실패 | `bi_roles.py`, `ensure_roles.py` | 승인된 금지의 코드화 | 가드 삭제 |
+| `sync_permissions` 비동기 모드 거부, `test_request_context`로 `g.user` 설정, 관리자 대소문자 무시 조회 | `superset/sync_permissions.py` | Celery 없는 환경에서 조용한 미동작 방지, 명령이 요구하는 `g.user` | 해당 파일 삭제와 `init.sh` 줄 삭제 |
+| 새 파일 `bi_roles.py`(권한 목록 한 곳), `register_database.py`가 `DATABASE_NAME` 공유 | `superset/` | 이름 상수 중복 제거 | 상수 인라인 복원 |
+| backend Settings 검증(`SUPERSET_APP_ROOT` 형식, 이름 빈 값·공백 거부) | `backend/app/config.py` | 값이 있으면 엄격 검증 | 검증기 삭제 |
+| `ci-validate-env.sh` 검사 추가(필수 `:?` 형태, `migrate` 조건, 변수 전달 범위, 대소문자 이름 충돌)와 네거티브 시험 97개 | `scripts/` | 설정 누락·유출 방지 | 해당 줄 삭제 |
+| 문서: `deploy-coordination.md` 37·38번, 08 서술 갱신, 업그레이드 점검 절 신설, env-bootstrap 스킬 갱신 | `docs/`, `skills/`, `.claude/skills/` | 사실 동기화 | - |
+- **정정:** 1차 수정에 들어갔던 "`bi_author` 권한이 0개면 Gamma에서 다시 복사" 분기는 권한 확대라 2차 수정에서 제거했다(0개면 경고만).
+### 9-3. 사용자 확인 대기(2건)
+1. **허용 밖 역할(예: Admin)이 붙은 서비스·발급 계정**: 현재 설계는 덮어쓰지 않고 `superset-init`을 exit 1로 중단한다(자동 복구 없음, 권한 상승이 남고 같은 실행의 다른 계정 복구도 건너뜀, `superset`은 `superset-init` 성공 뒤에만 시작하므로 재기동도 막힘으로 추정). 사람 계정 보호를 우선한 것이다. 대안은 서비스·발급 계정이 표식(이메일·이름)을 가진 경우에 한해 역할을 강제 복구하는 것이다. 운영 점검 항목은 `deploy-coordination.md` 37번에 적었다.
+2. **`superset-init` 소요**(새 설치 약 70~77초, 재기동 약 68초)로 `docker compose up` 전체 기동이 길어졌다. 허용하는지 확인(`superset` 기동 지연은 healthcheck `start_period`와 함께 EW-6에서 재점검).
+### 9-4. 확인된 사실(구현 중 실측)
+- `sync_permissions`는 `bi_readonly`에 `bi_data` USAGE가 없어도 `schema_access`를 만든다(schema 목록은 USAGE와 무관). 그래서 `migrate` 대기는 필수가 아니라 안전장치다.
+- `schema_access` 항목 이름은 `[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`. `can_grant_guest_token`은 `ADMIN_ONLY_PERMISSIONS`에 들어 있다. 새 비밀번호 2개는 해시로만 저장되어 `%` 금지가 필요 없다.
+- 작성자 계정이 `public` 가상 데이터셋 위에 차트를 만들 때 201인 현상은 08 §5에 기록된 Gamma 동작과 같다(FU-1에서는 수용).
+

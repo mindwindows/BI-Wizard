@@ -1,6 +1,6 @@
 ---
 name: local-environment
-description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, 재시작하고 로그와 Health Check를 확인하는 방법. 하위 경로(APP_BASE_PATH), APP_PROXY_STRIP_PREFIX 전환, DB 계정 분리와 db-bootstrap, 인증 스텁 스위치(AUTH_STUB_ENABLED), 마이그레이션 왕복 테스트, 문제 해결을 포함한다. "서버 띄워줘", "로그 보여줘", "상태 확인", "환경 안 올라와요" 같은 요청에 사용한다.
+description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, 재시작하고 로그와 Health Check를 확인하는 방법. 하위 경로(APP_BASE_PATH), APP_PROXY_STRIP_PREFIX 전환, DB 계정 분리와 db-bootstrap, Superset 서비스·발급 계정과 역할, Superset 업그레이드 점검, 인증 스텁 스위치(AUTH_STUB_ENABLED), 마이그레이션 왕복 테스트, 문제 해결을 포함한다. "서버 띄워줘", "로그 보여줘", "상태 확인", "환경 안 올라와요" 같은 요청에 사용한다.
 ---
 
 # local-environment — 로컬 실행 환경
@@ -12,7 +12,7 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 
 ## 2. 사용 조건 / 사전 요구사항
 - Docker Engine과 Docker Compose v2 (`docker compose`). Windows에서는 Docker Desktop 대신 Podman 등을 쓸 수 있으나 `service_completed_successfully` 지원은 사용자 PC에서 확인이 필요하다.
-- `.env` 파일: `.env.example`을 복사하고 비어 있는 Secret 값 8개(`POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`)를 채운다. `.env`는 Git에 올리지 않는다.
+- `.env` 파일: `.env.example`을 복사하고 비어 있는 Secret 값 10개(`POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`, `SUPERSET_SERVICE_PASSWORD`, `SUPERSET_GUEST_ISSUER_PASSWORD`)를 채운다. `.env`는 Git에 올리지 않는다.
 - 메모리: 상시 서비스 한도 합계 약 4.75GB(여유 포함 8GB 안). 한도는 `compose.yml`에 고정되어 있다.
 - BAT는 Windows에서만 실행한다. Linux/macOS와 AI 세션에서는 아래 `docker compose` 명령을 직접 쓴다.
 
@@ -35,7 +35,9 @@ description: BI-Wizard 로컬 실행 환경(Docker Compose)을 시작, 종료, �
 | `POSTGRES_READONLY_PASSWORD` | `bi_readonly` 비밀번호 | Superset 업무 데이터 연결용 |
 | `SUPERSET_DB_PASSWORD` | `superset_meta` 비밀번호 | Superset 메타 DB(`superset`) |
 | `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET` | Superset 키 | 운영 중 `SUPERSET_SECRET_KEY`를 바꾸면 저장된 암호화 값을 못 읽는다 |
-| `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD` | Superset 관리자 | 계정이 없을 때만 만든다 |
+| `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD` | Superset 관리자 | 계정이 없을 때만 만든다(비밀번호를 바꿔도 반영되지 않는다) |
+| `SUPERSET_SERVICE_USER`, `SUPERSET_SERVICE_PASSWORD` | Superset 서비스 계정(가상 데이터셋 등록 전용, 역할 `bi_service`) | 기본 이름 `bi_service`. `superset-init`이 매 기동 만들고 비밀번호를 맞춘다. **이름은 바꾸지 않는다.** backend도 받는다(사용은 FU-1e) |
+| `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD` | Superset 입장권 발급 전용 계정(역할 `bi_guest_issuer`) | 기본 이름 `bi_guest_issuer`. 규칙은 서비스 계정과 같다. 세 계정 이름(관리자 포함)은 서로 달라야 한다 |
 | `LOG_LEVEL`, `TZ` | 로그 수준, 시간대 | |
 
 Azure OpenAI 변수와 `/health/azure-openai`는 없다(브리프 5절 1번: 제외).
@@ -66,10 +68,10 @@ docker compose ps
 docker compose logs --tail=200 backend
 docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 않는다
 ```
-첫 기동은 이미지 빌드 때문에 수 분, 이후 `superset-init`(약 30초)이 매번 다시 실행된다. 모든 서비스가 준비되면 `docker compose ps`에서 `backend`, `frontend`, `postgres`, `superset`이 `healthy`다.
+첫 기동은 이미지 빌드 때문에 수 분, 이후 `superset-init`(Superset을 여러 번 띄우는 단계라 새 설치 약 77초, 재기동 약 68초 실측, 환경에 따라 다름)이 매번 다시 실행된다. 모든 서비스가 준비되면 `docker compose ps`에서 `backend`, `frontend`, `postgres`, `superset`이 `healthy`다.
 
 ### 기동 순서
-`postgres`(healthy) → `db-bootstrap`(성공 완료) → `migrate`(성공 완료) → `backend` → `frontend`. `superset-init`은 `db-bootstrap` 완료 후, `superset`은 `superset-init` 완료 후에 시작한다. `migrate`가 실패하면 `backend`는 시작하지 않는다.
+`postgres`(healthy) → `db-bootstrap`(성공 완료) → `migrate`(성공 완료) → `backend` → `frontend`. `superset-init`은 `db-bootstrap`과 `migrate` 완료 후, `superset`은 `superset-init` 완료 후에 시작한다(`superset-init`이 `migrate`를 기다리는 이유: `bi_readonly`의 `bi_data` USAGE는 마이그레이션 `0002`가 주므로 빈 볼륨 새 설치에서 순서 경쟁을 막는다. 순환 없음). `migrate`가 실패하면 `backend`와 `superset-init`은 시작하지 않는다.
 
 ### 하위 경로와 프록시 (`APP_BASE_PATH`, `SUPERSET_APP_ROOT`, `APP_PROXY_STRIP_PREFIX`)
 - 브라우저는 `http://localhost:${FRONTEND_PORT}${APP_BASE_PATH}/…`로 frontend nginx에 접속한다. 이 nginx가 로컬에서 **메인 플랫폼 프록시 역할**을 한다: `${APP_BASE_PATH}/`는 포털 정적 파일, `${APP_BASE_PATH}/api/`는 backend, `${SUPERSET_APP_ROOT}/`는 Superset.
@@ -92,6 +94,28 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
 - `superset-init`은 업무 데이터 연결(`bi_readonly`)을 `superset set_database_uri` CLI가 아니라 같은 함수를 부르는 `superset/register_database.py`로 등록한다. CLI는 URI(비밀번호 포함)를 명령줄 인수로 받아 컨테이너의 프로세스 목록에 보이기 때문이다. URI는 로그에 출력하지 않는다.
 - Superset 텔레메트리(Scarf): 공식 FAQ의 `SCARF_ANALYTICS=false`는 6.1.0에서 **효과가 없음을 확인해 삭제했다**(서버 소스와 빌드된 프런트엔드에 이 환경변수를 읽는 코드가 없고, 메뉴 컴포넌트가 값과 무관하게 `apachesuperset.gateway.scarf.sh` 이미지를 항상 요청한다). 대신 `superset/superset_config.py`가 기본 CSP(`TALISMAN_CONFIG`, `TALISMAN_DEV_CONFIG`)에서 `scarf.sh` 호스트를 제거해 브라우저가 해당 요청을 보내지 못하게 한다(Superset 내부 코드 수정 아님). 부수 효과로 브라우저 콘솔에 CSP 위반 경고(`img-src`)가 남을 수 있다. Google Fonts(`fonts.googleapis.com`, `fonts.gstatic.com`) 요청은 막지 않았다.
 - gunicorn 워커는 1개이고 주기적 재시작(`WORKER_MAX_REQUESTS`)은 쓰지 않는다. 워커 1개를 재시작하면 그 순간 요청 1건이 502가 되고 다음 요청이 지연된다. 메모리 누수 보호는 `mem_limit`과 `restart: unless-stopped`에 맡긴다. 한계: 한도에 닿으면 컨테이너가 강제 종료(137)된 뒤 재시작되며 그동안 Superset 요청이 실패한다. `docker stats`로 추세를 보고 한도는 `docs/decisions/03a-deploy-environment.md`에 따라 조정한다.
+
+### Superset 계정·역할 (`superset-init`, EW-3)
+`superset-init`은 매 기동 멱등으로 `superset db upgrade → ensure_admin → superset init → register_database → sync_permissions → ensure_roles → ensure_accounts` 순서로 실행한다. 모두 Superset 이미지 안의 파이썬 스크립트이며(앱 컨텍스트와 보안 관리자 사용, 새 의존성·REST 호출 없음) 로그에는 계정·역할 이름과 권한 개수만 나온다.
+- **`sync_permissions.py`**: `SyncPermissionsCommand`로 업무 데이터 연결 `BI-Wizard (read-only)`의 `schema_access` 항목(`[BI-Wizard (read-only)].[<POSTGRES_DB>].[bi_data]`)을 만든다. `SYNC_DB_PERMISSIONS_IN_ASYNC_MODE`가 켜져 있으면 실패한다(Celery가 없다).
+- **역할 4개**(권한 목록은 `superset/bi_roles.py` 한 곳):
+  | 역할 | 권한 | 용도 |
+  | --- | --- | --- |
+  | `bi_service` | `can_read Dataset`, `can_write Dataset`, `schema_access`(`bi_data`), `can_read SecurityRestApi` (4개) | 가상 데이터셋 등록 서비스 계정. `can_grant_guest_token`은 주지 않는다 |
+  | `bi_guest_issuer` | `can_grant_guest_token SecurityRestApi`, `can_read SecurityRestApi` (2개) | 입장권 발급 전용 계정 |
+  | `bi_author` | 처음 만들 때만 내장 `Gamma`의 권한을 복사(역할과 권한을 한 번에 넣음) | 작성자(차트·대시보드 작성). 이후 기동에서는 `Gamma`와의 차이를 로그로 알리기만 하고 권한을 바꾸지 않는다(권한이 0개여도 되살리지 않고 `점검 필요: 역할 bi_author의 권한이 0개입니다`만 남긴다. 사람이 비워 둔 역할일 수 있다) |
+  | `bi_author_schema` | `schema_access`(`bi_data`) 1개 | 작성자에게 `bi_author`와 함께 수동 부여 |
+  `bi_service`·`bi_guest_issuer`·`bi_author_schema`는 매 기동 `없으면 생성 → 권한 목록 통째 교체 → 재읽기 비교`다. 목록의 권한이 Superset에 하나라도 없으면(예: `schema_access`가 아직 없음) 아무것도 바꾸지 않고 `superset-init`이 실패한다.
+- **계정 2개**: 서비스 계정(`SUPERSET_SERVICE_USER`, 역할 `bi_service` 하나)과 발급 계정(`SUPERSET_GUEST_ISSUER_USER`, 역할 `bi_guest_issuer` 하나). 관리자 역할은 주지 않는다. 계정이 없으면 만들고, 있으면 매 기동 비밀번호를 `.env` 값으로 다시 맞추고 활성화하며 역할을 맞춘다. **허용 역할(`bi_service`/`bi_guest_issuer`) 안에서만 복구하고, 허용 밖 역할이나 Admin이 붙은 기존 계정은 덮어쓰지 않고 거부한다**(종료 코드 1, 같은 실행의 다른 계정도 바뀌지 않음). 역할이 0개인 기존 계정은 이 스크립트가 만든 표식(first_name `BI-Wizard`, email `<이름>@localhost`)이 있을 때만 복구하고 없으면 거부한다. 새로 만들 계정의 이메일이 다른 계정과 겹쳐도 사전에 거부한다. 거부된 계정의 역할은 Superset 화면에서 직접 정리해야 한다. **작성자 계정은 만들지 않는다**(관리자가 Superset에서 수동 생성하고 `bi_author`와 `bi_author_schema`를 준다. 내장 `Gamma`는 직접 주지 않는다).
+- **비밀번호 변경**: `.env`의 `SUPERSET_SERVICE_PASSWORD`/`SUPERSET_GUEST_ISSUER_PASSWORD`를 바꾸고 `docker compose up -d`(`superset-init`이 다시 실행되어 반영). 비밀번호에 '%' 금지 규칙은 이 두 값에는 필요 없다(해시로 저장되고 URI에 들어가지 않는다). 다만 `$`, `#`, 따옴표, 공백 금지는 `.env` 공통 규칙이다.
+- **이름 변경 금지**: 서비스 계정이 소유한 데이터셋은 계정 이름을 바꾸면(= 새 계정) 이전되지 않는다. 이름을 바꾸거나 계정을 교체하려면 소유자 이전 절차를 먼저 시험해야 한다(FU-1e). `SUPERSET_ADMIN_USER`·서비스·발급 이름이 서로 같으면(대소문자 무시) `superset-init`이 실패한다. 같은 이름의 기존 계정이 관리자 역할이거나 `bi_service`/`bi_guest_issuer` 밖의 역할을 가지면(사람 계정) 아무것도 바꾸지 않고 실패한다. 저장 뒤 비밀번호 해시가 `.env` 값과 맞는지 재읽기로 확인하며, 맞지 않으면 실패한다.
+- 로그 확인: `docker compose logs superset-init`에서 `역할 …: 권한 N개 적용`, `계정 …: 만듦/갱신`, `bi_author: Gamma와 차이 없음` 또는 `점검 필요: 역할 bi_author`를 본다.
+
+### Superset 업그레이드 점검
+Superset 이미지 버전을 올릴 때(6.1.0 고정 변경은 사용자 승인) 아래를 확인한다.
+1. **`bi_author` 차이 점검(필수)**: `superset init`은 내장 `Gamma`에만 새 권한을 더하고 `bi_author`(복사본)는 갱신하지 않는다. 업그레이드 뒤 첫 기동의 `docker compose logs superset-init`에서 `점검 필요: 역할 bi_author이(가) Gamma와 다릅니다`가 나오면 **반드시** 로그에 적힌 권한 이름("Gamma에만 있음"/"bi_author에만 있음")을 확인하고 복사본에 반영할지(관리자가 Superset에서 수동 추가) 그대로 둘지 결정해 기록한다. 자동으로 바꾸지 않는다. `bi_author: Gamma와 차이 없음` 한 줄이면 점검할 것이 없다.
+2. 권한 목록 이름 확인: 새 버전에서 `superset/bi_roles.py`의 권한 이름이 없어지거나 바뀌면 `superset-init`이 `없는 권한: …`으로 실패한다. 이름을 새 버전에 맞게 고치는 것은 권한 목록 변경이므로 사전 승인이 필요하다.
+3. 서비스 계정 4권한과 발급 계정 2권한 스모크(데이터셋 등록·CSRF·입장권 발급 허용, 서비스 계정의 입장권 발급 403), `sync_permissions` 동작(`SyncPermissionsCommand` 시그니처·비동기 설정), guest 권한과 지원 차트 6가지(`docs/decisions/08-superset-embedding.md` §3-1), 하위 경로(`APP_PROXY_STRIP_PREFIX` true/false)와 Embedded 재검증, `docs/deploy-coordination.md` 13·21번(로고 이중 접두, 404 일러스트) 해소 여부.
 
 ### db-bootstrap (DB 계정, `bi_data` schema, Superset 메타 DB)
 `docker compose up`마다 일회성 `db-bootstrap`이 `backend/bootstrap/run.sh`를 실행해 `roles.sql`을 적용한다(멱등, `initdb.d` 미사용). 이미지 슈퍼유저로 접속하는 유일한 서비스다.
@@ -150,7 +174,9 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 | `db-bootstrap` 실패 | 비밀번호 변수 4개 중 하나가 비어 있음, `POSTGRES_USER`가 역할 이름과 같음, 또는 `POSTGRES_PASSWORD`가 볼륨 생성 때 값과 다름 | `docker compose logs db-bootstrap`. `POSTGRES_PASSWORD`는 DB 볼륨이 처음 만들어질 때만 적용된다. 값을 되돌리거나 psql에서 `\password`로 바꾼다 |
 | `migrate` 실패 | `POSTGRES_OWNER_PASSWORD` 불일치·누락, `db-bootstrap`이 먼저 성공하지 않음(`bi_owner`·`bi_data` 없음) | `docker compose logs migrate`. `.env`의 비밀번호를 고치고 `docker compose up -d`(db-bootstrap이 비밀번호를 다시 맞춘다) |
 | `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, 또는 `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님 | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
-| `superset-init` 실패 | 메타 DB 접속 실패, 키 누락 | `docker compose logs superset-init` |
+| `superset-init` 실패 | 메타 DB 접속 실패, 키 누락, 계정 변수 누락·이름 중복, `없는 권한: …`(역할 목록의 권한이 Superset에 없음), 권한 동기화 실패, `migrate` 실패로 시작하지 않음 | `docker compose logs superset-init`(실패 단계 이름 바로 앞 `[superset-init]` 줄을 본다). `없는 권한`이 `schema_access`이면 `POSTGRES_DB` 값과 업무 데이터 연결 이름이 `sync_permissions` 단계의 결과와 같은지 확인 |
+| `up`이 `SUPERSET_SERVICE_PASSWORD`(또는 발급 계정 변수) `is missing a value`로 멈춤 | 예전 `.env`에 EW-3 변수 4개가 없음 | `.env.example`에서 4줄을 추가하고 비밀번호 2개를 채운다(`scripts\validate-env.bat`이 이름을 알려 준다) |
+| 로그에 `점검 필요: 역할 bi_author` | Superset 업그레이드 등으로 `Gamma`의 권한이 바뀜 | 위 "Superset 업그레이드 점검" 1번 |
 | Superset 404 | 프록시가 접두를 뗐거나 `SUPERSET_APP_ROOT`가 다름 | Superset 경로는 접두를 유지해야 한다. `.env`의 값과 접속 주소 확인 |
 | Superset 로고 이미지 404(경로에 접두가 두 번 붙음), `static/service-worker.js` 404 | Superset 6.1.0 하위 경로 동작과 이미지 구성. 화면 기능에는 영향이 없다 | Superset 내부 코드는 수정하지 않는다. 알려진 사항이며 대안은 개발 에이전트가 보고한다 |
 | Superset 로그인 화면에서 접두 없는 일러스트 이미지 요청이 404(404 페이지 그림). 올바른 경로 `${SUPERSET_APP_ROOT}/static/assets/<해시>.png`는 200 | 알려진 Superset 6.1.0 현상(이미지 요청 경로에 접두가 빠짐). 접두 밖 요청이 이제 404로 드러난다 | 화면 기능에는 영향이 없다. Superset 내부 코드는 수정하지 않는다 |
@@ -165,6 +191,7 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 - 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다.
 - 구성 검증: `docker compose config --quiet`
 - 수동: `scripts\health-check.bat`이 모두 `[OK]`이고 마지막에 `All checks passed.`를 출력하며 `docker compose ps`에서 상시 서비스가 `healthy`.
+- Superset 계정·역할: `docker compose logs superset-init`에 `bi_service` 4개, `bi_guest_issuer` 2개, `bi_author_schema` 1개, `bi_author` 새로 만듦 또는 `Gamma와 차이 없음`, 계정 2개가 나오고 종료 코드 0. 서비스 계정으로 `…/api/v1/security/csrf_token/`·`/api/v1/dataset/`는 200, `/api/v1/database/`와 입장권 발급(`guest_token`)은 403, 발급 계정은 입장권 발급 권한이 있다. 로그에 비밀번호가 없다.
 - 읽기 전용 계정: `bi_readonly`로 `SELECT 1`은 되고 `CREATE TABLE`·`INSERT`는 거부된다. `statement_timeout`은 30초다.
 - 계정 분리: backend 컨테이너의 환경에 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_OWNER_PASSWORD`가 없고(`docker compose config`), `/api/health/db`가 정상이며 `pg_stat_activity`의 backend 접속 계정이 `bi_app`이다. `bi_app`은 `public`에 `CREATE TABLE`, `SET ROLE bi_owner`, `alembic_version` 조회가 거부되고 `bi_data`에는 표·뷰를 만들 수 있다. 마이그레이션 왕복 테스트(`python -m migrations.roundtrip`) 통과.
 - 정적 검사(Docker 없이): `sh scripts/ci-validate-env.sh`(변수 목록·계정 분리·`roles.sql` 규칙), `sh scripts/test-ci-validate-env.sh`(그 검사의 네거티브 케이스).

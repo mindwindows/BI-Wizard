@@ -7,6 +7,8 @@
 #  4) 실행 파일(compose.yml, Jenkinsfile, scripts/*.bat)에 파괴적 명령이 없는지 검사한다.
 #  5) 계정 분리: backend/migrate 서비스에 슈퍼유저 변수를 넘기지 않고, 인증 스텁 스위치(AUTH_STUB_ENABLED)는
 #     기본 false이며 true이면 APP_ENV가 local 또는 test여야 한다.
+#     Superset 계정(EW-3): 관리자·서비스·발급 전용 계정 이름은 비어 있지 않고 서로 달라야 하며, superset-init은 migrate
+#     완료를 기다리고, 서비스·발급 비밀번호는 backend와 superset-init에만 전달한다.
 #  6) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
 # 사용: sh scripts/ci-validate-env.sh [출력파일]
 # 이 검사의 네거티브 케이스 시험: sh scripts/test-ci-validate-env.sh
@@ -25,9 +27,12 @@ FRONTEND_HOST FRONTEND_PORT BACKEND_HOST BACKEND_PORT \
 POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD \
 POSTGRES_APP_PASSWORD POSTGRES_OWNER_PASSWORD POSTGRES_READONLY_PASSWORD \
 SUPERSET_APP_ROOT SUPERSET_DB_PASSWORD SUPERSET_SECRET_KEY GUEST_TOKEN_JWT_SECRET \
-SUPERSET_ADMIN_USER SUPERSET_ADMIN_PASSWORD LOG_LEVEL TZ"
+SUPERSET_ADMIN_USER SUPERSET_ADMIN_PASSWORD \
+SUPERSET_SERVICE_USER SUPERSET_SERVICE_PASSWORD SUPERSET_GUEST_ISSUER_USER SUPERSET_GUEST_ISSUER_PASSWORD \
+LOG_LEVEL TZ"
 SECRETS="POSTGRES_PASSWORD POSTGRES_APP_PASSWORD POSTGRES_OWNER_PASSWORD POSTGRES_READONLY_PASSWORD \
-SUPERSET_DB_PASSWORD SUPERSET_SECRET_KEY GUEST_TOKEN_JWT_SECRET SUPERSET_ADMIN_PASSWORD"
+SUPERSET_DB_PASSWORD SUPERSET_SECRET_KEY GUEST_TOKEN_JWT_SECRET SUPERSET_ADMIN_PASSWORD \
+SUPERSET_SERVICE_PASSWORD SUPERSET_GUEST_ISSUER_PASSWORD"
 
 failed=0
 fail() {
@@ -89,6 +94,21 @@ case "$(value_of POSTGRES_USER)" in
     ;;
 esac
 
+# Superset 계정 이름(관리자, 서비스, 발급 전용)은 비어 있지 않고 서로 달라야 한다(같으면 superset-init이 기존 계정의 역할을
+# 덮어쓴다. 특히 관리자와 같으면 관리자 권한을 잃는다).
+# 비교는 대소문자를 무시한다(FAB auth_username_ci가 find_user를 대소문자 무시로 비교하므로 Admin과 admin은 같은 계정이다).
+# 여기서는 ASCII만 소문자로 바꾼다. 비ASCII 이름의 비교는 런타임(superset/ensure_accounts.py의 casefold)이 최종 검증한다.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+admin_user="$(lower "$(value_of SUPERSET_ADMIN_USER)")"
+service_user="$(lower "$(value_of SUPERSET_SERVICE_USER)")"
+issuer_user="$(lower "$(value_of SUPERSET_GUEST_ISSUER_USER)")"
+for account in "$admin_user" "$service_user" "$issuer_user"; do
+  [ -n "$account" ] || fail "SUPERSET_ADMIN_USER, SUPERSET_SERVICE_USER, SUPERSET_GUEST_ISSUER_USER는 비어 있을 수 없습니다."
+done
+if [ "$admin_user" = "$service_user" ] || [ "$admin_user" = "$issuer_user" ] || [ "$service_user" = "$issuer_user" ]; then
+  fail "SUPERSET_ADMIN_USER, SUPERSET_SERVICE_USER, SUPERSET_GUEST_ISSUER_USER는 서로 달라야 합니다."
+fi
+
 # 인증 스텁 스위치(bi-review 7-5): true/false만 허용한다. true이면 APP_ENV가 local 또는 test여야 한다.
 # 커밋되는 .env.example의 기본값은 false여야 한다(fail-open 방지).
 stub="$(value_of AUTH_STUB_ENABLED)"
@@ -109,7 +129,8 @@ for var in $(grep -o '\${[A-Za-z_][A-Za-z0-9_]*' "$COMPOSE" | sed 's/^\${//' | s
   printf '%s\n' "$names" | grep -qx "$var" || fail "$COMPOSE 가 $EXAMPLE 에 없는 변수 $var 을(를) 씁니다."
 done
 
-# compose 서비스 블록(서비스 이름 한 줄 아래부터 다음 서비스 직전까지).
+# compose 서비스 블록(서비스 이름 한 줄 아래부터 다음 서비스 직전까지). 이 아래 검사들은 compose.yml이 block 스타일 YAML
+# (서비스는 2칸, 키는 4칸·6칸 들여쓰기, flow 스타일 `{}`/`[]`로 환경변수를 쓰지 않음)이라는 전제에서 줄 단위로 검사한다.
 service_block() {
   awk -v svc="$1" '
     $0 ~ ("^  " svc ":[[:space:]]*$") { on = 1; next }
@@ -155,8 +176,37 @@ fi
 if ! service_block backend | grep -Eq '^[[:space:]]+AUTH_STUB_ENABLED:'; then
   fail "backend 서비스에 AUTH_STUB_ENABLED 가 없습니다."
 fi
-if service_code frontend | grep -Eq '^[[:space:]]+(-[[:space:]]*)?[A-Z_]*(POSTGRES|PASSWORD|SECRET|AUTH_STUB)[A-Z_]*[:=]|^[[:space:]]+env_file[[:space:]]*:'; then
-  fail "frontend 서비스에 DB/Secret/스텁 변수(또는 env_file)를 넘기면 안 됩니다."
+# Superset 서비스·발급 계정(EW-3): backend(사용)와 superset-init(생성)만 받고, 모두 `${VAR:?메시지}` 필수 형태여야 한다
+# (누락을 compose 단계에서 막는다). backend에는 SUPERSET_APP_ROOT도 같은 형태로 있어야 한다.
+require_strict() { # 서비스 이름, 변수 이름
+  service_code "$1" | grep -Eq "^[[:space:]]+$2:[[:space:]]*\\\$\{$2:\?" ||
+    fail "$1 서비스의 $2 가 \${$2:?…} 필수 형태가 아닙니다(없거나 필수 처리가 빠졌습니다)."
+}
+for var in SUPERSET_SERVICE_USER SUPERSET_SERVICE_PASSWORD SUPERSET_GUEST_ISSUER_USER SUPERSET_GUEST_ISSUER_PASSWORD; do
+  for svc in backend superset-init; do
+    service_block "$svc" | grep -Eq "^[[:space:]]+$var:" || fail "$svc 서비스에 $var 가 없습니다."
+    require_strict "$svc" "$var"
+  done
+done
+if ! service_block backend | grep -Eq '^[[:space:]]+SUPERSET_APP_ROOT:'; then
+  fail "backend 서비스에 SUPERSET_APP_ROOT 가 없습니다."
+fi
+require_strict backend SUPERSET_APP_ROOT
+for svc in superset migrate db-bootstrap postgres postgres-test; do
+  check_forbidden_vars "$svc" "Superset 서비스·발급 계정은 backend와 superset-init만 받습니다" \
+    SUPERSET_SERVICE_USER SUPERSET_SERVICE_PASSWORD SUPERSET_GUEST_ISSUER_USER SUPERSET_GUEST_ISSUER_PASSWORD
+done
+# superset-init은 migrate가 성공 완료(service_completed_successfully)될 때까지 기다린다(bi_readonly의 bi_data USAGE는
+# 마이그레이션 0002가 준다). 주석을 뗀 코드에서 `migrate:` 바로 다음 줄이 그 조건이어야 한다.
+# migrate가 superset-init에 의존하면 순환이므로 금지한다.
+if ! service_code superset-init | grep -A1 -E '^[[:space:]]+migrate:[[:space:]]*$' | grep -Eq '^[[:space:]]+condition:[[:space:]]*service_completed_successfully[[:space:]]*$'; then
+  fail "superset-init 서비스가 migrate 완료(depends_on migrate, condition: service_completed_successfully)를 기다리지 않습니다."
+fi
+if service_code migrate | grep -Eq 'superset'; then
+  fail "migrate 서비스가 superset 서비스에 의존하면 순환 의존이 됩니다."
+fi
+if service_code frontend | grep -Eq '^[[:space:]]+(-[[:space:]]*)?[A-Z_]*(POSTGRES|PASSWORD|SECRET|AUTH_STUB|SUPERSET_[A-Z_]*_USER)[A-Z_]*[:=]|^[[:space:]]+env_file[[:space:]]*:'; then
+  fail "frontend 서비스에 DB/Secret/스텁 변수(또는 env_file)를 넘기면 안 됩니다(Superset 계정 변수 포함)."
 fi
 
 # compose.yml 에 latest 태그가 없다.

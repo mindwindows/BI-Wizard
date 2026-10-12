@@ -13,7 +13,7 @@
 | `migrate` | (일회성) Alembic 마이그레이션 실행 (`bi_owner`) |
 | `backend` | FastAPI (`/api/health`, `/api/health/db`) (`bi_app`) |
 | `frontend` | 포털 정적 파일 + nginx (로컬에서 메인 플랫폼 프록시 역할) |
-| `superset-init`, `superset` | Apache Superset 6.1.0 (초기화 일회성 + 웹) |
+| `superset-init`, `superset` | Apache Superset 6.1.0 (초기화 일회성 + 웹). `superset-init`은 `migrate` 완료 뒤에 시작해 업무 데이터 연결, 역할 4개(`bi_service`, `bi_guest_issuer`, `bi_author`, `bi_author_schema`), 서비스·발급 전용 계정 2개를 매 기동 멱등으로 맞춥니다 |
 
 포털과 Superset은 메인 플랫폼의 **URL 하위 경로** 아래에서 서비스됩니다(기본 예시: `/bi-wizard`, `/bi-wizard/superset`). 실제 값은 웹서버 배포 때 운영자와 정합니다.
 
@@ -26,7 +26,7 @@
    ```
    copy .env.example .env
    ```
-2. `.env`에서 **비어 있는 Secret 8개**를 서로 다른 값으로 채웁니다: `POSTGRES_PASSWORD`(이미지 슈퍼유저), `POSTGRES_APP_PASSWORD`(backend), `POSTGRES_OWNER_PASSWORD`(migrate), `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`.
+2. `.env`에서 **비어 있는 Secret 10개**를 서로 다른 값으로 채웁니다: `POSTGRES_PASSWORD`(이미지 슈퍼유저), `POSTGRES_APP_PASSWORD`(backend), `POSTGRES_OWNER_PASSWORD`(migrate), `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_PASSWORD`, `SUPERSET_SERVICE_PASSWORD`(Superset 서비스 계정), `SUPERSET_GUEST_ISSUER_PASSWORD`(Superset 입장권 발급 전용 계정).
    생성 예: `python -c "import secrets; print(secrets.token_urlsafe(32))"` 또는 `openssl rand -hex 32`. 값은 영문, 숫자, `-`, `_`만 쓰세요(`$`, `%`, `#`, 따옴표, 공백은 쓰지 않습니다). Secret은 저장소, 이미지, 프런트 번들에 넣지 않습니다.
 3. 검증하고 시작합니다.
    ```
@@ -43,6 +43,8 @@
    scripts\logs-local.bat backend
    scripts\stop-local.bat
    ```
+
+**Superset 계정 변수(EW-3):** `SUPERSET_SERVICE_USER`(기본 `bi_service`), `SUPERSET_GUEST_ISSUER_USER`(기본 `bi_guest_issuer`)와 두 비밀번호는 `superset-init`이 서비스 계정·발급 전용 계정을 만들 때 쓰며 backend도 받습니다(사용은 FU-1e). 세 계정 이름(관리자 포함)은 서로 달라야 하고 **서비스 계정 이름은 바꾸지 않습니다**. 비밀번호를 바꾸면 `docker compose up -d`로 반영됩니다. 이 변수가 없는 예전 `.env`는 `up`이 `required variable … is missing`으로 멈추므로 `.env.example`에서 4줄을 추가하고 비밀번호 2개를 채우세요. 로그에서 `점검 필요: 역할 bi_author`가 보이면 `skills/local-environment/SKILL.md`의 "Superset 업그레이드 점검"을 따릅니다.
 
 **Gate ② 때 만든 DB 볼륨이 이미 있는 PC:** `.env`에 `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `AUTH_STUB_ENABLED=false`를 추가한 뒤 `scripts\start-local.bat`(또는 `docker compose up -d --build`)만 하면 됩니다. `db-bootstrap`이 새 계정을 만들고 기존 `alembic_version` 표의 소유자를 `bi_owner`로 바꾸며, `migrate`가 새 revision(`0002`)을 적용합니다. 데이터는 지워지지 않습니다.
 

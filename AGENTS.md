@@ -4,7 +4,7 @@
 
 ## 1. 환경 (Gate ② 결과)
 - **실행 진입점은 루트 `compose.yml` 하나다.** 시작 `docker compose up -d --build`, 종료 `docker compose down`. 같은 동작의 Windows BAT는 `scripts/`에 있다. 사용법과 문제 해결은 `skills/local-environment/SKILL.md`를 읽고 추측하지 않는다.
-- 서비스: `postgres`, `db-bootstrap`(일회성), `migrate`(일회성), `backend`, `frontend`, `superset-init`(일회성), `superset`, 그리고 profile `test`의 `postgres-test`(tmpfs). 순서는 `postgres → db-bootstrap → migrate → backend`, `db-bootstrap → superset-init → superset`.
+- 서비스: `postgres`, `db-bootstrap`(일회성), `migrate`(일회성), `backend`, `frontend`, `superset-init`(일회성), `superset`, 그리고 profile `test`의 `postgres-test`(tmpfs). 순서는 `postgres → db-bootstrap → migrate → backend`, `db-bootstrap + migrate → superset-init → superset`(`superset-init`이 `migrate`를 기다리는 것은 `bi_readonly`의 `bi_data` USAGE를 주는 마이그레이션 `0002`와의 순서 경쟁을 막기 위해서다. 순환은 없다).
 - 모든 서비스에 `mem_limit`이 있다(합계 8GB 안, `docs/decisions/03a-deploy-environment.md`). 한도는 `compose.yml`에 고정하고 변수화하지 않는다. Redis/Valkey/Celery는 두지 않는다(필요해지면 사용자와 재논의).
 - Health: `${APP_BASE_PATH}/api/health`, `${APP_BASE_PATH}/api/health/db`, `${SUPERSET_APP_ROOT}/health`. `/health/azure-openai`는 만들지 않는다.
 - **DB 계정 분리(EW-1, Gate ② 한정 구성 해소):** Gate ②에서는 `POSTGRES_USER`(이미지 슈퍼유저)를 앱·`migrate` 계정으로 썼다(한정 구성). 이제 `POSTGRES_USER`/`POSTGRES_PASSWORD`는 **이미지 슈퍼유저 전용**(postgres 이미지, healthcheck, `db-bootstrap`)이고 `backend`·`migrate`는 이 계정으로 접속하지 않는다. `migrate`=`bi_owner`(정적 표·`bi_data` 소유), `backend`=`bi_app`(정적 표는 명시 GRANT만, `bi_data`에만 `CREATE`)이며 계정 이름은 코드 상수(`backend/app/db.py`)다. 이것은 운영 가이드 기준선(`POSTGRES_USER`=앱 계정)과의 **의도적 차이**다(`docs/deploy-coordination.md` 29번). backend가 슈퍼유저로 접속하는 구성은 리뷰에서 차단된다.
@@ -16,8 +16,9 @@
 ## 2. 환경변수
 - `.env.example`이 이름 기준 원본이다. 운영 가이드의 canonical name(`APP_*`, `FRONTEND_*`, `BACKEND_*`, `POSTGRES_*`, `LOG_LEVEL`, `TZ`)을 그대로 쓰고, 같은 의미의 새 이름을 만들지 않는다. 환경별 이름 분리(`LOCAL_DB_HOST` 등) 금지: 이름은 고정하고 값만 바꾼다.
 - Azure OpenAI 변수(`AZURE_OPENAI_*`)는 없다(브리프 5절 1번: 제외). LLM 사용이 생기면 사용자 승인 후에만 추가한다.
-- 이 프로젝트의 추가 변수(현재 `.env.example` 26개): `APP_BASE_PATH`, `APP_PROXY_STRIP_PREFIX`, `AUTH_STUB_ENABLED`, `SUPERSET_APP_ROOT`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`. 역할 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 메타 DB `superset`, schema `bi_data`의 **이름은 코드 상수**이며 변수로 만들지 않는다(환경변수는 비밀번호만 받는다).
+- 이 프로젝트의 추가 변수(현재 `.env.example` 30개): `APP_BASE_PATH`, `APP_PROXY_STRIP_PREFIX`, `AUTH_STUB_ENABLED`, `SUPERSET_APP_ROOT`, `POSTGRES_APP_PASSWORD`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_READONLY_PASSWORD`, `SUPERSET_DB_PASSWORD`, `SUPERSET_SECRET_KEY`, `GUEST_TOKEN_JWT_SECRET`, `SUPERSET_ADMIN_USER`, `SUPERSET_ADMIN_PASSWORD`, `SUPERSET_SERVICE_USER`, `SUPERSET_SERVICE_PASSWORD`, `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD`(EW-3). 역할 `bi_owner`·`bi_app`·`bi_readonly`·`superset_meta`, 메타 DB `superset`, schema `bi_data`의 **이름은 코드 상수**이며 변수로 만들지 않는다(환경변수는 비밀번호만 받는다).
 - **인증 스텁 스위치 `AUTH_STUB_ENABLED`**(기본 `false`, 승인 AP-13): `true`는 개발·시험 전용이다. 켜져 있으면 `APP_ENV`가 환경변수로 **명시적으로 설정**(코드 기본값 `local`이 채운 것은 미설정으로 본다)되어 있고 값이 `local`·`test`일 때만 backend가 시작하며, 아니면 시작을 거부한다(fail-closed, `backend/app/config.py`, `test_config.py`). 시험용 사용자 시드를 운영 마이그레이션에 넣지 않는다. 스텁 로그인 기능은 FU-1a에서 만든다(지금은 스위치만 있다).
+- **Superset 계정·역할(EW-3):** `superset-init`이 매 기동 멱등으로 만든다(`superset/ensure_roles.py`, `ensure_accounts.py`, 앞 단계 `sync_permissions.py`). 권한 목록은 `superset/bi_roles.py` 한 곳에만 둔다(흩뿌리지 않는다). 역할: `bi_service`(4개, `can_grant_guest_token` 금지), `bi_guest_issuer`(2개), `bi_author`(처음 만들 때만 Gamma 복사, 이후 차이는 로그로 알리기만), `bi_author_schema`(1개). 서비스·발급 계정은 역할 하나만 갖고 관리자 역할을 갖지 않으며, 작성자 계정은 만들지 않는다(관리자가 수동). **서비스 계정 이름은 바꾸지 않는다**(소유 데이터셋 이전 절차 미확정). 세 계정 이름(관리자·서비스·발급)은 서로 달라야 한다(`ci-validate-env.sh`와 스크립트가 검사). 비밀번호는 환경변수로만 받고 인수·로그·예외 메시지에 넣지 않는다. 서비스·발급 변수는 backend와 `superset-init`에만 전달한다(`ci-validate-env.sh`가 검사). backend의 Superset 내부 주소 `http://superset:8088`은 코드 상수(`backend/app/config.py`)이며 변수로 만들지 않는다. 새 권한 목록 변경은 사전 승인이 필요하다.
 - **새 변수를 추가할 때** 이 순서로 영향을 확인하고 변경 요약(커밋 메시지)에 기록한다.
   1. `.env.example` (이름, 주석, Secret이면 빈 값)
   2. backend Settings (`backend/app/config.py`) 와 테스트
@@ -25,7 +26,7 @@
   4. `scripts/ci-validate-env.sh`의 `REQUIRED`(Secret이면 `SECRETS`도)와 `Jenkinsfile`(Credential 매핑이 필요한지)
   5. `scripts/validate-env.bat`, `README.md`, `skills/local-environment/SKILL.md`
   6. 테스트
-- **Secret**(DB 비밀번호, Superset 키, 관리자 비밀번호)은 Repository, Dockerfile, 이미지, Frontend 번들, 로그에 넣지 않는다. `.env`는 Git 제외다. **Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다**(공개 설정만 `environment:`에 명시). 컨테이너마다 필요한 변수만 전달한다.
+- **Secret**(DB 비밀번호, Superset 키, 관리자·서비스·발급 계정 비밀번호)은 Repository, Dockerfile, 이미지, Frontend 번들, 로그에 넣지 않는다. `.env`는 Git 제외다. **Frontend 컨테이너에는 전체 `.env`를 넘기지 않는다**(공개 설정만 `environment:`에 명시). 컨테이너마다 필요한 변수만 전달한다.
 
 ## 3. 하위 경로 배포와 프록시
 - 포털은 메인 플랫폼의 URL 하위 경로로 서비스된다. 프런트 API 호출은 `${basePath}/api/…`(호스트 없는 상대경로)이고 `/api`, `/superset`, `/bi-wizard`를 코드에 하드코딩하지 않는다(`/api` 구간은 `frontend/src/config.ts` 한 곳).

@@ -18,6 +18,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9._~-]+")
 
 
+# backend가 Superset에 접속하는 내부 주소. compose 서비스 이름 기반의 코드 상수다
+# (AP-12, 환경변수로 만들지 않는다). 실제 주소는 이 값 + Settings.superset_app_root다.
+# HTTP 호출 코드는 FU-1e에서 만든다.
+SUPERSET_INTERNAL_URL = "http://superset:8088"
+
 # 인증 스텁(시험용 사용자로 접속자를 흉내 내는 임시 기능)을 켤 수 있는 APP_ENV. 이 목록 밖이면
 # 스텁 스위치가 켜진 채로는 시작하지 않는다(fail-closed, bi-review 7-5, 03b 5-2 K3).
 AUTH_STUB_ALLOWED_ENVS = frozenset({"local", "test"})
@@ -92,6 +97,20 @@ class Settings(BaseSettings):
     postgres_app_password: SecretStr | None = None
     postgres_owner_password: SecretStr | None = None
 
+    # Superset 접속 설정(EW-3, 사용은 FU-1e). 누락은 compose가 막는다
+    # (backend의 다섯 값은 `${VAR:?}` 필수). Settings 자체는 값이 없어도 로드되고(None),
+    # 필요한 쪽이 사용 시점에 없으면 실패한다(Superset 불가가 포털 시작을 막지 않는다, 08 §2-1).
+    # 값이 있으면 엄격하게 검증한다: 경로는 빈 값·형식 오류 거부,
+    # 계정 이름은 빈 값·공백뿐인 값 거부.
+    # 비밀번호는 빈 문자열을 미설정과 같게 보며(사용 시점에 실패), SecretStr이라
+    # repr·로그·검증 오류 메시지에 나오지 않는다.
+    # 서비스 계정은 가상 데이터셋 등록, 발급 계정은 guest token 발급 전용이다.
+    superset_app_root: str | None = None
+    superset_service_user: str | None = Field(default=None, min_length=1)
+    superset_service_password: SecretStr | None = None
+    superset_guest_issuer_user: str | None = Field(default=None, min_length=1)
+    superset_guest_issuer_password: SecretStr | None = None
+
     # 인증 스텁 스위치. 기본 꺼짐. 켜는 조건은 check_auth_stub_allowed 참고.
     # (스텁 로그인 기능 자체는 FU-1a에서 만든다.)
     auth_stub_enabled: bool = False
@@ -102,6 +121,22 @@ class Settings(BaseSettings):
     @classmethod
     def _check_base_path(cls, value: str) -> str:
         return validate_base_path(value)
+
+    @field_validator("superset_app_root")
+    @classmethod
+    def _check_superset_app_root(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if value == "":
+            raise ValueError("SUPERSET_APP_ROOT는 비울 수 없다(루트 배포 값이 없다).")
+        return validate_base_path(value)
+
+    @field_validator("superset_service_user", "superset_guest_issuer_user")
+    @classmethod
+    def _check_superset_account_name(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("Superset 계정 이름은 공백뿐일 수 없다.")
+        return value
 
     @field_validator("log_level")
     @classmethod

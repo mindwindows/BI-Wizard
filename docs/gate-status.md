@@ -12,11 +12,11 @@
 - **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 785줄이다. **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
 - **EW-1(앱 계정 분리) 완료·검증 통과**(QA 11항목 통과, reviewer 차단 0건, 아래 "EW-1 결과"). 목록 밖 추가 항목은 소급 승인됐다(2026-10-11, `CLAUDE.md` 변경 이력).
 - 코드 상태: backend는 `bi_app`, migrate는 `bi_owner`로만 접속한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. 인증 스텁 엔드포인트와 업무 기능 코드는 없다(`AUTH_STUB_ENABLED` 시작 거부 논리만 있음).
+- **EW-3(Superset 계정·역할) 구현·검증 완료**: `superset-init`이 `migrate`·`db-bootstrap` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 앱 컨텍스트 스크립트로 실행한다. 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본, 처음에만)·`bi_author_schema`(1), 계정 `bi_service`·`bi_guest_issuer`(기본 이름). `.env.example` 30개(Secret 10개). backend는 설정 로딩만(HTTP 호출 코드는 FU-1e). `bi_guest`·`GUEST_TOKEN_VALIDATOR_HOOK`은 EW-4.
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. **EW-3 Superset 계정:** 서비스 계정 변수 `SUPERSET_SERVICE_USER`/`_PASSWORD`(승인됨)와 발급 전용 계정 변수 2개(**`SUPERSET_GUEST_ISSUER_USER`/`SUPERSET_GUEST_ISSUER_PASSWORD`로 확정·승인, 2026-10-12, 03b 8절**), `superset-init` 확장(`sync_permissions` → 서비스 역할 4권한 → 발급 역할 → 작성자 역할 `bi_author`[Gamma 복사본]+`bi_author_schema` → 계정 멱등 생성), backend→Superset 내부 주소(compose 서비스 이름 코드 상수)와 `SUPERSET_APP_ROOT` 전달(AP-12).
-   - **03b 8절 승인 조건:** 서비스 계정 생성 시점·기본 사용자 이름 값은 적용 후 보고. `superset-init` 구현은 Superset 이미지에 이미 있는 수단(CLI, flask shell)만 쓰고 새 의존성이 생기는 방법은 쓰지 않으며, 택한 방법과 이유를 보고. **서비스 역할·발급 역할·`bi_author` 권한 목록은 적용 전에 구체 내용을 보고하고 승인받는다.** EW-3는 새 세션에서 시작한다.
-2. **EW-4 guest 역할:** `bi_guest` 생성(권한 목록 파일), `GUEST_TOKEN_VALIDATOR_HOOK`, 부정 시험, 하위 경로 + Embedded 재검증.
+1. ~~EW-3 Superset 계정~~ **구현·검증 완료(2026-10-12, 결과는 아래 "EW-3 결과"와 03b 9절). 사용자 확인 대기 항목 2건이 있다(03b 9-3).** 사용자 확인 뒤 EW-4로 간다.
+2. **EW-4 guest 역할(다음):** `bi_guest` 생성(권한 목록 파일), `GUEST_TOKEN_VALIDATOR_HOOK`, 부정 시험, 하위 경로 + Embedded 재검증.
 3. **EW-5 문서·하네스**, **EW-6 통합 검증**(QA), **EW-7 reviewer 점검**. 계획표는 이 문서의 "FU-1용 Gate ④ 전 환경 작업(EW) 계획".
 4. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차.
 5. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
@@ -40,12 +40,18 @@
 - **먼저 읽을 문서:** `CLAUDE.md` → `docs/project-brief.md` → `docs/decisions/03b`(6절)·`03c` → `04~08` → `AGENTS.md`, `skills/local-environment/SKILL.md`.
 
 
+### EW-3 결과 (2026-10-12, env-engineer 구현, qa-engineer 독립 검증 2회, reviewer 점검 2회, 차단 0건)
+- **검증 통과(QA):** 새 설치(빈 볼륨)에서 `superset-init`이 `migrate` 완료 뒤 시작해 성공, 기존 볼륨 재기동·재실행 멱등, 서비스·발급·작성자 권한 시험(03c X-22·X-28 재현), 변조 복구, 비밀번호 변경 반영(특수문자 포함), 로그·`ps`·`docker inspect` 비밀번호 0건, `APP_PROXY_STRIP_PREFIX` true/false 동일, `superset-init` 메모리(최대 약 193MiB/1g), backend 설정 로딩 시험. 정적: `ci-validate-env.sh` 통과, `test-ci-validate-env.sh` 97개 실패 0, backend 테스트 129개 통과.
+- **마지막(2차 수정) 변경분은 env-engineer 자체 컨테이너 시험 + 오케스트레이터 코드 확인으로만 검증했고 별도 QA 재실행은 하지 않았다.** 대상: `bi_author` 0개 복사 분기 제거, 역할 0개 기존 계정 표식 검사, 이메일 충돌 사전 거부, `sync_permissions` 대소문자 무시 조회, 문서 정정. EW-6 통합 검증에서 다시 확인한다.
+- **미시험:** `migrate` 실패 때 `superset-init` 미기동(정적 확인만), 08 §2-1 0행 "USAGE 없이도 schema_access 생성" 실측 재현(구현자 실측만), 하위 경로 + Embedded 재검증(EW-4 몫), BAT 실행.
+
+
 | Gate | 상태 | 승인일 | 승인 내용 | 관련 문서 |
 | --- | --- | --- | --- | --- |
 | ① RESEARCH & DECIDE | 승인 | 2026-10-11 | 디자인: C(3분할 작업공간) 기본 + 데이터셋 목록·권한 관리·가져오기 앞 두 단계는 B(콘솔형). 기준 해상도 1920×1080, Inspector는 접기·폭 조절. Reference 5개 모두 확보(지목 파일만) | `docs/decisions/01-design-direction.md`, `docs/decisions/02-tech-reference.md`, `references/` |
 | ② ENVIRONMENT BOOTSTRAP | 승인(조건부) | 2026-10-11 | 마이그레이션 결정(D1~D7), 배포 환경 사전 제안, 읽기 전용 계정 제안, Gate ② 결과 결정 8건 반영 후 조건부 승인. **보류 2건:** BAT 6종 실행 검증(사내 환경에서 검증), Jenkinsfile CI의 Jenkins 실제 실행(Jenkins 실행 환경 확인 후). 보류 항목과 해소 시점은 아래 "Gate ② 보류 항목" | `docs/decisions/03-migration-tool.md`, `docs/decisions/03a-deploy-environment.md`, `docs/deploy-coordination.md` |
 | ③ MODULARIZE | **승인** (FU-1 범위) | 2026-10-11 | FU-1 범위의 04~08 승인, 합계 함수 빈 칸 전파, 지원 차트 6가지, 에이전트 모델 3개 sonnet 변경, §9-2 제안·§10 기능 축소 승인, AP-1·2·5·9·10·11·12·13·14·16 승인(AP-15는 FU-1 착수 때 요청). 상세 `03b` 6절 | `docs/decisions/04-modules.md` ~ `08-superset-embedding.md` |
-| ④ 기능 개발 | 대기 (진입 전 EW-1 완료·검증 통과, 사용자 확인 후 EW-3 이후) | - | - | - |
+| ④ 기능 개발 | 대기 (진입 전 EW-1·EW-3 완료·검증 통과, 사용자 확인 후 EW-4 이후) | - | - | - |
 
 ## 미결정 사항 (브리프 5절)
 | 번호 | 질문 | 상태 | 답변 |

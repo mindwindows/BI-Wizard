@@ -232,3 +232,103 @@ def test_validation_errors_do_not_echo_secret_values(make_settings):
     assert "SECRET-APP-PW-123" not in text
     assert "SECRET-OWNER-PW-456" not in text
     assert "APP_ENV" in text
+
+
+# --- Superset 접속 설정(EW-3, AP-12). 사용(HTTP 호출)은 FU-1e ---
+
+_SUPERSET_ENV = {
+    "SUPERSET_APP_ROOT": "/bi-wizard/superset",
+    "SUPERSET_SERVICE_USER": "bi_service",
+    "SUPERSET_SERVICE_PASSWORD": "SECRET-SERVICE-PW-1",
+    "SUPERSET_GUEST_ISSUER_USER": "bi_guest_issuer",
+    "SUPERSET_GUEST_ISSUER_PASSWORD": "SECRET-ISSUER-PW-2",
+}
+
+
+def test_superset_settings_are_optional_so_backend_starts_without_them(make_settings):
+    """Superset 불가가 포털을 멈추지 않는다: 값이 없어도 설정은 로드된다."""
+    settings = make_settings()
+    assert settings.superset_app_root is None
+    assert settings.superset_service_user is None
+    assert settings.superset_service_password is None
+    assert settings.superset_guest_issuer_user is None
+    assert settings.superset_guest_issuer_password is None
+
+
+def test_superset_settings_load_from_environment(make_settings):
+    settings = make_settings(**_SUPERSET_ENV)
+    assert settings.superset_app_root == "/bi-wizard/superset"
+    assert settings.superset_service_user == "bi_service"
+    assert settings.superset_guest_issuer_user == "bi_guest_issuer"
+    assert settings.superset_service_password is not None
+    assert settings.superset_service_password.get_secret_value() == "SECRET-SERVICE-PW-1"
+    assert settings.superset_guest_issuer_password is not None
+    assert settings.superset_guest_issuer_password.get_secret_value() == "SECRET-ISSUER-PW-2"
+
+
+def test_superset_internal_url_is_a_code_constant_not_a_setting():
+    from app.config import SUPERSET_INTERNAL_URL
+
+    assert SUPERSET_INTERNAL_URL == "http://superset:8088"
+    assert "superset_internal_url" not in Settings.model_fields
+
+
+def test_superset_passwords_do_not_appear_in_repr_str_or_dump(make_settings):
+    settings = make_settings(**_SUPERSET_ENV)
+    for text in (repr(settings), str(settings), str(settings.model_dump())):
+        assert "SECRET-SERVICE-PW-1" not in text
+        assert "SECRET-ISSUER-PW-2" not in text
+    assert "SECRET-SERVICE-PW-1" not in repr(settings.superset_service_password)
+
+
+@pytest.mark.parametrize(
+    "value", ["", "bi-wizard/superset", "/bi-wizard/superset/", "/a//b", "/a/../b", "/a b"]
+)
+def test_superset_app_root_rejects_empty_and_invalid_values(make_settings, value):
+    with pytest.raises(ValidationError):
+        make_settings(SUPERSET_APP_ROOT=value)
+
+
+@pytest.mark.parametrize("variable", ["SUPERSET_SERVICE_USER", "SUPERSET_GUEST_ISSUER_USER"])
+def test_superset_account_name_cannot_be_empty(make_settings, variable):
+    with pytest.raises(ValidationError, match=variable.lower()):
+        make_settings(**{variable: ""})
+
+
+def test_validation_errors_do_not_echo_superset_passwords(make_settings):
+    """다른 항목 때문에 설정 검증이 실패해도 오류 메시지에 비밀번호가 섞여 나오지 않는다."""
+    with pytest.raises(ValidationError) as caught:
+        make_settings(**{**_SUPERSET_ENV, "SUPERSET_APP_ROOT": "", "SUPERSET_SERVICE_USER": ""})
+    text = str(caught.value)
+    assert "SECRET-SERVICE-PW-1" not in text
+    assert "SECRET-ISSUER-PW-2" not in text
+    assert "superset_app_root" in text
+
+
+def test_main_starts_without_superset_settings(monkeypatch):
+    """Superset 설정이 없어도 `python -m app` 시작은 막히지 않는다(DB 비밀번호만 조건)."""
+    from app import __main__ as entry
+
+    monkeypatch.setenv("POSTGRES_APP_PASSWORD", "app-pw")
+    called = []
+    monkeypatch.setattr(entry.uvicorn, "run", lambda *a, **k: called.append(True))
+    entry.main()
+    assert called == [True]
+
+
+@pytest.mark.parametrize("variable", ["SUPERSET_SERVICE_USER", "SUPERSET_GUEST_ISSUER_USER"])
+@pytest.mark.parametrize("value", [" ", "   ", "\t", "\n"])
+def test_superset_account_name_cannot_be_whitespace_only(make_settings, variable, value):
+    with pytest.raises(ValidationError, match=variable.lower()):
+        make_settings(**{variable: value})
+
+
+@pytest.mark.parametrize(
+    "variable", ["SUPERSET_SERVICE_PASSWORD", "SUPERSET_GUEST_ISSUER_PASSWORD"]
+)
+def test_superset_empty_password_is_unset_not_an_error(make_settings, variable):
+    """빈 비밀번호는 로드 오류가 아니라 미설정과 같다(사용하는 쪽이 사용 시점에 실패한다)."""
+    settings = make_settings(**{variable: ""})
+    secret = getattr(settings, variable.lower())
+    assert secret is not None
+    assert secret.get_secret_value() == ""
