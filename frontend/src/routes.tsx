@@ -1,5 +1,7 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from "react-router-dom";
 import { getConfig } from "./config";
+import { AccessDenied } from "./features/access/AccessDenied";
+import { PermissionsPage } from "./features/access/permissions/PermissionsPage";
 import { Home } from "./pages/Home";
 import { Placeholder } from "./pages/Placeholder";
 import { RouteError, Shell } from "./Shell";
@@ -21,13 +23,12 @@ export const routes: RouteObject[] = [
     errorElement: <RouteError />,
     children: [
       { index: true, element: <Home /> },
-      // S1 접근 안내("접근 권한이 없습니다")는 단위 1a에서 /api/me와 함께 채운다.
-      { path: "access-denied", element: <Placeholder screen="S1" title="접근 안내" unit="단위 1a" /> },
+      { path: "access-denied", element: <AccessDenied /> },
       { path: "datasets", element: <Placeholder screen="S2" title="데이터셋 목록" unit="단위 1b" /> },
       { path: "datasets/new", element: <Placeholder screen="S3" title="데이터셋 만들기" unit="단위 1b" /> },
       { path: "datasets/:datasetId", element: <Placeholder screen="S4" title="작업공간" unit="단위 1b~1d" /> },
       { path: "checks", element: <Placeholder screen="S5" title="점검" unit="단위 1d" /> },
-      { path: "admin/permissions", element: <Placeholder screen="S6" title="권한 관리" unit="단위 1a" /> },
+      { path: "admin/permissions", element: <PermissionsPage /> },
       { path: "dashboards", element: <Placeholder screen="S7" title="대시보드" unit="단위 1e" /> },
       { path: "admin/dashboards", element: <Placeholder screen="S8" title="대시보드 연결 관리" unit="단위 1e" /> },
       { path: "admin/status", element: <Placeholder screen="S9" title="관리자 현황" unit="단위 1e" /> },

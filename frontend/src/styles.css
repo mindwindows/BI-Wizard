@@ -83,3 +83,219 @@ td {
   text-align: left;
   padding: 6px 16px 6px 0;
 }
+
+/* ---- 단위 1a: 셸 상단, 접근 안내, S6 권한 관리 (콘솔형, 정보 밀도 우선) ---- */
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-right .nav-admin {
+  margin-left: 0;
+}
+
+.work-team,
+.stub-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.stub-switcher {
+  padding: 2px 8px;
+  border: 1px dashed #f0b429;
+  border-radius: 4px;
+  color: #f7c948;
+}
+
+.stub-error,
+.state-error-inline {
+  color: #8a1c1c;
+}
+
+.stub-error {
+  color: #ffb3b3;
+}
+
+.muted-on-dark,
+.who {
+  color: #cbd2d9;
+  font-size: 13px;
+}
+
+.state-ok {
+  padding: 8px 12px;
+  border: 1px solid #2f8f5b;
+  background: #effaf3;
+  color: #14532d;
+}
+
+:focus-visible {
+  outline: 2px solid #1d6fd6;
+  outline-offset: 1px;
+}
+
+.access-denied {
+  max-width: 640px;
+  margin: 48px auto;
+}
+
+.console-forms {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 280px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.panel h2,
+.pending h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.panel label,
+.toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.panel label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.grid-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.matrix {
+  margin: 0;
+  width: 100%;
+}
+
+.matrix th,
+.matrix td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #e4e7eb;
+  vertical-align: top;
+}
+
+.matrix thead th {
+  position: sticky;
+  top: 0;
+  background: #f0f2f5;
+  z-index: 1;
+}
+
+.matrix tbody th {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  min-width: 220px;
+  font-weight: 400;
+}
+
+.matrix .inactive,
+.matrix tr.inactive th,
+.matrix tr.inactive td {
+  color: #7b8794;
+  background: #f5f5f5;
+}
+
+.matrix td.changed {
+  background: #fff8db;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #d9e8fb;
+  color: #124a8f;
+  font-size: 12px;
+}
+
+.badge-off {
+  background: #e4e7eb;
+  color: #52606d;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #1d6fd6;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.pending {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 41, 51, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  width: 640px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 16px 20px;
+  background: #fff;
+  border-radius: 6px;
+}
+
+.modal h2 {
+  margin-top: 0;
+}

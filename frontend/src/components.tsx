@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ApiError } from "./api";
+import { describeApiError } from "./errors";
 
 export function Loading({ label = "불러오는 중" }: { label?: string }) {
   return (
@@ -9,12 +10,9 @@ export function Loading({ label = "불러오는 중" }: { label?: string }) {
   );
 }
 
-/** error.code로 분기하는 자리. 코드별 안내는 화면 단위에서 늘린다. 문구는 서버 message를 우선한다. */
+/** error.code로 분기한 쉬운 한국어 문구(errors.ts). */
 export function describeError(error: unknown): { message: string; requestId: string | null } {
-  if (error instanceof ApiError) {
-    return { message: error.message, requestId: error.requestId };
-  }
-  return { message: "화면을 표시하는 중 오류가 발생했습니다.", requestId: null };
+  return { message: describeApiError(error), requestId: error instanceof ApiError ? error.requestId : null };
 }
 
 export function ErrorNotice({ error, children }: { error: unknown; children?: ReactNode }) {

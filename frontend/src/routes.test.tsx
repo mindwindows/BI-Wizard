@@ -2,14 +2,16 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { createTestRouter, routerBasename } from "./routes";
+import { ADMIN_ME, HEALTH_HANDLERS, installFetch, json } from "./test-utils";
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("{}", { status: 200 }))));
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  delete window.__APP_CONFIG__;
 });
 
 const DEEP_LINKS: Array<[string, string]> = [
@@ -38,6 +40,11 @@ describe.each([
   ["하위 경로(/bi-wizard)", "/bi-wizard"],
   ["루트 배포", ""],
 ])("딥링크: %s", (_name, basePath) => {
+  beforeEach(() => {
+    window.__APP_CONFIG__ = { basePath, supersetRoot: "" };
+    installFetch({ ...HEALTH_HANDLERS, "GET /me": () => json(200, ADMIN_ME), "GET /users": () => json(200, { items: [], total: 0, limit: 50, offset: 0 }), "GET /teams": () => json(200, { items: [], total: 0, limit: 200, offset: 0 }) }, basePath);
+  });
+
   it.each(DEEP_LINKS)("%s 직접 진입", async (path, testId) => {
     render(<App router={createTestRouter(basePath, `${basePath}${path === "/" ? "/" : path}`)} />);
     expect(await screen.findByTestId(testId)).toBeTruthy();
@@ -62,6 +69,8 @@ describe.each([
 });
 
 it("하위 경로 밖 주소는 셸 화면으로 연결되지 않는다", () => {
+  window.__APP_CONFIG__ = { basePath: "/bi-wizard", supersetRoot: "" };
+  installFetch({ ...HEALTH_HANDLERS, "GET /me": () => json(200, ADMIN_ME) }, "/bi-wizard");
   const router = createTestRouter("/bi-wizard", "/datasets");
   expect(router.state.errors).not.toBeNull();
   render(<App router={router} />);
