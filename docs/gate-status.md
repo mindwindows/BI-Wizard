@@ -1,15 +1,21 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-11 작성, 이 세션 종료 시점)
+## 다음 세션 인계 (2026-10-11 작성, 2026-10-12 갱신)
+
+### 세션 시작 시 첫 확인
+- `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
+- 동기화했다면 에이전트·스킬 정의(`.claude/agents`, `.claude/skills`)가 세션 시작 시점의 옛 버전일 수 있다. **새 세션으로 다시 시작하도록 사용자에게 알린다**(이전 세션에서 로컬이 옛 커밋이라 정의 파일이 haiku였던 사례가 있었다).
+- 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
 ### 현재 상태
-- **브랜치:** `harness/setup`(PR mindwindows/BI-Wizard#2). `main`에 직접 커밋·푸시하지 않는다. 새 PR은 만들지 않고 푸시로 갱신한다.
+- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 작업 단위가 끝나 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다).
 - **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절). `04~08`은 모두 "상태: 승인(2026-10-11, 03b 6절)"로 기록돼 있고 합계 785줄이다. **Gate ④**는 대기이며 진입 전 환경 작업(EW)이 진행 중이다.
 - **EW-1(앱 계정 분리) 완료·검증 통과**(QA 11항목 통과, reviewer 차단 0건, 아래 "EW-1 결과"). 목록 밖 추가 항목은 소급 승인됐다(2026-10-11, `CLAUDE.md` 변경 이력).
 - 코드 상태: backend는 `bi_app`, migrate는 `bi_owner`로만 접속한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. 인증 스텁 엔드포인트와 업무 기능 코드는 없다(`AUTH_STUB_ENABLED` 시작 거부 논리만 있음).
 
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. **EW-3 Superset 계정:** 서비스 계정 변수 `SUPERSET_SERVICE_USER`/`_PASSWORD`(승인됨)와 발급 전용 계정 변수 2개(이름은 후보 `SUPERSET_GUEST_ISSUER_USER`/`_PASSWORD`, **EW-3에서 확정하며 새 변수이므로 적용 전 승인**), `superset-init` 확장(`sync_permissions` → 서비스 역할 4권한 → 발급 역할 → 작성자 역할 `bi_author`[Gamma 복사본]+`bi_author_schema` → 계정 멱등 생성), backend→Superset 내부 주소(compose 서비스 이름 코드 상수)와 `SUPERSET_APP_ROOT` 전달(AP-12).
+1. **EW-3 Superset 계정:** 서비스 계정 변수 `SUPERSET_SERVICE_USER`/`_PASSWORD`(승인됨)와 발급 전용 계정 변수 2개(**`SUPERSET_GUEST_ISSUER_USER`/`SUPERSET_GUEST_ISSUER_PASSWORD`로 확정·승인, 2026-10-12, 03b 8절**), `superset-init` 확장(`sync_permissions` → 서비스 역할 4권한 → 발급 역할 → 작성자 역할 `bi_author`[Gamma 복사본]+`bi_author_schema` → 계정 멱등 생성), backend→Superset 내부 주소(compose 서비스 이름 코드 상수)와 `SUPERSET_APP_ROOT` 전달(AP-12).
+   - **03b 8절 승인 조건:** 서비스 계정 생성 시점·기본 사용자 이름 값은 적용 후 보고. `superset-init` 구현은 Superset 이미지에 이미 있는 수단(CLI, flask shell)만 쓰고 새 의존성이 생기는 방법은 쓰지 않으며, 택한 방법과 이유를 보고. **서비스 역할·발급 역할·`bi_author` 권한 목록은 적용 전에 구체 내용을 보고하고 승인받는다.** EW-3는 새 세션에서 시작한다.
 2. **EW-4 guest 역할:** `bi_guest` 생성(권한 목록 파일), `GUEST_TOKEN_VALIDATOR_HOOK`, 부정 시험, 하위 경로 + Embedded 재검증.
 3. **EW-5 문서·하네스**, **EW-6 통합 검증**(QA), **EW-7 reviewer 점검**. 계획표는 이 문서의 "FU-1용 Gate ④ 전 환경 작업(EW) 계획".
 4. **FU-1 착수(1a→1e):** 착수 때 AP-15(lark, 프런트 라우터, AG Grid Community, Superset Embedded SDK)를 버전·라이선스 확인 후 사용자에게 요청한다. 단위 구성은 `docs/decisions/04-modules.md`, 첫 단위부터 `feature-unit` 절차.

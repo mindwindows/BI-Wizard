@@ -290,3 +290,10 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 ### 7-3. 세션 인계
 이 세션은 EW-1까지로 마무리한다. EW-3부터는 새 세션에서 시작하며 인계 내용은 `docs/gate-status.md` 맨 위 "다음 세션 인계" 절에 있다. 필요한 실험 기록은 `docs/research/`로 옮겼다.
 
+## 8. EW-3 착수 전 승인 (2026-10-12, 사용자)
+- **로컬 동기화:** `harness/setup`을 `origin/main`(`a7051d8`)으로 맞춘다(`git checkout -B`). `origin/harness/setup`(`7aeaa38`)에서 `a7051d8`로의 이동은 앞으로 가는 이동이므로 일반 push로 올리며 강제 push는 하지 않는다. 작업 브랜치는 계속 `harness/setup`이고 `claude/sharp-goldberg-hzsd6c`는 건드리지 않는다.
+- **발급 전용 계정 변수 이름 확정:** `SUPERSET_GUEST_ISSUER_USER`, `SUPERSET_GUEST_ISSUER_PASSWORD`(Z3 후보를 확정, 04 AP-16과 08 §10과 같음).
+- **서비스 계정(`SUPERSET_SERVICE_USER`/`_PASSWORD`):** 생성 시점과 기본 사용자 이름 값은 적용 후 보고한다.
+- **`superset-init` 구현 방법:** Superset 이미지에 이미 있는 수단(CLI, flask shell)만 쓰고, 새 의존성이 생기는 방법은 쓰지 않는다. 택한 방법과 이유를 보고한다(A-22·A-26 해소).
+- **권한 목록:** 서비스 역할, 발급 역할, `bi_author` 권한 목록은 적용 전에 구체 내용을 보고하고 승인받는다.
+- **세션 인계:** EW-3는 새 세션에서 시작한다. `gate-status.md` 인계 절 맨 앞에 "세션 시작 시 첫 확인"(HEAD가 `origin/harness/setup` 최신과 같은지 확인, 다르면 동기화 승인부터, 동기화했다면 새 세션으로 재시작 안내)을 추가했다.
