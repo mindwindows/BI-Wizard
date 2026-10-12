@@ -1,6 +1,21 @@
-import { AllCommunityModule, ModuleRegistry, themeQuartz, type CellEditRequestEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
+import {
+  CellApiModule,
+  CellStyleModule,
+  ClientSideRowModelApiModule,
+  ClientSideRowModelModule,
+  CustomEditorModule,
+  ModuleRegistry,
+  PinnedRowModule,
+  RenderApiModule,
+  RowApiModule,
+  RowStyleModule,
+  ScrollApiModule,
+  SelectEditorModule,
+  TextEditorModule,
+  TooltipModule,
+  themeQuartz, type CellEditRequestEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useCallback, useEffect, useMemo, useRef, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { ErrorNotice, Loading } from "../../components";
 import type { Column } from "../dataset/types";
 import { ENTRY_ROW, type GridRow } from "./model";
@@ -8,8 +23,23 @@ import { PAGE_SIZES, useEntry, type EntryParams } from "./useEntry";
 import { ROW_COLUMN_ID, buildColumnDefs } from "./gridColumns";
 import { displayText } from "./values";
 
-// AG Grid Community의 모듈만 등록한다(ag-grid-enterprise는 설치하지 않는다).
-ModuleRegistry.registerModules([AllCommunityModule]);
+// AG Grid Community 모듈 중 이 화면이 쓰는 것만 등록한다(AllCommunityModule 대비 번들 약 20% 감소, ag-grid-enterprise는 설치하지 않는다).
+// 모듈을 빠뜨리면 개발 모드에서 'AG Grid error #200'이 난다. 기능을 추가할 때는 ValidationModule을 잠깐 등록해 시험을 돌려 확인한다.
+ModuleRegistry.registerModules([
+  ClientSideRowModelModule,
+  ClientSideRowModelApiModule,
+  PinnedRowModule,
+  CellStyleModule,
+  RowStyleModule,
+  TextEditorModule,
+  SelectEditorModule,
+  CustomEditorModule,
+  TooltipModule,
+  RenderApiModule,
+  RowApiModule,
+  CellApiModule,
+  ScrollApiModule,
+]);
 
 const theme = themeQuartz.withParams({ fontSize: 13, headerFontSize: 13, spacing: 4 });
 
@@ -93,11 +123,22 @@ export function EntryGrid(props: EntryGridProps) {
     [onSelectColumn],
   );
 
-  function onPaste(event: ClipboardEvent<HTMLDivElement>) {
-    // 칸을 편집하는 중에는 브라우저 기본 붙여넣기(한 칸 안의 글자)를 그대로 둔다.
-    if ((event.target as HTMLElement).closest("input, textarea, select")) return;
+  // 붙여넣기는 document 수준에서 받는다. 래퍼 div의 onPaste만 쓰면, 그리드 밖 글자(안내 문단 등)가 선택된 채로 칸을 눌러도
+  // 브라우저가 paste 대상을 '선택된 요소'로 정해 이벤트가 그리드에 닿지 않는다(QA F-1).
+  // 처리 조건: 대상이 그리드 안이거나, 지금 DOM 포커스(activeElement)가 그리드 안일 때. 대상이 입력창·편집기면 기본 동작을 그대로 둔다.
+  // jsdom은 선택된 글자 때문에 대상이 바뀌는 동작을 만들지 못하므로, 시험은 대상을 그리드 밖 요소로 보내 흉내 낸다.
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const pasteHandler = useRef<(event: globalThis.ClipboardEvent) => void>(() => undefined);
+  const handlePaste = (event: globalThis.ClipboardEvent) => {
+    const wrapper = gridRef.current;
+    if (!wrapper) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
+    const active = document.activeElement;
+    const inGrid = (target !== null && wrapper.contains(target)) || (active !== null && wrapper.contains(active));
+    if (!inGrid) return;
     event.preventDefault();
-    const text = event.clipboardData.getData("text/plain");
+    const text = event.clipboardData?.getData("text/plain") ?? "";
     const focused = apiRef.current?.getFocusedCell();
     if (!focused) {
       entry.requestPaste(text, null, -1);
@@ -107,7 +148,15 @@ export function EntryGrid(props: EntryGridProps) {
     const startColumn = colId === ROW_COLUMN_ID ? 0 : columns.findIndex((c) => String(c.id) === colId);
     const inNewArea = focused.rowPinned === "bottom" || focused.rowIndex >= entry.rows.length;
     entry.requestPaste(text, inNewArea ? null : focused.rowIndex, startColumn);
-  }
+  };
+  useEffect(() => {
+    pasteHandler.current = handlePaste; // 매 렌더 뒤 최신 상태(entry·columns)를 쓰는 처리기로 바꾼다
+  });
+  useEffect(() => {
+    const listener = (event: globalThis.ClipboardEvent) => pasteHandler.current(event);
+    document.addEventListener("paste", listener);
+    return () => document.removeEventListener("paste", listener);
+  }, []);
 
   function onPanelKey(event: KeyboardEvent<HTMLElement>, close: () => void) {
     if (event.key === "Escape") {
@@ -287,7 +336,7 @@ export function EntryGrid(props: EntryGridProps) {
       {entry.status === "loading" && !firstLoad ? <Loading label="행을 불러오는 중" /> : null}
 
       {firstLoad || (entry.status === "error" && rowData.length === 0) ? null : (
-        <div className="entry-grid" role="group" aria-label="입력 그리드 표" onPaste={onPaste}>
+        <div className="entry-grid" role="group" aria-label="입력 그리드 표" ref={gridRef}>
           <AgGridReact<GridRow>
             theme={theme}
             columnDefs={columnDefs}

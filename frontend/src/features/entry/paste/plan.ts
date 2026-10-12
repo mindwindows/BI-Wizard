@@ -51,7 +51,7 @@ export function utf8Length(text: string): number {
  * 붙여넣기 요청(C4)을 만든다. 저장하지 않고 서버에 보낼 내용과 확인창에 보여 줄 요약만 계산한다.
  * - 현재 선택 칸부터 아래/오른쪽으로 채운다. 쪽 끝을 넘는 줄은 마지막 쪽에서만 새 행(row_id=null)이 된다.
  * - 기존 행은 row_id와 화면 이전 값(expected[])을 싣고, 값은 문자열|null 그대로 보낸다.
- * - 서버 호출 전에 막는 것: 5,000행/1MiB 초과, 계산 열·기존 행의 기준 날짜 열, 열/행 부족, 칸 수가 모자란 기존 행, 모호한 숫자·날짜.
+ * - 서버 호출 전에 막는 것: 5,000행/1MiB 초과, 계산 열·기존 행의 기준 날짜 열 변경(같은 값은 통과)·새 행의 기준 날짜 열 누락, 열/행 부족, 칸 수가 모자란 기존 행, 모호한 숫자·날짜.
  */
 export function buildPastePlan(input: PasteInput): PasteBuild {
   const { matrix, columns, savedRows, startRow, startColumn } = input;
@@ -105,6 +105,13 @@ export function buildPastePlan(input: PasteInput): PasteBuild {
         message: `${line}번째 줄의 칸 수(${cells.length}개)가 다른 줄(${width}개)보다 적어 기존 행의 빈 칸을 지울 수 있습니다. 칸 수를 맞춰 다시 복사해 주세요.`,
       });
     }
+    if (!saved && input.baseDateColumnId !== null) {
+      // 새 행에는 기준 날짜 열 값이 필요하다(서버 REQUIRED와 같은 취지로 확인창 전에 안내한다).
+      const at = targets.findIndex((t) => t.id === input.baseDateColumnId);
+      if (at < 0 || (cells[at] ?? "").trim() === "") {
+        problems.push({ line, message: `${line}번째 줄: 새 행에는 기준 열 값이 필요합니다. 기준 날짜 열이 함께 붙도록 시작 칸을 옮기거나 값을 채워 주세요.` });
+      }
+    }
     const values: (string | null)[] = [];
     for (let c = 0; c < width; c += 1) {
       const column = targets[c];
@@ -114,12 +121,23 @@ export function buildPastePlan(input: PasteInput): PasteBuild {
         continue;
       }
       if (saved && column.id === input.baseDateColumnId) {
+        // 05 C4: 서버는 저장된 값과 같은 값은 무시하고 '바꾸려 할 때'만 거부한다. 같은 값이면 그대로 통과시킨다.
+        // 서버 값 표현은 YYYY-MM-DD이므로 앞뒤 공백만 뺀 글자를 정확 비교한다.
+        const savedValue = saved.cells[String(column.id)];
+        if (typeof savedValue === "string" && text.trim() === savedValue) {
+          values.push(savedValue);
+          continue;
+        }
         problems.push({
           line,
           column: column.display_name,
-          message: `기존 행의 기간(${column.display_name})은 붙여넣기로 바꿀 수 없습니다. 칸을 직접 고치거나 새 행으로 붙여 주세요.`,
+          message: `기존 행의 기간(${column.display_name})은 붙여넣기로 바꿀 수 없습니다(저장된 값과 같으면 그대로 둡니다). 칸을 직접 고치거나 새 행으로 붙여 주세요.`,
         });
         values.push(null);
+        continue;
+      }
+      if (!saved && column.id === input.baseDateColumnId && text.trim() === "") {
+        values.push(null); // 위에서 이미 '기준 열 값이 필요합니다'로 안내했다
         continue;
       }
       const parsed = pasteCellValue(column, text);

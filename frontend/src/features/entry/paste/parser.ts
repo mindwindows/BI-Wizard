@@ -8,12 +8,19 @@
  * ④ 되돌림 없이 끝까지 안 닫히면 붙여넣기를 거부한다.
  * ⑤ 공백을 자르지 않고, NUL이 있으면 거부하고, 행마다 셀 수가 달라도 허용한다.
  */
-export type ParseError = "NUL" | "UNCLOSED_QUOTE";
+export type ParseError = "NUL" | "UNCLOSED_QUOTE" | "TOO_LARGE";
+
+/**
+ * 파싱 전 입력 크기 상한(문자 수). 요청 상한은 1MiB(바이트)이지만 여기서는 UTF-16 문자 수를 세므로,
+ * 4배(4Mi 문자)를 넘는 입력은 어떻게 해도 요청 상한을 넘는 것으로 보고 파싱 없이 거부한다(계획 단계가 정확한 바이트 검사를 다시 한다).
+ */
+export const MAX_PARSE_CHARS = 4 * 1024 * 1024;
 
 export type ParseResult = { ok: true; rows: string[][] } | { ok: false; error: ParseError; message: string };
 
 export const PARSE_MESSAGES: Record<ParseError, string> = {
   NUL: "붙여넣은 내용에 읽을 수 없는 문자(NUL)가 들어 있어 붙여넣지 않았습니다. 엑셀에서 다시 복사해 주세요.",
+  TOO_LARGE: "붙여넣은 내용이 너무 커서(1MiB 초과) 붙여넣지 않았습니다. 나누어 복사해 주세요.",
   UNCLOSED_QUOTE: "따옴표가 닫히지 않아 붙여넣지 않았습니다. 엑셀에서 다시 복사해 주세요.",
 };
 
@@ -74,6 +81,7 @@ function readQuoted(text: string, start: number): CellRead | "backtrack" | "uncl
 }
 
 export function parsePaste(text: string): ParseResult {
+  if (text.length > MAX_PARSE_CHARS) return { ok: false, error: "TOO_LARGE", message: PARSE_MESSAGES.TOO_LARGE };
   if (text.includes("\u0000")) return { ok: false, error: "NUL", message: PARSE_MESSAGES.NUL };
   if (text === "") return { ok: true, rows: [] };
 

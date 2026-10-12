@@ -4,8 +4,11 @@ import type { Column, DatasetDetail } from "../dataset/types";
 import type { CellValue, Row } from "./types";
 
 /**
- * 시험용 C1~C4 가짜 서버. 05 계약(§2-3)대로 동작한다: expected_version 비교, 칸 단위 expected 가드,
- * 새 행의 기간 유일성, 붙여넣기 전부 취소. 실제 백엔드를 부르지 않는다.
+ * 시험용 C1~C4 가짜 서버. 05 계약(§2-3)의 핵심 의미를 단순화해 흉내 낸다(실제 서버와 같다는 보증은 아니다):
+ * expected_version 비교, 칸 단위 expected 가드, 새 행의 기간 유일성, 붙여넣기 전부 취소.
+ * - C4: 값이 expected와 같은 칸은 쓰지도 않고 가드로 쓰지도 않는다(그 칸은 건너뜀).
+ * - C3: 현재 값이 이미 새 값이면 expected와 달라도 성공으로 본다.
+ * - 숫자 비교는 십진 의미("1234.50" == "1234.5"). 검증 규칙(범위·필수 등)은 일부만 흉내 낸다. 실제 백엔드를 부르지 않는다.
  */
 export const SALES_COLUMNS: Column[] = [
   COL(1, "기준일", "date", { required: true }),
@@ -33,9 +36,29 @@ export interface FakeRows {
   calls: RecordedCall[];
 }
 
-const same = (a: CellValue | undefined, b: CellValue | undefined) => (a ?? null) === (b ?? null);
+/** 십진 문자열의 의미 비교: 앞뒤 불필요한 0을 뺀 정수부·소수부가 같으면 같은 수("1234.50" == "1234.5", "-0" == "0"). */
+function sameDecimal(a: string, b: string): boolean {
+  const norm = (text: string) => {
+    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
+    if (!match) return null;
+    const int = match[2].replace(/^0+(?=\d)/, "");
+    const frac = (match[3] ?? "").replace(/0+$/, "");
+    const zero = int === "0" && frac === "";
+    return `${match[1] && !zero ? "-" : ""}${int}.${frac}`;
+  };
+  const [x, y] = [norm(a), norm(b)];
+  return x !== null && y !== null && x === y;
+}
 
 export function makeFakeRows(detail: DatasetDetail, initial: Row[], opts: { total?: number } = {}): FakeRows {
+  const same = (columnId: number, a: CellValue | undefined, b: CellValue | undefined): boolean => {
+    const [x, y] = [a ?? null, b ?? null];
+    if (x === null || y === null) return x === y;
+    const column = state.detail.columns.find((c) => c.id === columnId);
+    if (column?.type === "number") return sameDecimal(String(x), String(y));
+    return x === y;
+  };
+
   const state: FakeRows = { rows: structuredClone(initial), detail, handlers: {}, calls: [] };
   const id = detail.id;
   const baseId = detail.base_date_column_id;
@@ -77,7 +100,7 @@ export function makeFakeRows(detail: DatasetDetail, initial: Row[], opts: { tota
     const target = state.rows.find((r) => r.row_id === rowId);
     if (!target) return apiError(404, "ROW_NOT_FOUND");
     const conflicts = body.changes
-      .filter((c) => !same(target.cells[String(c.column_id)], c.expected))
+      .filter((c) => !same(c.column_id, target.cells[String(c.column_id)], c.value) && !same(c.column_id, target.cells[String(c.column_id)], c.expected))
       .map((c) => ({ row_id: rowId, column_id: c.column_id, current: target.cells[String(c.column_id)] ?? null }));
     if (conflicts.length > 0) return apiError(409, "CELL_CONFLICT", "서버 문구", { conflicts });
     for (const change of body.changes) {
@@ -101,7 +124,8 @@ export function makeFakeRows(detail: DatasetDetail, initial: Row[], opts: { tota
         return;
       }
       body.column_ids.forEach((columnId, i) => {
-        if (!same(target.cells[String(columnId)], r.expected?.[i])) {
+        if (same(columnId, r.expected?.[i], r.values[i])) return; // 값이 expected와 같은 칸은 가드로 쓰지 않는다
+        if (!same(columnId, target.cells[String(columnId)], r.expected?.[i])) {
           conflicts.push({ row_index: index, row_id: r.row_id, column_id: columnId, kind: "cell", current: target.cells[String(columnId)] ?? null });
         }
       });
@@ -112,6 +136,7 @@ export function makeFakeRows(detail: DatasetDetail, initial: Row[], opts: { tota
     body.rows.forEach((r, index) => {
       const cells: Record<string, CellValue> = {};
       body.column_ids.forEach((columnId, i) => {
+        if (r.row_id !== null && same(columnId, r.expected?.[i], r.values[i])) return; // 값이 같은 칸은 쓰지 않는다
         cells[String(columnId)] = r.values[i];
       });
       if (r.row_id === null) {

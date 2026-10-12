@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import cases from "./fixtures/clipboard-cases.json";
-import { parsePaste, serializePaste } from "./parser";
+import { MAX_PARSE_CHARS, parsePaste, serializePaste } from "./parser";
 
 /**
  * 시험 기준(07 §9): docs/samples/clipboard-cases.json 42건 + 속성 시험.
@@ -22,10 +22,18 @@ describe("clipboard-cases.json", () => {
     expect(ALL).toHaveLength(42);
   });
 
-  it("원본(docs/samples)과 같은 내용이다(저장소 전체가 있을 때만 확인)", () => {
+  // 저장소 전체가 있는 환경(docs/project-brief.md가 보임)에서는 원본이 정확히 1개 있어야 한다(조용히 통과 금지).
+  // frontend/ 폴더만 빌드 문맥인 환경(`docker build --target test frontend`)에서는 docs/가 없으므로 건너뛰고, 건너뛴 사실이 시험 이름에 드러난다.
+  const repoMarker = Object.keys(import.meta.glob("../../../../../docs/project-brief.md"));
+  const originalPaths = Object.keys(import.meta.glob("../../../../../docs/samples/clipboard-cases.json"));
+  const hasRepo = repoMarker.length > 0;
+  const originalName = hasRepo ? "원본(docs/samples)과 같은 내용이다" : "원본(docs/samples)과 같은 내용이다 [건너뜀: docs/ 없음(frontend만 빌드하는 환경)]";
+
+  it.skipIf(!hasRepo)(originalName, () => {
+    expect(originalPaths).toHaveLength(1);
     const original = import.meta.glob("../../../../../docs/samples/clipboard-cases.json", { eager: true, import: "default" });
     const found = Object.values(original);
-    if (found.length === 0) return; // 이미지 빌드처럼 docs/가 없는 환경
+    expect(found).toHaveLength(1);
     expect(found[0]).toEqual(cases);
   });
 
@@ -42,6 +50,13 @@ describe("clipboard-cases.json", () => {
       });
     }
   }
+
+  it("입력이 너무 크면 파싱 전에 거부한다(4Mi 문자 초과)", () => {
+    expect(parsePaste("a".repeat(MAX_PARSE_CHARS))).toMatchObject({ ok: true });
+    const result = parsePaste("a".repeat(MAX_PARSE_CHARS + 1));
+    expect(result).toMatchObject({ ok: false, error: "TOO_LARGE" });
+    if (!result.ok) expect(result.message).toContain("1MiB");
+  });
 
   it("거부 사례는 NUL과 닫히지 않은 따옴표를 구별한다", () => {
     expect(parsePaste("a\u0000b")).toMatchObject({ ok: false, error: "NUL" });

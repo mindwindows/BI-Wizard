@@ -39,13 +39,13 @@ describe("buildPastePlan", () => {
   });
 
   it("끝을 넘는 줄은 새 행(row_id=null, expected 키 없음)", () => {
-    const built = buildPastePlan(base({ matrix: [["1"], ["2"], ["3"]], startRow: 2, startColumn: 2 }));
+    const built = buildPastePlan(base({ matrix: [["2026-01-01", "1"], ["2026-04-01", "2"], ["2026-05-01", "3"]], startRow: 2, startColumn: 0 }));
     expect(built.ok).toBe(true);
     if (!built.ok) return;
     expect(built.plan.request.rows).toEqual([
-      { row_id: 1, expected: ["a"], values: ["1"] },
-      { row_id: null, values: ["2"] },
-      { row_id: null, values: ["3"] },
+      { row_id: 1, expected: ["2026-01-01", "10"], values: ["2026-01-01", "1"] },
+      { row_id: null, values: ["2026-04-01", "2"] },
+      { row_id: null, values: ["2026-05-01", "3"] },
     ]);
     expect(built.plan.rowSlots).toEqual([2, null, null]);
   });
@@ -58,8 +58,8 @@ describe("buildPastePlan", () => {
   });
 
   it("칸 수가 모자란 줄: 새 행은 null로 채우고 기존 행은 거부(빈 칸 삭제 방지)", () => {
-    const newRows = buildPastePlan(base({ matrix: [["a", "b"], ["c"]], startRow: null, startColumn: 2 }));
-    expect(newRows.ok && newRows.plan.request.rows[1].values).toEqual(["c", null]);
+    const newRows = buildPastePlan(base({ matrix: [["2026-04-01", "5"], ["2026-05-01"]], startRow: null, startColumn: 0 }));
+    expect(newRows.ok && newRows.plan.request.rows[1].values).toEqual(["2026-05-01", null]);
     const existing = buildPastePlan(base({ matrix: [["1", "x"], ["2"]], startRow: 0, startColumn: 1 }));
     expect(existing.ok).toBe(false);
     if (!existing.ok) expect(existing.problems[0]).toMatchObject({ line: 2 });
@@ -68,9 +68,9 @@ describe("buildPastePlan", () => {
   it("5,000행 초과와 1MiB 초과는 서버 호출 전에 거부", () => {
     const tooMany = buildPastePlan(base({ matrix: Array.from({ length: MAX_PASTE_ROWS + 1 }, () => ["1"]), startRow: null }));
     expect(tooMany.ok).toBe(false);
-    const exactly = buildPastePlan(base({ matrix: Array.from({ length: MAX_PASTE_ROWS }, () => ["1"]), startRow: null, startColumn: 1 }));
+    const exactly = buildPastePlan(base({ matrix: Array.from({ length: MAX_PASTE_ROWS }, () => ["2026-01-01", "1"]), startRow: null, startColumn: 0 }));
     expect(exactly.ok).toBe(true);
-    const big = buildPastePlan(base({ matrix: [["가".repeat(400_000)]], startRow: null, startColumn: 2 }));
+    const big = buildPastePlan(base({ matrix: [["2026-01-01", "1", "가".repeat(400_000)]], startRow: null, startColumn: 0 }));
     expect(big.ok).toBe(false);
     if (!big.ok) expect(big.problems[0].message).toContain("1MiB");
   });
@@ -81,7 +81,7 @@ describe("buildPastePlan", () => {
     const formula2 = buildPastePlan(base({ matrix: [["1", "2"]], startColumn: 3 }));
     expect(formula2.ok).toBe(false);
     if (!formula2.ok) expect(formula2.problems[0].message).toContain("합계");
-    const period = buildPastePlan(base({ matrix: [["2026-09-01"]], startColumn: 0 }));
+    const period = buildPastePlan(base({ matrix: [["2026-09-01"]], startColumn: 0 })); // 첫 기존 행은 2026-03-01
     expect(period.ok).toBe(false);
     if (!period.ok) expect(period.problems[0]).toMatchObject({ line: 1, column: "기준일" });
     const columns = buildPastePlan(base({ matrix: [["1", "2", "3", "4", "5", "6"]], startColumn: 0, startRow: null }));
@@ -92,8 +92,8 @@ describe("buildPastePlan", () => {
   });
 
   it("모호한 값은 줄 번호와 열 이름으로 모아 최대 20건까지 보고하고 보내지 않는다", () => {
-    const matrix = Array.from({ length: 30 }, () => ["1,000"]);
-    const built = buildPastePlan(base({ matrix, startRow: null, startColumn: 1 }));
+    const matrix = Array.from({ length: 30 }, () => ["2026-01-01", "1,000"]);
+    const built = buildPastePlan(base({ matrix, startRow: null, startColumn: 0 }));
     expect(built.ok).toBe(false);
     if (built.ok) return;
     expect(built.problems).toHaveLength(20);
@@ -108,5 +108,52 @@ describe("buildPastePlan", () => {
     const columns = [COL(1, "이름", "text"), COL(2, "수량", "number")];
     const built = buildPastePlan(base({ columns, baseDateColumnId: null, matrix: [["a", "1"]], startRow: 0, startColumn: 0, savedRows: [{ row_id: 7, cells: {} }] }));
     expect(built.ok && built.plan.request.rows[0]).toEqual({ row_id: 7, expected: [null, null], values: ["a", "1"] });
+  });
+
+  describe("기존 행의 기준 날짜 열(05 C4: 같은 값은 무시, 바꾸려 할 때만 거부)", () => {
+    it("저장된 값과 같으면 통과하고 그대로 values에 싣는다(앞뒤 공백은 비교 전에 뺀다)", () => {
+      const built = buildPastePlan(base({ matrix: [["2026-03-01", "31"], [" 2026-02-01 ", "21"]], startRow: 0, startColumn: 0 }));
+      expect(built.ok).toBe(true);
+      if (!built.ok) return;
+      expect(built.plan.request.rows).toEqual([
+        { row_id: 3, expected: ["2026-03-01", "30"], values: ["2026-03-01", "31"] },
+        { row_id: 2, expected: ["2026-02-01", "20"], values: ["2026-02-01", "21"] },
+      ]);
+    });
+
+    it("다르면 거부한다(빈 글자 포함). 같은 줄의 다른 칸 오류와 함께 모은다", () => {
+      const different = buildPastePlan(base({ matrix: [["2026-03-01", "1"], ["2026-02-02", "2"], ["", "3"]], startRow: 0, startColumn: 0 }));
+      expect(different.ok).toBe(false);
+      if (different.ok) return;
+      expect(different.problems.map((p) => p.line)).toEqual([2, 3]);
+      expect(different.problems[0].message).toContain("기간");
+    });
+
+    it("기존 행 + 같은 기준월 + 새 행 혼합 붙여넣기는 계획까지 간다", () => {
+      const built = buildPastePlan(base({ matrix: [["2026-01-01", "1"], ["2026-04-01", "2"]], startRow: 2, startColumn: 0 }));
+      expect(built.ok).toBe(true);
+      if (built.ok) expect(built.plan).toMatchObject({ existingRows: 1, newRows: 1 });
+    });
+  });
+
+  describe("새 행의 기준 날짜 열(서버 REQUIRED와 같은 취지로 미리 안내)", () => {
+    it("기준 날짜 열이 붙여넣는 열에 없으면 거부한다", () => {
+      const built = buildPastePlan(base({ matrix: [["1"], ["2"], ["3"], ["4"]], startRow: 2, startColumn: 1 }));
+      expect(built.ok).toBe(false);
+      if (built.ok) return;
+      expect(built.problems.map((p) => p.line)).toEqual([2, 3, 4]);
+      expect(built.problems[0].message).toContain("새 행에는 기준 열 값이 필요합니다");
+    });
+
+    it("기준 날짜 칸이 비어 있어도 거부한다", () => {
+      const built = buildPastePlan(base({ matrix: [["", "1"], ["  ", "2"]], startRow: null, startColumn: 0 }));
+      expect(built.ok).toBe(false);
+      if (!built.ok) expect(built.problems).toHaveLength(2);
+    });
+
+    it("기준 날짜 열이 없는 데이터셋에는 적용하지 않는다", () => {
+      const built = buildPastePlan(base({ baseDateColumnId: null, matrix: [["1"]], startRow: null, startColumn: 1 }));
+      expect(built.ok).toBe(true);
+    });
   });
 });

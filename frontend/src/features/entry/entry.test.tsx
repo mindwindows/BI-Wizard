@@ -604,18 +604,30 @@ describe("엑셀 붙여넣기 (C4)", () => {
     await waitFor(() => expect(ctx.grid.querySelector('[row-id="r4"]')).toBeTruthy());
   });
 
-  it("마지막 쪽에서 끝을 넘는 줄은 새 행이 된다", async () => {
+  it("마지막 쪽에서 끝을 넘는 줄은 새 행이 된다(기존 행의 기준 날짜가 저장된 값과 같으면 통과)", async () => {
     const ctx = await openGrid();
-    // 마지막 화면 행(r1)의 메모 칸에서 3줄 -> 1줄은 기존 행, 2줄은 새 행
-    paste(ctx, "a\r\nb\r\nc", { rowIndex: 2, colId: "3" });
+    // 마지막 화면 행(r1, 2026-03-01)의 기준일 칸에서 3줄 -> 1줄은 기존 행(같은 기준월), 2줄은 새 행
+    paste(ctx, "2026-03-01\t7\r\n2026-04-01\t8\r\n2026-05-01\t9", { rowIndex: 2, colId: "1" });
     expect(dialog().textContent).toContain("기존 행 1개");
     expect(dialog().textContent).toContain("새 행 2개");
     applyPaste();
     await waitFor(() => expect(writes(ctx.calls)).toHaveLength(1));
-    const body = writes(ctx.calls)[0].body as { rows: { row_id: number | null; expected?: unknown[] }[] };
+    const body = writes(ctx.calls)[0].body as { rows: { row_id: number | null; expected?: unknown[]; values: unknown[] }[] };
     expect(body.rows.map((r) => r.row_id)).toEqual([1, null, null]);
     expect("expected" in body.rows[1]).toBe(false);
-    expect(body.rows[0].expected).toEqual([null]);
+    expect(body.rows[0]).toEqual({ row_id: 1, expected: ["2026-03-01", "1234.50"], values: ["2026-03-01", "7"] });
+    expect(await screen.findByText(/1행을 고치고 2행을 새로 추가했습니다/)).toBeTruthy();
+    expect(ctx.fake.rows.find((r) => r.row_id === 1)!.cells).toMatchObject({ "1": "2026-03-01", "2": "7" });
+  });
+
+  it("새 행에 기준 날짜 열이 없으면 확인창 전에 안내하고 보내지 않는다", async () => {
+    const ctx = await openGrid();
+    paste(ctx, "a\r\nb\r\nc", { rowIndex: 2, colId: "3" });
+    const alert = await screen.findByRole("alert", { name: "붙여넣기 오류" });
+    expect(alert.textContent).toContain("2번째 줄");
+    expect(alert.textContent).toContain("새 행에는 기준 열 값이 필요합니다");
+    expect(screen.queryByRole("dialog", { name: "붙여넣기 확인" })).toBeNull();
+    expect(writes(ctx.calls)).toHaveLength(0);
   });
 
   it("쪽 끝을 넘지만 마지막 쪽이 아니면 새 행으로 만들지 않고 안내한다", async () => {
@@ -811,6 +823,62 @@ describe("엑셀 붙여넣기 (C4)", () => {
       const ctx = await openGrid();
       paste(ctx, "1\t가\r\n2", { rowIndex: 0, colId: "2" });
       expect((await screen.findByRole("alert", { name: "붙여넣기 오류" })).textContent).toContain("2번째 줄의 칸 수(1개)");
+    });
+  });
+
+  describe("붙여넣기 이벤트 대상(document 수준 리스너)", () => {
+    const clip = (data: string) => ({ clipboardData: { getData: (type: string) => (type === "text/plain" ? data : "") } });
+
+    // jsdom 한계: 실제 브라우저의 '글자 선택 후 칸 클릭'(선택된 요소가 paste 대상이 됨)을 만들 수 없다.
+    // 여기서는 칸에 DOM 포커스를 두고, paste 이벤트의 대상을 그리드 밖 요소(안내 문단)로 보내 같은 상황을 흉내 낸다.
+    function focusCell(ctx: Ctx, rowIndex: number, colId: string) {
+      act(() => ctx.api.setFocusedCell(rowIndex, colId));
+      const target = cell(ctx.grid, "r1", colId);
+      act(() => target.focus());
+      expect(ctx.grid.contains(document.activeElement)).toBe(true);
+    }
+
+    it("그리드 안에 포커스가 있으면 이벤트 대상이 그리드 밖의 선택된 글자여도 붙여넣기가 동작한다", async () => {
+      const ctx = await openGrid();
+      focusCell(ctx, 2, "2");
+      const help = document.querySelector(".entry-help") as HTMLElement;
+      expect(ctx.grid.contains(help)).toBe(false);
+      const notPrevented = fireEvent.paste(help, clip("5"));
+      expect(notPrevented).toBe(false); // 가로챘다
+      expect(dialog().textContent).toContain("기존 행 1개");
+    });
+
+    it("그리드 밖 입력창(다른 폼)의 붙여넣기는 가로채지 않는다", async () => {
+      const ctx = await openGrid();
+      focusCell(ctx, 2, "2");
+      const outside = document.createElement("input");
+      document.body.appendChild(outside);
+      outside.focus();
+      const notPrevented = fireEvent.paste(outside, clip("x\ty"));
+      expect(notPrevented).toBe(true);
+      expect(screen.queryByRole("dialog", { name: "붙여넣기 확인" })).toBeNull();
+      expect(screen.queryByRole("alert", { name: "붙여넣기 오류" })).toBeNull();
+      const area = document.createElement("textarea");
+      document.body.appendChild(area);
+      expect(fireEvent.paste(area, clip("x"))).toBe(true);
+      outside.remove();
+      area.remove();
+    });
+
+    it("그리드에 포커스가 없고 대상도 그리드 밖이면 처리하지 않는다", async () => {
+      const ctx = await openGrid();
+      act(() => ctx.api.setFocusedCell(2, "2"));
+      (document.activeElement as HTMLElement | null)?.blur();
+      const help = document.querySelector(".entry-help") as HTMLElement;
+      expect(fireEvent.paste(help, clip("5"))).toBe(true);
+      expect(screen.queryByRole("dialog", { name: "붙여넣기 확인" })).toBeNull();
+    });
+
+    it("그리드가 사라지면 리스너도 사라진다", async () => {
+      const ctx = await openGrid();
+      focusCell(ctx, 2, "2");
+      cleanup();
+      expect(fireEvent.paste(document.body, clip("5"))).toBe(true);
     });
   });
 
