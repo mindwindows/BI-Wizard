@@ -154,10 +154,16 @@ def test_every_non_rejected_case_gives_the_expected_value_or_error_through_real_
                     failures.append(
                         f"{label}: 오류 {case.error} 기대, 실제 값 {actual!r} 코드 {code}"
                     )
-            elif code is not None or not values_equal(actual, case.value, tolerance=TOLERANCE):
+            elif code is not None or not values_equal(
+                actual,
+                case.value,
+                # 반올림 함수는 정확한 값이어야 한다(긴 소수 사례가 허용 오차에 묻히지 않게).
+                tolerance=None if case.expression.startswith("ROUND") else TOLERANCE,
+            ):
                 failures.append(f"{label}: 기대 {case.value!r}, 실제 {actual!r} 오류 {code}")
     assert failures == [], "\n".join(failures)
-    assert checked >= 150
+    # 거부 사례를 뺀 모든 사례를 실제로 비교했다(하한이 아니라 정확한 수).
+    assert checked == len([1 for _, case in ALL_CASES if case.expect != REJECT])
 
 
 def test_rejected_cases_are_rejected_by_check_and_save_with_the_expected_code(api, world, db):

@@ -16,18 +16,24 @@
   집합(`day`·`month`·`year`)에서만 온다.
 - 뷰(`dv_`·`de_`)는 `create_view`/`drop_view`로만 만든다. 만들기 전에 뷰 정의(SELECT)를 허용
   목록 규칙으로 확인한다(자기 `ds_<번호>` 한 표만 읽음, `text()`·`literal_column` 없음, 서브쿼리
-  없음, 바인드 값은 숫자·글자·참거짓·날짜뿐). 상수의 SQL 글자 렌더는 호출한 쪽이 넘기는
-  `render`(formula의 `render_literal_sql` 접점)만 쓰므로 이 모듈은 `literal_binds`를 직접 쓰지
-  않는다(`CreateView`가 내부에서 같은 렌더러로 그린다).
+  없음, 허용 목록 `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음, 바인드 값은 숫자·글자·참거짓·날짜뿐이며
+  글자는 NUL·역슬래시·제어·서식 문자가 없어야 한다(formula 렌더러의 1차 방어와 별개인 방어 중복)).
+  상수의 SQL 글자 렌더는 호출한 쪽이 넘기는 `render`(formula의 `render_literal_sql` 접점)만 쓰므로
+  이 모듈은 `literal_binds`를 직접 쓰지 않는다(`CreateView`가 내부에서 같은 렌더러로 그린다).
+  렌더 글자와 `CreateView`가 그리는 정의의 대조는 **어떤 DB 문장도 실행하기 전에** 한다.
 - 완화책 ③(07 §4-3): 뷰를 만든 뒤 같은 트랜잭션에서 (가) 뷰를 `LIMIT 0`으로 읽어 열 이름·개수가
   기대와 같은지, (나) 호출한 쪽이 넘긴 글자 상수 확인 SELECT를 같은 렌더러로 실행해 입력과 같은지
-  비교한다. 어긋나면 `DdlVerificationError`를 올리고 호출한 쪽이 트랜잭션을 롤백한다.
+  비교한다. (나)의 `RenderedSelect`는 렌더된 글자가 `SELECT CAST('…' AS TEXT) AS k<n>, …` 모양이고
+  값이 입력 상수와 같을 때만 **실행 전에** 통과시킨다(임의 글자를 돌려주는 render 함수는 실행되지
+  않는다). 어긋나면 `DdlVerificationError`를 올리고 호출한 쪽이 트랜잭션을 롤백한다.
 - 표·열 생성 뒤에는 만든 표·열이 실제로 있는지 다시 읽어 확인한다.
 """
 
 from __future__ import annotations
 
 import datetime
+import re
+import unicodedata
 from collections.abc import Callable
 from collections.abc import Sequence as SequenceABC
 from decimal import Decimal
@@ -81,6 +87,7 @@ from sqlalchemy.sql.elements import (
     Label,
     TextClause,
 )
+from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.types import TypeEngine
 
 from app.core.db_errors import sqlstate
@@ -129,8 +136,40 @@ _ALLOWED_BIND_TYPES = (Decimal, str, bool, int, datetime.date)
 
 Renderer = Callable[[ClauseElement, Dialect], str]
 
+# 뷰 정의에서 부를 수 있는 SQL 함수의 허용 목록(소문자). `pg_sleep`·시스템 함수·사용자 함수는
+# 목록 밖이라 뷰 게이트가 실행 전에 거부한다(reviewer R1). 변환기·사전이 새 SQL 함수를 쓰려면
+# 검토한 뒤 여기에 더한다.
+VIEW_ALLOWED_FUNCTIONS = frozenset(
+    {
+        "abs", "btrim", "ceil", "char_length", "coalesce", "date_part", "extract", "floor",
+        "greatest", "least", "left", "length", "lower", "make_date", "mod", "nullif",
+        "regexp_replace", "right", "round", "sign", "trunc",
+    }
+)  # fmt: skip
+
+# 글자 상수에서 게이트가 한 번 더 거르는 문자 범주(NUL은 Cc). formula 렌더러의 1차 방어와 같은
+# 규칙을 일부러 따로 둔 방어 중복이다(07 §4-2, reviewer M2).
+_REJECTED_TEXT_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
 
 # --- 허용 목록 게이트 ----
+
+
+def _text_bind_problem(value: str) -> str | None:
+    """글자 바인드 값에 NUL·역슬래시·제어·서식·줄/문단 구분 문자가 있으면 이유(없으면 None)."""
+    if "\\" in value:
+        return "역슬래시"
+    for char in value:
+        if unicodedata.category(char) in _REJECTED_TEXT_CATEGORIES:
+            return "제어·서식 문자"
+    return None
+
+
+def _check_bind_value(value: object) -> None:
+    if value is not None and not isinstance(value, _ALLOWED_BIND_TYPES):
+        raise DdlNotAllowedError("뷰 정의의 상수는 숫자·글자·참거짓·날짜여야 한다.")
+    if isinstance(value, str) and _text_bind_problem(value) is not None:
+        raise DdlNotAllowedError("뷰 정의의 글자 상수에 쓸 수 없는 문자가 있다.")
 
 
 def _check_table(table: Table) -> None:
@@ -169,10 +208,11 @@ def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
             raise DdlNotAllowedError("뷰 정의에 text()를 쓸 수 없다.")
         elif isinstance(node, ColumnClause) and node.is_literal:
             raise DdlNotAllowedError("뷰 정의에 literal_column을 쓸 수 없다.")
+        elif isinstance(node, FunctionElement):
+            if node.packagenames or str(node.name).lower() not in VIEW_ALLOWED_FUNCTIONS:
+                raise DdlNotAllowedError("뷰 정의에 허용 목록 밖 SQL 함수를 쓸 수 없다.")
         elif isinstance(node, BindParameter):
-            value = node.value
-            if value is not None and not isinstance(value, _ALLOWED_BIND_TYPES):
-                raise DdlNotAllowedError("뷰 정의의 상수는 숫자·글자·참거짓·날짜여야 한다.")
+            _check_bind_value(node.value)
     if selects != 1:
         raise DdlNotAllowedError("뷰 정의에 서브쿼리를 쓸 수 없다.")
     froms = selectable.get_final_froms()
@@ -348,6 +388,31 @@ def drop_period_rules(conn: Connection, dataset_id: int, column_id: int) -> None
 # --- 뷰 (07 §8, 06 §3-4) ----
 
 
+_ECHO_LABEL = re.compile(r"k\d+")
+# 렌더된 확인 질의의 허용 모양 한 칸: `CAST('…' AS TEXT) AS k<n>` (따옴표는 `''`로만 들어간다)
+_ECHO_ITEM = re.compile(r"CAST\('((?:[^']|'')*)' AS TEXT\) AS (k\d+)")
+_ECHO_PREFIX = "SELECT "
+
+
+def _echo_columns(statement: Select) -> list[tuple[str, str]]:
+    """확인 질의의 (열 이름, 글자 상수) 목록. 열 모양은 `CAST(글자 상수 AS TEXT) AS k<n>`."""
+    columns: list[tuple[str, str]] = []
+    for column in statement.selected_columns:
+        cast_ = getattr(column, "element", None)
+        bind = getattr(cast_, "clause", None)
+        if (
+            not isinstance(column, Label)
+            or not isinstance(cast_, Cast)
+            or not isinstance(cast_.type, Text)
+            or not isinstance(bind, BindParameter)
+            or not isinstance(bind.value, str)
+            or not _ECHO_LABEL.fullmatch(str(column.name))
+        ):
+            raise DdlNotAllowedError("확인 질의의 열은 CAST(글자 상수 AS TEXT) AS k<n>이어야 한다.")
+        columns.append((str(column.name), bind.value))
+    return columns
+
+
 def _check_echo_select(statement: object) -> Select:
     """완화책 ③ 확인 질의 모양 확인: FROM 없이 `CAST(글자 상수 AS TEXT)` 열만 있는 SELECT."""
     if not isinstance(statement, Select) or statement.get_final_froms():
@@ -356,9 +421,62 @@ def _check_echo_select(statement: object) -> Select:
         if isinstance(node, Select | Label | Cast):
             continue
         if isinstance(node, BindParameter) and isinstance(node.value, str):
+            _check_bind_value(node.value)
             continue
         raise DdlNotAllowedError("확인 질의는 글자 상수만 담을 수 있다.")
+    if not _echo_columns(statement):
+        raise DdlNotAllowedError("확인 질의에 열이 없다.")
     return statement
+
+
+def _decode_echo_literal(body: str, *, backslash_escapes: bool) -> str:
+    """렌더된 글자 상수 한 칸의 안쪽을 값으로 되돌린다(따옴표 두 개는 하나로)."""
+    out: list[str] = []
+    i = 0
+    while i < len(body):
+        pair = body[i : i + 2]
+        if pair == "''":
+            out.append("'")
+            i += 2
+        elif backslash_escapes and pair == "\\\\":
+            out.append("\\")
+            i += 2
+        elif backslash_escapes and body[i] == "\\":
+            raise DdlNotAllowedError("렌더된 확인 질의에 짝 없는 역슬래시가 있다.")
+        else:
+            out.append(body[i])
+            i += 1
+    return "".join(out)
+
+
+def check_rendered_echo(rendered: str, statement: Select, dialect: Dialect) -> str:
+    """렌더된 확인 질의가 허용된 모양이고 값이 입력 상수와 같은지 **실행 전에** 확인한다.
+
+    허용 모양은 FROM 없는 `SELECT CAST('…' AS TEXT) AS k0, CAST('…' AS TEXT) AS k1, …` 뿐이며,
+    각 칸을 값으로 되돌린 것이 입력 상수와 열 순서까지 같아야 한다. 아니면 `DdlNotAllowedError`로
+    거부하고 DB에는 아무것도 보내지 않는다.
+    """
+    expected = _echo_columns(statement)
+    if not rendered.startswith(_ECHO_PREFIX):
+        raise DdlNotAllowedError("렌더된 확인 질의가 허용된 모양이 아니다.")
+    escapes = bool(getattr(dialect, "_backslash_escapes", False))
+    position = len(_ECHO_PREFIX)
+    actual: list[tuple[str, str]] = []
+    while True:
+        match = _ECHO_ITEM.match(rendered, position)
+        if match is None:
+            raise DdlNotAllowedError("렌더된 확인 질의가 허용된 모양이 아니다.")
+        value = _decode_echo_literal(match.group(1), backslash_escapes=escapes)
+        actual.append((match.group(2), value))
+        position = match.end()
+        if position == len(rendered):
+            break
+        if not rendered.startswith(", ", position):
+            raise DdlNotAllowedError("렌더된 확인 질의가 허용된 모양이 아니다.")
+        position += 2
+    if actual != expected:
+        raise DdlNotAllowedError("렌더된 확인 질의의 상수가 입력과 다르다.")
+    return rendered
 
 
 class RenderedSelect(Executable, ClauseElement):
@@ -366,19 +484,27 @@ class RenderedSelect(Executable, ClauseElement):
 
     완화책 ③의 확인 질의(글자 상수만 담은 SELECT)를 뷰 정의와 **같은 렌더러**로 실행해, 렌더된
     글자가 입력과 같은지 비교한다. 이 모듈은 상수를 직접 렌더하지 않고 넘겨받은 렌더러만 부른다.
+    렌더러가 돌려준 글자는 실행 전에 `check_rendered_echo`로 모양과 값을 확인하므로 렌더 함수가
+    임의 SQL을 돌려줘도 실행되지 않는다. `dialect`를 주면 그 방언으로 렌더·확인하고, 없으면 실행하는
+    연결의 방언을 쓴다.
     """
 
     inherit_cache = False
     is_dml = False
 
-    def __init__(self, selectable: Select, render: Renderer) -> None:
+    def __init__(
+        self, selectable: Select, render: Renderer, dialect: Dialect | None = None
+    ) -> None:
         self.selectable = _check_echo_select(selectable)
         self.render = render
+        self.dialect = dialect
 
 
 @compiles(RenderedSelect)
 def _compile_rendered_select(element: RenderedSelect, compiler: Any, **_kw: Any) -> str:
-    return element.render(element.selectable, compiler.dialect)
+    dialect = element.dialect or compiler.dialect
+    rendered = element.render(element.selectable, dialect)
+    return check_rendered_echo(rendered, element.selectable, dialect)
 
 
 def _execute_view_statement(conn: Connection, statement: Any) -> Any:
@@ -458,6 +584,12 @@ def create_view(
     expected = _check_view_select(selectable, dataset_id)
     dialect = conn.dialect
     rendered = render(selectable, dialect)  # 상수 검증 + 같은 렌더러로 그린 정의 글자
+    # 렌더러가 그린 정의 글자가 실제 `CREATE VIEW`에 그대로 들어가는지 **실행 전에** 대조한다.
+    for or_replace in (False, True):
+        statement = _create_view_statement(kind, dataset_id, selectable, or_replace=or_replace)
+        compiled = str(statement.compile(dialect=dialect))
+        if not (compiled.endswith(rendered) and compiled.removesuffix(rendered).endswith(" AS ")):
+            raise DdlVerificationError("뷰 정의의 상수 렌더가 검증한 글자와 다르다.")
     existing = view_column_names(conn, kind, dataset_id)
     rebuilt = False
     if existing is None:
@@ -485,10 +617,6 @@ def create_view(
             conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
         )
         rebuilt = True
-    # 렌더러가 그린 정의 글자가 실제 `CREATE VIEW`에 그대로 들어갔는지 대조한다.
-    statement = _create_view_statement(kind, dataset_id, selectable, or_replace=False)
-    if rendered not in str(statement.compile(dialect=dialect)):
-        raise DdlVerificationError("뷰 정의의 상수 렌더가 검증한 글자와 다르다.")
     _verify_view(conn, kind, dataset_id, expected, render, echo)
     return rebuilt
 

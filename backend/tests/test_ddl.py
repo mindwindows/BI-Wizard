@@ -731,3 +731,81 @@ def test_pg_downgrade_0004_keeps_dynamic_objects_and_upgrade_restores(
     inspector = sa.inspect(pg_owner_engine)
     assert inspector.has_table("datasets") and inspector.has_table("dataset_columns")
     assert inspector.has_table(f"ds_{number}", schema=DYNAMIC_SCHEMA)
+
+
+# --- 뷰 확인 질의·literal_column·@compiles 위치 제한 (reviewer M1·M2) ----
+
+# `RenderedSelect`는 완화책 ③ 확인 질의 실행 전용이라 ddl 밖에서 쓰면 안 된다. `@compiles`(렌더
+# 함수가 만든 글자를 그대로 실행하는 확장)는 ddl과 아래 허용 목록의 정렬 식 한 곳뿐이어야 한다.
+COMPILES_ALLOWED_OUTSIDE_DDL = {Path("core/sorting.py")}
+
+
+def banned_name_findings(tree: ast.AST, names: set[str]) -> list[str]:
+    """이름을 직접 쓰거나, 별칭으로 가져오거나, 속성 사슬(`a.b.c.name`)로 부르는 곳.
+
+    `from x import name as other`, `import x as y; y.z.name`, `getattr(y, "name")`(글자 상수)을 모두
+    잡는다.
+    """
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            found += [
+                a.name.rsplit(".", 1)[-1] for a in node.names if a.name.split(".")[-1] in names
+            ]
+        if isinstance(node, ast.Name) and node.id in names:
+            found.append(node.id)
+        if isinstance(node, ast.Attribute) and node.attr in names:
+            found.append(node.attr)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in names:
+            found.append(node.value)
+    return found
+
+
+def _outside(*packages: str) -> list[Path]:
+    return [
+        path
+        for path in _sources(APP)
+        if path.relative_to(APP).parts[0] not in {p.removesuffix("/") for p in packages}
+    ]
+
+
+def test_banned_name_finder_catches_aliases_and_attribute_chains():
+    names = {"literal_column", "compiles", "RenderedSelect"}
+    cases = [
+        "from sqlalchemy import literal_column as lc\n",
+        "from sqlalchemy.sql.expression import literal_column\n",
+        "import sqlalchemy as sa\nx = sa.sql.expression.literal_column('1')\n",
+        "import sqlalchemy as sa\nx = sa.sql.elements.quoted.literal_column\n",
+        "from sqlalchemy.ext import compiler as c\n@c.compiles(X)\ndef f(e, c): ...\n",
+        "import sqlalchemy.ext.compiler as c\n@c.compiles(X)\ndef f(e, c): ...\n",
+        "from sqlalchemy.ext.compiler import compiles as cc\n",
+        "from app.ddl.dynamic import RenderedSelect as RS\n",
+        "from app import ddl\nddl.dynamic.RenderedSelect(s, r)\n",
+        "import sqlalchemy as sa\nf = getattr(sa, 'literal_column')\n",
+        "import app.ddl.dynamic as d\nd.RenderedSelect\n",
+    ]
+    for source in cases:
+        assert banned_name_findings(ast.parse(source), names), source
+    clean = "import sqlalchemy as sa\nx = sa.literal(1)\ny = sa.column('a')\n"
+    assert not banned_name_findings(ast.parse(clean), names)
+
+
+def test_rendered_select_is_never_used_outside_the_ddl_module():
+    for path in _outside("ddl"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert banned_name_findings(tree, {"RenderedSelect"}) == [], path
+
+
+def test_compiles_extension_exists_only_in_ddl_and_the_pinned_sorting_expression():
+    users = {
+        path.relative_to(APP)
+        for path in _outside("ddl")
+        if banned_name_findings(ast.parse(path.read_text(encoding="utf-8")), {"compiles"})
+    }
+    assert users == COMPILES_ALLOWED_OUTSIDE_DDL
+
+
+def test_literal_column_is_never_used_outside_ddl_and_formula():
+    for path in _outside("ddl", "formula"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assert banned_name_findings(tree, {"literal_column"}) == [], path

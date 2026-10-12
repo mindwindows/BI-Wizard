@@ -28,6 +28,8 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.db_errors import is_connection_failure, is_statement_timeout
+from app.core.errors import formula_runtime_error
 from app.formula.analyze import TNode, literal_value
 from app.formula.context import Compiled, ConvertContext
 from app.formula.errors import CONSTANT_ERROR_REASONS_KO, FormulaError, FormulaIssue, make_issue
@@ -187,12 +189,26 @@ def run_const_probes(probes: Sequence[Probe], probe: ConstProbe) -> list[Formula
     return issues
 
 
+def _raise_if_infrastructure(exc: Exception) -> None:
+    """연결 끊김·소켓 시간 초과는 그대로, 문장 시간 초과는 `FORMULA_RUNTIME_ERROR`로 올린다.
+
+    이런 실패는 수식의 잘못이 아니므로 `CONSTANT_PROBE_FAILED`(수식 거부)로 바꾸지 않는다. 연결
+    계층 오류는 전역 핸들러가 503 `SERVICE_UNAVAILABLE`로 답한다. 수식 때문에 DB가 거부한 경우
+    (그 밖의 DB 오류)만 호출한 쪽이 수식 거부로 처리한다.
+    """
+    if is_statement_timeout(exc):
+        raise formula_runtime_error() from None
+    if is_connection_failure(exc):
+        raise exc
+
+
 def _evaluate(pending: Sequence[Probe], probe: ConstProbe) -> list[Any]:
-    """한 번에 평가하고, 실패하면 하나씩 평가한다(실패한 것은 `None`)."""
+    """한 번에 평가하고, 실패하면 하나씩 평가한다(수식 때문에 실패한 것은 `None`)."""
     conditions = [p.condition for p in pending]
     try:
         values = list(probe(conditions))
-    except Exception:  # DB 오류의 종류는 모른다. 하나씩 다시 시도한다.
+    except Exception as exc:  # DB 오류의 종류는 모른다. 인프라 오류가 아니면 하나씩 다시 시도한다.
+        _raise_if_infrastructure(exc)
         values = []
     if len(values) == len(conditions):
         return [bool(v) if v is not None else False for v in values]
@@ -201,6 +217,7 @@ def _evaluate(pending: Sequence[Probe], probe: ConstProbe) -> list[Any]:
         try:
             (value,) = list(probe([condition]))
             results.append(bool(value) if value is not None else False)
-        except Exception:
+        except Exception as exc:
+            _raise_if_infrastructure(exc)
             results.append(None)
     return results

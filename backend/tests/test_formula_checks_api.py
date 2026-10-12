@@ -610,3 +610,92 @@ def test_successful_definition_change_clears_a_recorded_failure(
         response = post_formula(call, first, "새 계산", "[값] + 1")
         assert response.status_code == 201, response.text
         assert client.get("/api/health").json()["views_failed_count"] == 0
+
+
+# --- 긴 잠금 아래 소켓 시간 초과는 500이 아니라 503 (QA O-3) ----
+
+
+@pytest.fixture
+def socket_timeout_on_dynamic_reads(monkeypatch):
+    """`bi_data` 객체를 읽는 Session.execute가 pg8000 소켓 시간 초과(raw TimeoutError)를 올린다."""
+    real = Session.execute
+    calls: list[str] = []
+
+    def execute(self, statement, *args, **kwargs):
+        if "bi_data" in str(statement):
+            calls.append("timeout")
+            raise TimeoutError("timed out SELECT secret FROM bi_data.ds_1")
+        return real(self, statement, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "execute", execute)
+    return calls
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/datasets/{id}/rows", "/api/checks/formula-errors", "/api/datasets/{id}/formula-errors"],
+    ids=["c1-rows", "d7-overview", "d8-cells"],
+)
+def test_read_paths_answer_503_when_a_long_lock_makes_the_socket_time_out(
+    api, errors_ds_for_timeout, socket_timeout_on_dynamic_reads, caplog, path
+):
+    url = path.format(id=errors_ds_for_timeout["id"])
+    with caplog.at_level("ERROR"):
+        response = api("viewer", "GET", url)
+    assert response.status_code == 503, response.text
+    assert response.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    assert socket_timeout_on_dynamic_reads  # 실제로 시간 초과 경로를 지났다
+    for leaked in ("SELECT", "secret", "bi_data", "Traceback"):
+        assert leaked not in response.text
+        assert leaked not in caplog.text
+    assert "TimeoutError" in caplog.text  # 로그에는 클래스 이름만
+
+
+@pytest.fixture
+def errors_ds_for_timeout(api, db, world):
+    dataset = make_dataset(api, world, "시간 초과")
+    value = add_column(api, dataset["id"], "값")["id"]
+    add_formula(api, dataset["id"], "역수", "1 / [값]")
+    insert_rows(db, dataset["id"], [{value: 0}, {value: 2}])
+    return {"id": dataset["id"]}
+
+
+# --- 시작 때 동기 대조가 서비스 시작을 막는 시간 (reviewer R5) ----
+
+FIFTY = 50
+STARTUP_RECONCILE_LIMIT_SECONDS = 60.0  # 넉넉한 상한(실측값은 Skill `formula-column` 8절에 기록)
+
+
+def test_startup_reconcile_time_with_fifty_datasets(api, db, world, stub_settings, sync, capsys):
+    """활성 데이터셋 50개(원본 열 2개 + 계산 열 3개)의 시작 대조 시간을 잰다.
+
+    lifespan이 `reconcile_all`을 끝낼 때까지 서비스가 시작되지 않으므로 이 시간이 시작 지연이다.
+    (a) 해시가 모두 같을 때(보통의 재시작), (b) 모두 달라 뷰를 전부 다시 만들 때.
+    """
+    ids = []
+    for number in range(FIFTY):
+        dataset = make_dataset(api, world, f"대조 {number}")
+        add_column(api, dataset["id"], "매출")
+        add_column(api, dataset["id"], "비용")
+        add_formula(api, dataset["id"], "비율", "[매출] / [비용]")
+        add_formula(api, dataset["id"], "합계", "SUM([매출], [비용])")
+        add_formula(api, dataset["id"], "반올림", "ROUNDUP([매출] / 3, 2)")
+        ids.append(dataset["id"])
+    timings = {}
+    for label in ("hash-equal", "all-stale"):
+        if label == "all-stale":
+            with db.writer.begin() as conn:
+                conn.execute(
+                    sa.update(datasets).where(datasets.c.id.in_(ids)).values(def_hash="stale")
+                )
+        started = time.perf_counter()
+        with start_app(db, stub_settings, sync) as client:
+            elapsed = time.perf_counter() - started
+            assert client.get("/api/health").json()["views_failed_count"] == 0
+        timings[label] = elapsed
+    with capsys.disabled():
+        print(
+            f"\n[R5] 시작 대조 {FIFTY}개: 해시 같음 {timings['hash-equal']:.2f}초, "
+            f"전부 재생성 {timings['all-stale']:.2f}초"
+        )
+    assert max(timings.values()) < STARTUP_RECONCILE_LIMIT_SECONDS

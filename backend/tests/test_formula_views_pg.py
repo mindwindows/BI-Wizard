@@ -562,6 +562,13 @@ def lenient_c0(monkeypatch):
 
     monkeypatch.setattr(literals, "text_constant_problem", without_backslash_rule)
     monkeypatch.setattr("app.formula.analyze.text_constant_problem", without_backslash_rule)
+    # 게이트의 방어 중복(ddl 쪽 글자 상수 검사)도 같은 규칙만 끈다.
+    from app.ddl import dynamic
+
+    gate_original = dynamic._text_bind_problem
+    monkeypatch.setattr(
+        dynamic, "_text_bind_problem", lambda value: gate_original(value.replace("\\", ""))
+    )
 
 
 @pytest.mark.parametrize("name", sorted(BACKSLASH_CASES))
@@ -666,9 +673,8 @@ def test_l3_renderer_alone_is_consistent_when_dialect_and_session_agree(
     dialect._backslash_escapes = setting == "off"
     with db.engine.connect() as conn:
         conn.execute(sa.select(sa.func.set_config("standard_conforming_strings", setting, True)))
-        statement = sa.select(LITERALS.text(payload).label("v"))
-        rendered = render_literal_sql(statement, dialect)
-        row = conn.execute(RenderedSelect(statement, lambda s, d: rendered)).one()
+        statement = sa.select(LITERALS.text(payload).label("k0"))
+        row = conn.execute(RenderedSelect(statement, render_literal_sql, dialect)).one()
         assert row[0] == payload
         conn.rollback()
     assert_no_effect(victim)
@@ -681,9 +687,8 @@ def test_l3_a_mismatch_between_dialect_and_session_would_corrupt_or_inject(db, v
     dialect._backslash_escapes = False  # on으로 알고 렌더
     with db.engine.connect() as conn:
         conn.execute(sa.select(sa.func.set_config("standard_conforming_strings", "off", True)))
-        statement = sa.select(LITERALS.text(payload).label("v"))
-        rendered = render_literal_sql(statement, dialect)
-        row = conn.execute(RenderedSelect(statement, lambda s, d: rendered)).one()
+        statement = sa.select(LITERALS.text(payload).label("k0"))
+        row = conn.execute(RenderedSelect(statement, render_literal_sql, dialect)).one()
         assert row[0] != payload
         conn.rollback()
     assert_no_effect(victim)

@@ -248,6 +248,41 @@ def test_unhandled_db_connection_error_is_503_without_leaks(make_settings, sqlit
     assert "OperationalError" in caplog.text and error["request_id"] in caplog.text
 
 
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        lambda: TimeoutError("timed out SELECT secret FROM users"),
+        lambda: ConnectionResetError("reset SELECT secret FROM users"),
+        lambda: BrokenPipeError("broken SELECT secret FROM users"),
+        lambda: __import__("pg8000.exceptions", fromlist=["InterfaceError"]).InterfaceError(
+            "network error SELECT secret FROM users"
+        ),
+    ],
+    ids=["socket-timeout", "connection-reset", "broken-pipe", "pg8000-interface-error"],
+)
+def test_unwrapped_connection_layer_errors_are_503_without_leaks(
+    make_settings, sqlite_engine, caplog, make_error
+):
+    """SQLAlchemy가 감싸지 않는 소켓 시간 초과·연결 끊김·pg8000 네트워크 오류도 503이다."""
+    app = create_app(make_settings(), engine=sqlite_engine)
+    router = APIRouter()
+    error = make_error()
+
+    @router.get("/_t/socket")
+    def socket_failure():
+        raise error
+
+    app.include_router(router, prefix="/api")
+    with TestClient(app, raise_server_exceptions=False) as c, caplog.at_level(logging.ERROR):
+        response = c.get("/api/_t/socket")
+    body = _assert_error_shape(response, "SERVICE_UNAVAILABLE", 503)
+    assert body["details"] == {}
+    for leaked in ("SELECT", "secret", "users", "Traceback"):
+        assert leaked not in response.text
+        assert leaked not in caplog.text
+    assert type(error).__name__ in caplog.text and body["request_id"] in caplog.text
+
+
 def test_validation_error_for_broken_json(client):
     response = client.post(
         "/api/_t/validate", content=b'{"name": ', headers={"Content-Type": "application/json"}

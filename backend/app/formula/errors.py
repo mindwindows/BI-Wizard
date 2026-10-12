@@ -48,7 +48,7 @@ MESSAGES_KO: dict[str, str] = {
     "UNKNOWN_COLUMN": "'{name}' 열을 찾을 수 없습니다.{suggest}",
     "UNKNOWN_FUNCTION": "'{name}' 함수는 없습니다.{suggest}",
     "COLUMN_TYPE_UNSUPPORTED": "'{name}' 열의 종류를 수식에서 쓸 수 없습니다.",
-    "ARG_COUNT": "{name}에는 값이 {expected}개 필요한데 {actual}개가 들어 있습니다.",
+    "ARG_COUNT": "{name}에는 값이 {expected} 필요한데 {actual}개가 들어 있습니다.",
     "ARG_TYPE": "{name}의 {position}번째 값은 {expected}이어야 하는데 {actual}입니다.{hint}",
     "TYPE_MISMATCH": "{name}에 쓴 값들은 같은 종류여야 하는데 {types}이(가) 섞여 있습니다.{hint}",
     "CONST_REQUIRED": "{name}의 {position}번째 값은 계산식이나 열이 아니라 "

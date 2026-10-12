@@ -5,7 +5,8 @@ DB를 모른다. 사전의 항목(연산자 포함)마다 인수 구성 x 값 �
 - 출처(인수 하나가 어디서 오는가): `const`(수식 안의 상수), `col`(원본 열 값), `calc`(원본 열을
   그대로 돌려주는
   계산 열을 참조해 식이 펼쳐지는 경우).
-- 값 변형: 숫자 {0, 1, -1, 0.1, 0.5, 1.5, 2.5, -2.5, 1E-7, 10**30, 38자리}, 글자 {빈 문자열, 한글,
+- 값 변형: 숫자 {0, 1, -1, 0.1, 0.5, 1.5, 2.5, -2.5, 1E-7, 10**30, 38자리, 긴 소수 3종},
+  글자 {빈 문자열, 한글,
   `O'Brien`, 대소문자 혼합, 앞뒤·안쪽 연속 공백, NFC/NFD 쌍, 200자, `%` 포함}, 참거짓, 날짜 {윤일,
   월말, 0001-01-01, 9999-12-31}, 빈 값(열 값에서만 생긴다).
 - 인수 두 개까지는 전수(모든 출처·값 조합), 세 개 이상은 쌍별(모든 인수 쌍의 모든 선택 조합을 한 번
@@ -37,6 +38,9 @@ NUMBERS: tuple[Decimal, ...] = (
     Decimal("1E-7"),
     Decimal(10**30),
     Decimal("12345678901234567890123456789012345678"),  # 38자리
+    Decimal("123456789012.1234567895"),  # 정수부 12자리 + 소수 10자리(끝이 5인 반올림 경계)
+    Decimal("-123456789012.1234567895"),
+    Decimal("0.12345678901234567890123456789012345678"),  # 소수 38자리
 )
 _NFC = "é"  # é
 _NFD = "é"  # e + 결합 악센트(같은 글자의 다른 표현)
@@ -104,6 +108,9 @@ class Combo:
     arg_types: tuple[str, ...]
     args: tuple[Arg, ...]
     expression: str
+    constant_error: str | None = (
+        None  # 사전 `error_when` 규칙으로 C0가 거부해야 하면 그 코드(E1~E3)
+    )
 
 
 @dataclass
@@ -115,6 +122,57 @@ class Group:
     combos: list[Combo] = field(default_factory=list)
     rows: list[tuple[Any, ...]] = field(default_factory=list)  # 인수 위치별 열 값(없으면 None)
     tags: bool = False  # SUMTAG 묶음: 같은 태그의 숫자 열을 쓴다
+
+
+# --- 상수 오류 기대값(사전의 `error_when`으로 설명되는 거부, 07 §3) ----
+# 인수가 모두 수식 안 상수이면 C0가 `CONSTANT_ERROR`로 거부한다(DB 오류 조건을 상수로 평가).
+# 어떤 조합이 거부돼야 하는지를 DB와 변환기를 쓰지 않고 파이썬으로 따로 계산해(독립 기대값)
+# 거부된 수식의 집합이 정확히 같은지 대조한다. 사전에 `error_when`이 있는 항목이 늘면
+# `CONSTANT_ERROR_ORACLE`에 더해야 한다(시험이 확인한다).
+
+
+def _truncate(value: Decimal) -> int:
+    return int(value)  # 0 쪽으로 버림
+
+
+def _divide_by_zero(values: Sequence[Any]) -> str | None:
+    return "E1" if values[1] == 0 else None  # 나누는 수가 0
+
+
+def _bad_slice_length(values: Sequence[Any]) -> str | None:
+    n = values[1]
+    return "E2" if (n < 0 or n > 10000) else None  # 개수가 0 미만이거나 10000 초과
+
+
+def _date_out_of_range(values: Sequence[Any]) -> str | None:
+    year, month, day = (_truncate(v) for v in values)
+    carry = (month - 1) // 12
+    year, month = year + carry, month - 12 * carry
+    if not -100000 <= day <= 100000 or not 1 <= year <= 9999:
+        return "E3"
+    try:
+        datetime.date(year, month, 1) + datetime.timedelta(days=day - 1)
+    except OverflowError:
+        return "E3"
+    return None
+
+
+CONSTANT_ERROR_ORACLE = {
+    "/": _divide_by_zero,
+    "LEFT": _bad_slice_length,
+    "RIGHT": _bad_slice_length,
+    "DATE": _date_out_of_range,
+}
+# 거부 코드는 C0의 `CONSTANT_ERROR` 하나뿐이다(다른 코드가 나오면 행렬이나 변환기가 잘못된 것).
+EXPECTED_REJECTION_CODES = frozenset({"CONSTANT_ERROR"})
+
+
+def constant_error(spec_name: str, args: Sequence[Arg]) -> str | None:
+    """인수가 모두 상수이고 사전 규칙의 오류 조건이 참이면 그 셀 오류 코드(E1~E3), 아니면 None."""
+    rule = CONSTANT_ERROR_ORACLE.get(spec_name)
+    if rule is None or any(arg.source != CONST for arg in args):
+        return None
+    return rule([arg.value for arg in args])
 
 
 # --- 쌍별 조합 ----
@@ -256,7 +314,15 @@ def spec_groups(spec: FunctionSpec) -> list[Group]:
             group.rows = _combine(row_domains)
             for choice in _combine(domains):
                 expression = render_expression(spec, arg_types, choice, names)
-                group.combos.append(Combo(spec.name, arg_types, tuple(choice), expression))
+                group.combos.append(
+                    Combo(
+                        spec.name,
+                        arg_types,
+                        tuple(choice),
+                        expression,
+                        constant_error(spec.name, choice),
+                    )
+                )
             groups.append(group)
     return groups
 
@@ -283,3 +349,13 @@ def all_groups() -> list[Group]:
 
 def total_formulas(groups: Sequence[Group]) -> int:
     return sum(len(g.combos) for g in groups)
+
+
+def expected_rejections(groups: Sequence[Group]) -> dict[tuple[str, str], str]:
+    """C0가 거부해야 하는 수식: (사전 항목 이름, 수식) -> 설명하는 셀 오류 코드."""
+    return {
+        (g.spec_name, c.expression): c.constant_error
+        for g in groups
+        for c in g.combos
+        if c.constant_error is not None
+    }

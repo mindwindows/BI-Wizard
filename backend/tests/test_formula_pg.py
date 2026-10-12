@@ -7,6 +7,8 @@
 평가하고, 미리보기(바인드)와 뷰(리터럴 렌더)의 결과가 같은지 확인한다.
 """
 
+from decimal import Decimal
+
 import sqlalchemy as sa
 
 from app.formula import compile_formula, get_default_registry
@@ -70,3 +72,60 @@ def test_random_formulas_never_raise_database_errors_and_agree(pg_app_engine):
         accepted, _rejected, problems = fuzz_check(connection, expressions, rows, FUZZ_COLUMNS)
     assert accepted >= 45
     assert problems == [], "\n".join(problems[:10])
+
+
+# --- 반올림 함수의 정확성: 긴 소수·큰 값 (reviewer M3) ----
+
+_ROUNDING_VALUES = [
+    "0", "1", "-1", "0.5", "-0.5", "1.5", "2.5", "-2.5", "1.005", "-1.005", "0.1", "1E-7",
+    "123456789012.1234567895",  # 정수부 12자리 + 소수 10자리(마지막이 5인 경계)
+    "-123456789012.1234567895",
+    "123456789012.1234567890",  # 소수 끝이 0
+    "99999999999999999999.9999999999",
+    "0.12345678901234567890123456789012345678",  # 소수 38자리
+    "-0.12345678901234567890123456789012345678",
+    "0.00000000000000000000000000000000000001",  # 소수 38째 자리만 1
+    "12345678901234567890123456789012345678",  # 정수 38자리
+    "1234567890123456789012.123456789012345",
+    "1000000000000000000000000000000",  # 10**30
+]  # fmt: skip
+
+
+def _decimal_reference(value: Decimal, digits: int, rounding: str) -> Decimal:
+    import decimal
+
+    context = decimal.Context(prec=200)
+    return value.quantize(Decimal(1).scaleb(-digits), rounding=rounding, context=context)
+
+
+def test_rounding_functions_are_exact_for_long_decimals_and_round_away_from_zero(pg_app_engine):
+    """ROUND/ROUNDUP/ROUNDDOWN을 파이썬 `Decimal` 기준값과 전수 대조한다(자릿수 -10~10).
+
+    ROUND는 0.5를 0에서 먼 쪽으로, ROUNDUP은 0에서 먼 쪽으로, ROUNDDOWN은 0 쪽으로 처리하고, 결과의
+    소수 자릿수는 자릿수(음수면 0)다. ROUNDUP이 나눗셈을 쓰면 유효숫자 약 16자리를 넘는 값에서
+    틀렸다.
+    """
+    import decimal
+
+    functions = {
+        "ROUND": decimal.ROUND_HALF_UP,
+        "ROUNDUP": decimal.ROUND_UP,
+        "ROUNDDOWN": decimal.ROUND_DOWN,
+    }
+    problems: list[str] = []
+    checked = 0
+    with pg_app_engine.connect() as connection:
+        for name, rounding in functions.items():
+            for text in _ROUNDING_VALUES:
+                value = Decimal(text)
+                literal = format(value, "f") if value >= 0 else f"({format(value, 'f')})"
+                for digits in range(-10, 11):
+                    result = compile_formula(f"{name}({literal}, {digits})", standard_columns())
+                    assert result.ok, (name, text, digits, result.issues)
+                    got = connection.execute(sa.select(result.value)).scalar_one()
+                    want = _decimal_reference(value, digits, rounding)
+                    checked += 1
+                    if got != want or got.as_tuple().exponent != -max(digits, 0):
+                        problems.append(f"{name}({text}, {digits}): DB {got} != 기준 {want}")
+    assert checked == 3 * len(_ROUNDING_VALUES) * 21
+    assert problems == [], "\n".join(problems[:20])

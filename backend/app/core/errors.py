@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.db_errors import is_db_unavailable
+from app.core.db_errors import DB_NETWORK_ERRORS, is_db_unavailable
 from app.core.request_id import REQUEST_ID_HEADER, get_request_id
 
 logger = logging.getLogger(__name__)
@@ -513,6 +513,8 @@ async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _handle_app_error)
     app.add_exception_handler(SQLAlchemyError, _handle_db_unavailable)
+    for network_error in DB_NETWORK_ERRORS:  # 감싸지 않은 소켓 시간 초과·연결 끊김도 503
+        app.add_exception_handler(network_error, _handle_db_unavailable)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)
     app.add_exception_handler(StarletteHTTPException, _handle_http_exception)
     app.add_exception_handler(Exception, _handle_unexpected)

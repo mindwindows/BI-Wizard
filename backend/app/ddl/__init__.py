@@ -5,6 +5,7 @@
 
 from app.ddl.dynamic import (
     ALLOWED_DDL_ELEMENTS,
+    VIEW_ALLOWED_FUNCTIONS,
     VIEW_KINDS,
     add_period_rules,
     add_raw_column,
@@ -38,6 +39,7 @@ __all__ = [
     "ALLOWED_DDL_ELEMENTS",
     "ALLOWED_OBJECT_KINDS",
     "DYNAMIC_SCHEMA",
+    "VIEW_ALLOWED_FUNCTIONS",
     "VIEW_KINDS",
     "DdlError",
     "DdlExecutionError",

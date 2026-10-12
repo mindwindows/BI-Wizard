@@ -4,7 +4,11 @@
 상수 부분식 검사는 SQLite 상수 SELECT로 대신 평가한다.
 """
 
+import re
+
 import pytest
+from sqlalchemy.exc import DisconnectionError
+from sqlalchemy.exc import InterfaceError as SaInterfaceError
 
 from app.formula import ColumnInfo, check_formula, compile_formula, render_text
 from app.formula.analyze import MAX_EXPANDED_NODES
@@ -643,3 +647,146 @@ def test_unused_column_kinds_do_not_break_name_resolution():
     ]
     assert ok_result("[xxx] = [xxx]", columns).result_type == "boolean"
     assert DAY and NAME
+
+
+# --- 오류 문구의 단위·조사 중복 (스크린샷 발견: "값이 2개개 필요한데") ----
+
+_DUPLICATE_UNIT_OR_PARTICLE = re.compile(r"(개|번째|단계|자|을|를|은|는|이|가|에|의)\1")
+
+
+def _all_message_texts() -> dict[str, str]:
+    """검사 오류 문구 전수: 사전의 모든 거부 사례를 실제로 컴파일해 나온 문구 + 정적 문구."""
+    from app.formula import get_default_registry
+    from app.formula.errors import CELL_ERROR_MESSAGES_KO, CONSTANT_ERROR_REASONS_KO
+
+    texts: dict[str, str] = {}
+    for spec in get_default_registry().specs():
+        for case in spec.cases:
+            if case.expect != "reject":
+                continue
+            result = compile_formula(case.expression, standard_columns())
+            for issue in result.issues:
+                texts[f"{issue.code}: {case.expression}"] = issue.message
+        texts[f"help {spec.name}"] = spec.help_ko
+        texts[f"excel_diff {spec.name}"] = spec.excel_diff
+    for expression in (
+        "MIN(1)", "ROUND(1)", "IF(TRUE, 1)", "SUM()", "NOT()", "DATE(1, 2)", "LEN([이름], 1)",
+        "ROUND(1, 2, 3)", "SUMTAG()", "[없는 열]", "FOO(1)", "1 +", "(1", '"abc', "[매출",
+    ):  # fmt: skip
+        for issue in compile_formula(expression, standard_columns()).issues:
+            texts[f"{issue.code}: {expression}"] = issue.message
+    texts.update({f"cell {code}": text for code, text in CELL_ERROR_MESSAGES_KO.items()})
+    texts.update({f"reason {code}": text for code, text in CONSTANT_ERROR_REASONS_KO.items()})
+    return texts
+
+
+def test_error_messages_do_not_repeat_a_unit_or_particle():
+    texts = _all_message_texts()
+    assert len(texts) > 100  # 사전 전체의 거부 사례와 도움말을 실제로 훑었다
+    repeated = {
+        key: text for key, text in texts.items() if _DUPLICATE_UNIT_OR_PARTICLE.search(text)
+    }
+    assert repeated == {}
+
+
+def test_every_message_template_filled_with_realistic_values_has_no_repeated_unit():
+    """틀을 현실적인 값으로 채워 단위·조사 겹침을 본다(단위는 틀에만 있고 값에는 없어야 한다)."""
+    from app.formula.errors import MESSAGES_KO
+
+    values = {
+        "max": 40, "length": 2500, "count": 60000, "actual": 1, "position": 2, "expected": "2개",
+        "name": "ROUND", "char": "“", "token": ")", "hint": "", "suggest": "",
+        "types": "글자, 숫자",
+        "kind": "숫자", "range": "-10~10 사이의 정수", "tag": "합계", "column_id": 3,
+        "path": "A → B → A", "reason": "0으로 나눔",
+    }  # fmt: skip
+    for code, template in MESSAGES_KO.items():
+        try:
+            text = template.format(**values)
+        except KeyError as missing:  # 새 틀의 자리 이름이 늘면 이 시험 값표에 더한다
+            raise AssertionError(f"{code}: 값표에 {missing}가 없다") from None
+        assert not _DUPLICATE_UNIT_OR_PARTICLE.search(text), (code, text)
+
+
+def test_argument_count_messages_are_exact():
+    (issue,) = compile_formula("ROUND(1)", standard_columns()).issues
+    assert issue.message == "ROUND에는 값이 2개 필요한데 1개가 들어 있습니다."
+    (issue,) = compile_formula("IF(TRUE, 1)", standard_columns()).issues
+    assert issue.message == "IF에는 값이 3개 필요한데 2개가 들어 있습니다."
+    (issue,) = compile_formula("MIN(1)", standard_columns()).issues
+    assert issue.message == "MIN에는 값이 2개 이상 필요한데 1개가 들어 있습니다."
+
+
+# --- 상수 검사 중 인프라 오류는 수식 거부가 아니다 (reviewer R3) ----
+
+
+def _db_error(sqlstate_code: str):
+    from sqlalchemy.exc import DBAPIError
+
+    class FakeOrig(Exception):
+        pass
+
+    return DBAPIError.instance(
+        "SELECT CAST(secret AS BOOLEAN)",
+        None,
+        FakeOrig({"C": sqlstate_code, "M": "message with 비밀상수"}),
+        FakeOrig,
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("socket timed out"),
+        ConnectionResetError("connection reset"),
+        BrokenPipeError("broken pipe"),
+        pytest.param(_db_error("08006"), id="sqlstate-connection-failure"),
+        pytest.param(_db_error("57P01"), id="sqlstate-admin-shutdown"),
+        pytest.param(DisconnectionError("server closed the connection"), id="disconnection"),
+        pytest.param(SaInterfaceError("SELECT 1", None, Exception("network")), id="sa-interface"),
+    ],
+)
+def test_connection_failures_during_the_constant_check_are_not_formula_rejections(error):
+    raised = error
+    calls = []
+
+    def probe(conditions):
+        calls.append(len(conditions))
+        raise raised
+
+    with pytest.raises(type(raised)):  # 수식 오류로 바꾸지 않고 그대로 올린다(핸들러가 503)
+        compile_formula("1 / 0", standard_columns(), const_probe=probe)
+    assert calls == [1]  # 한 번 실패하면 하나씩 다시 시도하지 않는다
+
+
+def test_statement_timeout_during_the_constant_check_is_a_runtime_error_not_a_rejection():
+    from app.core.errors import AppError, ErrorCode
+
+    def probe(conditions):
+        raise _db_error("57014")
+
+    with pytest.raises(AppError) as caught:
+        compile_formula("1 / 0", standard_columns(), const_probe=probe)
+    assert caught.value.code == ErrorCode.FORMULA_RUNTIME_ERROR
+    assert "비밀상수" not in str(caught.value) and caught.value.__cause__ is None
+
+
+def test_a_database_rejection_of_the_formula_itself_is_still_a_probe_failure():
+    def probe(conditions):
+        raise _db_error("22003")  # numeric_value_out_of_range: 수식이 원인이다
+
+    result = compile_formula("1 / 2", standard_columns(), const_probe=probe)
+    assert [i.code for i in result.issues] == ["CONSTANT_PROBE_FAILED"]
+
+
+def test_connection_failure_while_retrying_one_by_one_is_also_not_a_rejection():
+    state = {"calls": 0}
+
+    def probe(conditions):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise _db_error("22003")  # 묶음 평가는 수식 때문에 실패 -> 하나씩 다시 시도
+        raise TimeoutError("socket timed out")
+
+    with pytest.raises(TimeoutError):
+        compile_formula("1 / 2", standard_columns(), const_probe=probe)

@@ -531,11 +531,14 @@ def _round_down(ctx: ConvertContext, a: Sequence[Compiled]) -> ColumnElement[Any
 
 
 def _round_up(ctx: ConvertContext, a: Sequence[Compiled]) -> ColumnElement[Any]:
+    # 나눗셈은 PostgreSQL이 몫을 유효숫자 약 16자리까지만 계산해 큰 값에서 틀릴 수 있다(07 §10-1,
+    # reviewer M3). 그래서 곱셈만 쓴다: ceil(|x| * 10^n) * 10^-n. 두 상수(10^n, 10^-n)는 `Decimal`로
+    # 정확히 표현되고 numeric 곱셈은 정확하며, 결과의 소수 자릿수는 n(n < 0이면 0)이다.
     n = _digits(a)
-    factor = ctx.lit.number(Decimal(10) ** n)
+    up = ctx.lit.number(Decimal(10) ** n)
+    down = ctx.lit.number(Decimal(10) ** -n)
     x = a[0].value
-    scaled = sa.func.ceil(sa.func.abs(x) * factor) / factor
-    return sa.func.sign(x) * sa.func.round(scaled, ctx.lit.integer(n))
+    return sa.func.sign(x) * (sa.func.ceil(sa.func.abs(x) * up) * down)
 
 
 def _rounding(
@@ -574,6 +577,12 @@ ROUND = _rounding(
         ok("ROUND(1.005, 2)", "1.01"),
         ok("ROUND(1234.567, -2)", 1200),
         ok("ROUND([a], 1)", "2.3", cols=_N, row={"a": "2.25"}),
+        ok(
+            "ROUND(123456789012.1234567895, 9)",
+            "123456789012.123456790",
+            note="정수부 12자리 + 소수 10자리, 0.5는 0에서 먼 쪽",
+        ),
+        ok("ROUND(-123456789012.1234567895, 9)", "-123456789012.123456790"),
     ),
 )
 ROUNDUP = _rounding(
@@ -588,6 +597,15 @@ ROUNDUP = _rounding(
         ok("ROUNDUP(1.00, 2)", "1.00"),
         ok("ROUNDUP(1201, -2)", 1300),
         ok("ROUNDUP([a], 0)", 3, cols=_N, row={"a": "2.01"}),
+        ok(
+            "ROUNDUP(123456789012.1234567890, 10)",
+            "123456789012.1234567890",
+            note="이미 그 자릿수면 그대로(나눗셈을 쓰면 긴 소수에서 틀렸다)",
+        ),
+        ok("ROUNDUP(123456789012.1234567891, 10)", "123456789012.1234567891"),
+        ok("ROUNDUP(123456789012.1234567891, 9)", "123456789012.123456790"),
+        ok("ROUNDUP(-1234567890123456789012.123456789012345, 2)", "-1234567890123456789012.13"),
+        ok("ROUNDUP(99999999999999999999.9999999999, 10)", "99999999999999999999.9999999999"),
     ),
 )
 ROUNDDOWN = _rounding(
@@ -601,6 +619,8 @@ ROUNDDOWN = _rounding(
         ok("ROUNDDOWN(1.999, 2)", "1.99"),
         ok("ROUNDDOWN(1299, -2)", 1200),
         ok("ROUNDDOWN([a], 0)", 2, cols=_N, row={"a": "2.99"}),
+        ok("ROUNDDOWN(-123456789012.1234567895, 9)", "-123456789012.123456789"),
+        ok("ROUNDDOWN(1234567890123456789012.123456789012345, 2)", "1234567890123456789012.12"),
     ),
 )
 

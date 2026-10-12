@@ -162,7 +162,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 | 413 `PAYLOAD_TOO_LARGE` | 5,000행 또는 1MiB 초과 | 나누어 붙여넣는다. HTML 413이면 nginx가 막은 것(같은 안내) |
 | 503 `WRITE_BUSY` | 다른 입력·정의 변경을 3초 넘게 기다림 또는 교착 | `retry_after`초 뒤 같은 요청을 다시 보낸다. 반복되면 `pg_stat_activity`의 긴 트랜잭션과 `docker compose logs backend` |
 | 503 `DEFINITION_BUSY`(열 추가 등) | 입력이 이어져 정의 변경 락을 1초 안에 못 얻음 | 입력이 잠잠할 때 다시 시도(굶음 관찰 참조) |
-| 503 `SERVICE_UNAVAILABLE` | DB 장애, 또는 사용자 조회 설정 오류(권한 거부·표 없음)도 같은 503으로 보임 | `/api/health/db`, `docker compose logs backend`. 설정 오류면 `migrate`가 최신인지, 접속 계정이 `bi_app`인지 확인 |
+| 503 `SERVICE_UNAVAILABLE` | DB 장애, 긴 잠금 아래 행 조회(C1)의 소켓 시간 초과(5초; 이전에는 500이었다), 또는 사용자 조회 설정 오류(권한 거부·표 없음)도 같은 503으로 보임 | `/api/health/db`, `docker compose logs backend`. 설정 오류면 `migrate`가 최신인지, 접속 계정이 `bi_app`인지 확인 |
 | 500 `INTERNAL_ERROR` | 예기치 않은 오류 | 응답의 `request_id`로 `docker compose logs backend` |
 | 숫자 칸이 `"1234.5"`처럼 뒤 0이 사라짐 | PostgreSQL `numeric`은 저장한 자릿수를 그대로 돌려주므로 입력이 `"1234.5"`였을 것 | 입력 문자열 확인. (DB 없는 SQLite 시험은 자릿수를 보존하지 않는다) |
 

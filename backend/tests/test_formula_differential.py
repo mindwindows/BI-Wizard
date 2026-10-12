@@ -30,7 +30,7 @@ from app.dataset import service as dataset_service
 from app.db_metadata import DYNAMIC_SCHEMA, dataset_columns
 from app.ddl import column_name, error_column_name, error_view_name, view_name
 from app.formula import LITERALS, compile_formula, get_default_registry, repo
-from app.formula.errors import CELL_ERROR_BY_NUMBER
+from app.formula.errors import CELL_ERROR_BY_NUMBER, CONSTANT_ERROR_REASONS_KO
 from app.formula.hook import apply_definition, make_probe
 from app.formula.literals import LITERALS as _LITERALS  # noqa: F401
 from app.formula.views import build_column_infos, compile_all, source_columns, source_table
@@ -38,11 +38,14 @@ from tests.conftest import Db
 from tests.formula_matrix import (
     CALC,
     COL,
+    CONSTANT_ERROR_ORACLE,
+    EXPECTED_REJECTION_CODES,
     TAGS,
     VARIANTS,
     Group,
     all_groups,
     column_names,
+    expected_rejections,
     total_formulas,
 )
 
@@ -66,9 +69,8 @@ def test_matrix_is_generated_from_the_dictionary_for_every_entry():
 
 
 def test_matrix_covers_all_value_variants_and_sources_for_two_argument_entries():
-    groups = [g for g in all_groups() if g.spec_name == "+"]
-    assert len(groups) == 1
-    combos = groups[0].combos
+    groups = [g for g in all_groups() if g.spec_name == "+"]  # 묶음 크기 상한으로 여러 개일 수 있다
+    combos = [c for g in groups for c in g.combos]
     sources = {(c.args[0].source, c.args[1].source) for c in combos}
     assert len(sources) == 9  # 두 인수의 출처 3 x 3을 전수
     consts = {c.args[0].value for c in combos if c.args[0].source == "const"}
@@ -79,15 +81,35 @@ def test_matrix_covers_all_value_variants_and_sources_for_two_argument_entries()
 
 def test_three_argument_entries_cover_every_pair_of_choices():
     groups = [g for g in all_groups() if g.spec_name == "DATE"]
-    (group,) = groups
-    choices = [{(c.args[i].source, c.args[i].value) for c in group.combos} for i in range(3)]
+    combos = [c for g in groups for c in g.combos]
+    choices = [{(c.args[i].source, c.args[i].value) for c in combos} for i in range(3)]
     for i, j in ((0, 1), (0, 2), (1, 2)):
         covered = {
             ((c.args[i].source, c.args[i].value), (c.args[j].source, c.args[j].value))
-            for c in group.combos
+            for c in combos
         }
         assert covered == {(a, b) for a in choices[i] for b in choices[j]}
-    assert len(group.combos) < len(choices[0]) * len(choices[1]) * len(choices[2])  # 전수보다 적다
+    assert len(combos) < len(choices[0]) * len(choices[1]) * len(choices[2])  # 전수보다 적다
+
+
+def test_every_dictionary_entry_with_an_error_condition_has_an_independent_expectation():
+    """`error_when`이 있는 항목은 거부 기대값 계산(파이썬)이 있어야 한다(새 항목이 빠지면 실패)."""
+    with_rules = {s.name for s in get_default_registry().specs() if s.error_when}
+    assert with_rules == set(CONSTANT_ERROR_ORACLE)
+
+
+def test_expected_rejections_are_marked_by_the_generator_with_the_rule_that_explains_them():
+    groups = all_groups()
+    expected = expected_rejections(groups)
+    assert expected, "상수 오류로 거부되는 조합이 하나도 없다"
+    by_rule = collections.Counter((name, code) for (name, _expression), code in expected.items())
+    assert set(by_rule) == {("/", "E1"), ("LEFT", "E2"), ("RIGHT", "E2"), ("DATE", "E3")}
+    assert expected[("/", "(1) / (0)")] == "E1"
+    assert expected[("LEFT", 'LEFT("", (-1))')] == "E2"
+    assert ("LEFT", 'LEFT("", 0)') not in expected
+    assert ("DATE", "DATE(0, 1, 1)") in expected  # 연 0은 범위 밖
+    assert ("DATE", "DATE(2024, 2, 29)") not in expected
+    assert ("/", "([입력1]) / (0)") not in expected  # 열 값은 상수 오류가 아니라 오류 칸
 
 
 def test_matrix_size_is_reported():
@@ -114,6 +136,8 @@ class Harness:
         self.mismatches: list[str] = []
         self.exceptions: list[str] = []
         self.rejected: collections.Counter[str] = collections.Counter()
+        # (사전 항목 이름, 수식) -> (C0 거부 코드, 상수 오류 이유 문구)
+        self.rejected_items: dict[tuple[str, str], tuple[str, str]] = {}
 
     # -- 데이터셋 만들기
     def build(self, group: Group) -> tuple[int, dict[str, int]]:
@@ -188,7 +212,12 @@ class Harness:
                     combo.expression, infos, source_columns=sources, const_probe=probe
                 )
                 if not result.ok:
-                    self.rejected[result.issues[0].code] += 1
+                    issue = result.issues[0]
+                    self.rejected[issue.code] += 1
+                    self.rejected_items[(group.spec_name, combo.expression)] = (
+                        issue.code,
+                        issue.message,
+                    )
                     continue
                 column_id = self.db.add_formula_column(
                     dataset_id,
@@ -303,11 +332,14 @@ def test_differential_matrix_has_zero_mismatches_and_zero_database_exceptions(db
         harness.compare(dataset_id, accepted)
     # 요약(터미널 요약이 출력한다)
     rejected_total = sum(harness.rejected.values())
+    expected = expected_rejections(groups)
+    total = total_formulas(groups)
     SUMMARY.update(
-        formulas=total_formulas(groups),
+        formulas=total,
         accepted=accepted_total,
         rejected=rejected_total,
         rejected_by_code=dict(harness.rejected),
+        expected_rejected=len(expected),
         cells=harness.stats["cells"],
         blank_cells=harness.stats["blank_cells"],
         error_cells=dict(harness.errors),
@@ -317,10 +349,38 @@ def test_differential_matrix_has_zero_mismatches_and_zero_database_exceptions(db
     )
     assert harness.exceptions == [], harness.exceptions[:10]
     assert harness.mismatches == [], "\n".join(harness.mismatches[:20])
-    assert accepted_total + rejected_total == total_formulas(groups)
-    assert accepted_total >= 4000
+    assert accepted_total + rejected_total == total
+    # 거부는 사전의 `error_when` 상수 오류로 설명되는 것만이다: 코드가 허용 목록 안이고, 거부된
+    # 수식의 집합이 생성기가 표시한 기대값과 정확히 같으며, 이유 문구도 설명하는 규칙과 같다.
+    unexpected_codes = set(harness.rejected) - EXPECTED_REJECTION_CODES
+    assert not unexpected_codes, (
+        f"허용 목록 밖 거부 코드 {unexpected_codes}: {_rejection_report(harness)}"
+    )
+    rejected_keys = set(harness.rejected_items)
+    assert rejected_keys == set(expected), (
+        f"거부 집합이 기대와 다르다: 예상 밖 거부 {len(rejected_keys - set(expected))}건, "
+        f"거부돼야 하는데 통과 {len(set(expected) - rejected_keys)}건\n{_rejection_report(harness)}"
+    )
+    assert rejected_total == len(expected), _rejection_report(harness)
+    assert accepted_total == total - len(expected), _rejection_report(harness)
+    for key, cell_code in expected.items():
+        _code, message = harness.rejected_items[key]
+        assert CONSTANT_ERROR_REASONS_KO[cell_code] in message, (key, cell_code, message)
     # 오류 칸 세 종류가 모두 실제로 나왔다(행렬이 오류 경계를 건드린다).
     assert set(harness.errors) == {"E1", "E2", "E3"}
+
+
+def _rejection_report(harness: Harness) -> str:
+    """거부 코드별·사전 항목별 집계와 기대 밖 사례(처음 20건)."""
+    expected = expected_rejections(all_groups())
+    by_code = collections.Counter(code for code, _ in harness.rejected_items.values())
+    by_spec = collections.Counter(name for name, _ in harness.rejected_items)
+    extra = [k for k in harness.rejected_items if k not in expected]
+    missing = [k for k in expected if k not in harness.rejected_items]
+    return (
+        f"코드별 {dict(by_code)}, 항목별 {dict(by_spec)}, 예상 밖 거부 {extra[:20]}, "
+        f"누락 {missing[:20]}"
+    )
 
 
 def test_service_preview_matches_the_view_for_a_sample_of_formulas(db):

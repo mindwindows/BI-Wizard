@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app import ddl
-from app.core.db_errors import is_lock_conflict, sqlstate
+from app.core.db_errors import is_db_unavailable, is_lock_conflict, sqlstate
 from app.core.errors import AppError, ErrorCode, definition_busy, not_found
 from app.core.ports import DefinitionHooks
 from app.dataset import definition as dataset_definition
@@ -54,9 +54,11 @@ def failure_reason(exc: BaseException) -> str:
         return "VIEW_VERIFY_FAILED: 만든 뷰를 다시 읽어 확인하지 못해 되돌렸습니다."
     if isinstance(exc, LiteralError):
         return "LITERAL_INVALID: 수식 상수가 규칙에 맞지 않아 뷰를 만들지 못했습니다."
+    if isinstance(exc, DBAPIError) and is_lock_conflict(exc):
+        return "LOCK_TIMEOUT: 다른 작업이 진행 중이라 뷰를 만들지 못했습니다."
+    if is_db_unavailable(exc):
+        return "DB_UNAVAILABLE: 데이터베이스가 응답하지 않아 뷰를 만들지 못했습니다."
     if isinstance(exc, DBAPIError):
-        if is_lock_conflict(exc):
-            return "LOCK_TIMEOUT: 다른 작업이 진행 중이라 뷰를 만들지 못했습니다."
         return f"DB_ERROR: 데이터베이스 오류로 뷰를 만들지 못했습니다(코드 {sqlstate(exc) or '?'})."
     return f"UNEXPECTED: 예기치 않은 오류로 뷰를 만들지 못했습니다({type(exc).__name__})."
 
