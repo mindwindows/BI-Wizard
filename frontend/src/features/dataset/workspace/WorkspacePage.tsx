@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import { ApiError } from "../../../api";
 import { ErrorNotice, Loading } from "../../../components";
 import { EntryGrid } from "../../entry/EntryGrid";
+import { createFormula, updateFormula } from "../../formula/api";
+import type { SaveInput, SaveOutcome } from "../../formula/FormulaEditor";
 import { addColumn, getDataset, sortColumns, updateColumn, updateDataset } from "../api";
 import { formatDate } from "../format";
 import {
@@ -28,6 +30,8 @@ function Workspace({ datasetId }: { datasetId: number }) {
   const [feedback, setFeedback] = useState<Feedback>(null);
   // 가장 최근에 알게 된 정의 버전. 연속 저장이 낡은 값을 쓰지 않게 ref로도 들고 있다.
   const versionRef = useRef(0);
+  // 수식을 저장하면 계산 열 값이 바뀌므로 그리드가 행을 다시 읽도록 올린다.
+  const [gridRefresh, setGridRefresh] = useState(0);
   const detail = loaded && "detail" in loaded ? loaded.detail : null;
   // 열 목록은 정의가 바뀔 때만 새 배열이 된다(그리드 열 정의가 불필요하게 다시 만들어지지 않게).
   const columns = useMemo(() => sortColumns(detail?.columns ?? []), [detail?.columns]);
@@ -122,6 +126,52 @@ function Workspace({ datasetId }: { datasetId: number }) {
         void refetch();
         return "열을 저장했습니다.";
       }),
+    saveFormula: async (input: SaveInput): Promise<SaveOutcome> => {
+      setFeedback(null);
+      try {
+        const saved =
+          input.mode === "create"
+            ? await createFormula(datasetId, {
+                expected_version: versionRef.current,
+                display_name: input.display_name,
+                expression: input.expression,
+                ...(input.tag !== undefined ? { tag: input.tag } : {}),
+                ...(input.position !== undefined ? { position: input.position } : {}),
+              })
+            : await updateFormula(datasetId, input.columnId, { expected_version: versionRef.current, expression: input.expression });
+        versionRef.current = saved.def_version;
+        setLoaded((previous) =>
+          previous && "detail" in previous
+            ? {
+                detail: {
+                  ...previous.detail,
+                  def_version: saved.def_version,
+                  columns: previous.detail.columns.some((c) => c.id === saved.column.id)
+                    ? previous.detail.columns.map((c) => (c.id === saved.column.id ? saved.column : c))
+                    : [...previous.detail.columns, saved.column],
+                },
+              }
+            : previous,
+        );
+        setGridRefresh((value) => value + 1);
+        if (input.mode === "create") setSelection({ kind: "column", id: saved.column.id });
+        void refetch();
+        setFeedback({
+          kind: "ok",
+          text:
+            input.mode === "create"
+              ? "계산 열을 추가했습니다."
+              : saved.result_type_changed
+                ? "수식을 저장했습니다. 결과 종류가 바뀌었습니다. 이 열을 쓰는 저장된 차트가 있으면 대시보드에서 차트가 그대로 보이는지 확인해 주세요."
+                : "수식을 저장했습니다.",
+        });
+        return { ok: true };
+      } catch (error) {
+        // 정의가 바뀌었다면 최신 정의를 다시 읽는다. 입력 중인 수식은 편집기에 그대로 남는다.
+        if (error instanceof ApiError && error.code === "DEFINITION_VERSION_MISMATCH") await refetch();
+        return { ok: false, error };
+      }
+    },
     updateDataset: (body) =>
       run(async () => {
         const next = await updateDataset(datasetId, { expected_version: versionRef.current, ...body });
@@ -192,9 +242,14 @@ function Workspace({ datasetId }: { datasetId: number }) {
               ))}
             </ul>
             {canDefine ? (
-              <button type="button" onClick={() => select({ kind: "add" })}>
-                열 추가
-              </button>
+              <div className="actions">
+                <button type="button" onClick={() => select({ kind: "add" })}>
+                  열 추가
+                </button>
+                <button type="button" onClick={() => select({ kind: "addFormula" })}>
+                  계산 열 추가
+                </button>
+              </div>
             ) : null}
           </section>
         </div>
@@ -215,6 +270,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
               getVersion={getVersion}
               onVersion={noteVersion}
               onDefinitionStale={refetch}
+              refreshToken={gridRefresh}
             />
           )}
         </section>

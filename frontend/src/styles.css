@@ -560,6 +560,24 @@ button.link {
   font-style: italic;
 }
 
+/* 계산 열 머리글 구별: 기울임 + 수식 기호(글자 내용은 바꾸지 않는다) + 아래 선 */
+.entry-grid .header-formula .ag-header-cell-text::before {
+  content: "ƒ ";
+  font-style: normal;
+  font-weight: 700;
+  color: #3e4c59;
+}
+
+.entry-grid .header-formula {
+  box-shadow: inset 0 -3px 0 #9fb3c8;
+}
+
+.entry-grid .cell-errcode {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .cell-flag {
   font-size: 11px;
   color: #b45309;
@@ -638,4 +656,175 @@ button.link {
 .inspector-form p,
 .inspector-form .field > span {
   margin: 0;
+}
+
+/* ---- 1d 수식 편집기·수식 보기·점검 ---- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.list-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  padding: 1px 8px;
+  border: 1px solid #9fb3c8;
+  border-radius: 12px;
+  background: #f0f4f8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip-formula {
+  font-style: italic;
+  background: #e1e8ef;
+}
+
+.formula-input textarea {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.formula-input textarea[aria-invalid="true"] {
+  border-color: #c81e1e;
+  outline: 1px solid #c81e1e;
+}
+
+.suggest {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #9fb3c8;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.suggest li {
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.suggest li.active,
+.suggest li:hover {
+  background: #d9e8fb;
+}
+
+.formula-errors {
+  padding: 6px 8px;
+  border: 1px solid #e0a3a3;
+  background: #fdf2f2;
+  font-size: 13px;
+}
+
+.formula-errors ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.formula-marked,
+.formula-text {
+  margin: 0 0 4px;
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid #cbd2d9;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.formula-bad {
+  background: #fcc;
+  color: #7a1010;
+  text-decoration: underline wavy #c81e1e;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1d6fd6;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.formula-preview {
+  border-top: 1px solid #cbd2d9;
+  padding-top: 6px;
+}
+
+.formula-preview h3,
+.formula-view h3,
+.formula-help h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.preview-table {
+  font-size: 12px;
+}
+
+.preview-table .preview-error {
+  background: #fde8e8;
+  color: #9b1c1c;
+  font-weight: 600;
+}
+
+.preview-table .preview-empty {
+  color: #7b8794;
+  background: repeating-linear-gradient(135deg, #fafbfc, #fafbfc 6px, #f0f2f5 6px, #f0f2f5 8px);
+}
+
+.preview-stale {
+  opacity: 0.55;
+}
+
+.formula-help summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.function-list dt {
+  margin-top: 6px;
+}
+
+.function-list dd {
+  margin: 0 0 0 12px;
+  font-size: 12px;
+}
+
+.formula-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.formula-info {
+  text-align: left;
+}
+
+.error-cells {
+  padding: 4px 8px;
+  background: #fafbfc;
 }

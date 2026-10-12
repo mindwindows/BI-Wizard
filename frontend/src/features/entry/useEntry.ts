@@ -32,6 +32,8 @@ export interface EntryParams {
   onVersion: (version: number) => void;
   /** 정의를 다시 읽는다(DEFINITION_VERSION_MISMATCH) */
   onDefinitionStale: () => Promise<void>;
+  /** 값이 바뀌면 행을 다시 읽는다(수식을 저장해 계산 열 값이 바뀐 뒤 등) */
+  refreshToken?: number;
 }
 
 export interface Notice {
@@ -114,7 +116,7 @@ export function useEntry(params: EntryParams) {
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   // ---- C1 읽기 -------------------------------------------------------------------------------------------------
-  const key = `${params.datasetId}:${order}:${limit}:${offset}:${reloadToken}`;
+  const key = `${params.datasetId}:${order}:${limit}:${offset}:${reloadToken}:${params.refreshToken ?? 0}`;
   useEffect(() => {
     const controller = new AbortController();
     listRows(params.datasetId, { order, limit, offset }, controller.signal)

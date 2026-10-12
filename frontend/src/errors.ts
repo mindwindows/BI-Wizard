@@ -25,6 +25,8 @@ const MESSAGES: Record<string, string> = {
   DATASET_HAS_ROWS: "이미 입력된 행이 있어 날짜 단위와 기준 날짜 열은 바꿀 수 없습니다. 행이 없는 데이터셋에서만 바꿀 수 있습니다.",
   COLUMN_LOCKED: "열의 타입과 종류는 바꿀 수 없습니다. 다른 타입이 필요하면 새 열을 추가해 주세요.",
   FORMULA_CIRCULAR: "이 변경으로 계산 열이 서로를 참조하는 순환이 생깁니다. 구분 태그나 수식을 확인해 주세요.",
+  FORMULA_INVALID: "수식에 고칠 곳이 있어 저장하지 않았습니다. 표시된 위치의 안내를 확인해 주세요.",
+  FORMULA_RUNTIME_ERROR: "수식을 계산할 수 없습니다. 수식을 확인하고 미리보기로 결과를 살펴봐 주세요.",
   PAYLOAD_TOO_LARGE: "보내는 데이터가 너무 큽니다. 줄여서 다시 시도해 주세요.",
   SUPERSET_REJECTED: "대시보드 서버가 요청을 거부했습니다. 관리자에게 문의해 주세요.",
   SUPERSET_UNAVAILABLE: "대시보드 서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.",
@@ -129,7 +131,12 @@ export function describeApiError(error: unknown): string {
     const field = isRecord(error.details) && typeof error.details.field === "string" ? error.details.field : "";
     return INACTIVE_BY_FIELD[field] ?? INACTIVE_GENERIC;
   }
-  if (error.code === "DEFINITION_BUSY" || error.code === "WRITE_BUSY") {
+  if (error.code === "FORMULA_CIRCULAR") {
+    // 05 §3 details.path: 열 이름 경로 (예: ["A", "B", "A"] -> "A → B → A")
+    const path = isRecord(error.details) && Array.isArray(error.details.path) ? error.details.path.filter((n): n is string => typeof n === "string") : [];
+    return path.length > 0 ? `${MESSAGES.FORMULA_CIRCULAR} (순환 경로: ${path.join(" → ")})` : MESSAGES.FORMULA_CIRCULAR;
+  }
+  if (error.code === "DEFINITION_BUSY" || error.code === "WRITE_BUSY" || error.code === "PREVIEW_BUSY") {
     const retry = isRecord(error.details) ? error.details.retry_after : undefined;
     return typeof retry === "number" && retry > 0 ? `${MESSAGES[error.code]} (약 ${Math.ceil(retry)}초 뒤)` : MESSAGES[error.code];
   }

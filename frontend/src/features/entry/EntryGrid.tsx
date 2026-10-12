@@ -18,6 +18,7 @@ import { AgGridReact } from "ag-grid-react";
 import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { ErrorNotice, Loading } from "../../components";
 import type { Column } from "../dataset/types";
+import { useFunctionCatalog } from "../formula/catalog";
 import { ENTRY_ROW, type GridRow } from "./model";
 import { PAGE_SIZES, useEntry, type EntryParams } from "./useEntry";
 import { ROW_COLUMN_ID, buildColumnDefs } from "./gridColumns";
@@ -59,9 +60,12 @@ export function EntryGrid(props: EntryGridProps) {
   const entry = useEntry(props);
   const apiRef = useRef<GridApi<GridRow> | null>(null);
 
+  // 계산 열이 있을 때만 D1(셀 오류 문구)을 읽는다. 못 읽어도 기본 문구로 표시한다.
+  const catalog = useFunctionCatalog(columns.some((c) => c.kind === "formula"));
+  const cellErrors = catalog.status === "ready" ? catalog.catalog.cell_errors : undefined;
   const columnDefs = useMemo(
-    () => buildColumnDefs({ columns, baseDateColumnId, canEnter, selectedColumnId }),
-    [columns, baseDateColumnId, canEnter, selectedColumnId],
+    () => buildColumnDefs({ columns, baseDateColumnId, canEnter, selectedColumnId, cellErrors }),
+    [columns, baseDateColumnId, canEnter, selectedColumnId, cellErrors],
   );
   const rowData = useMemo(() => [...entry.rows, ...entry.drafts], [entry.rows, entry.drafts]);
   const pinnedBottom = useMemo(() => (canEnter ? [ENTRY_ROW] : []), [canEnter]);

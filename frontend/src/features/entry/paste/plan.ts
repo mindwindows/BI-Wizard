@@ -102,14 +102,14 @@ export function buildPastePlan(input: PasteInput): PasteBuild {
     if (saved && cells.length < width) {
       problems.push({
         line,
-        message: `${line}번째 줄의 칸 수(${cells.length}개)가 다른 줄(${width}개)보다 적어 기존 행의 빈 칸을 지울 수 있습니다. 칸 수를 맞춰 다시 복사해 주세요.`,
+        message: `칸 수(${cells.length}개)가 다른 줄(${width}개)보다 적어 기존 행의 빈 칸을 지울 수 있습니다. 칸 수를 맞춰 다시 복사해 주세요.`,
       });
     }
     if (!saved && input.baseDateColumnId !== null) {
       // 새 행에는 기준 날짜 열 값이 필요하다(서버 REQUIRED와 같은 취지로 확인창 전에 안내한다).
       const at = targets.findIndex((t) => t.id === input.baseDateColumnId);
       if (at < 0 || (cells[at] ?? "").trim() === "") {
-        problems.push({ line, message: `${line}번째 줄: 새 행에는 기준 열 값이 필요합니다. 기준 날짜 열이 함께 붙도록 시작 칸을 옮기거나 값을 채워 주세요.` });
+        problems.push({ line, message: `새 행에는 기준 열 값이 필요합니다. 기준 날짜 열이 함께 붙도록 시작 칸을 옮기거나 값을 채워 주세요.` });
       }
     }
     const values: (string | null)[] = [];

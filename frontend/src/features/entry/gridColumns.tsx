@@ -1,29 +1,25 @@
 import type { CellClassParams, ColDef, ValueFormatterParams, ValueGetterParams } from "ag-grid-community";
 import type { CustomCellRendererProps } from "ag-grid-react";
 import { COLUMN_TYPE_LABELS, type Column } from "../dataset/types";
+import { cellErrorText } from "../formula/messages";
 import type { GridRow } from "./model";
 import { BOOL_FALSE, BOOL_TRUE, displayText, editorText, isBlank } from "./values";
 
 export const ROW_COLUMN_ID = "__row";
-
-/** 05 §3: 계산 열 칸의 오류 코드 E1~E3의 뜻(D1 cell_errors 문구는 단위 1d에서 받아 오면 그쪽을 우선한다). */
-export const CELL_ERROR_TEXT: Record<string, string> = {
-  E1: "0으로 나누어 계산할 수 없습니다.",
-  E2: "글자 길이 범위를 벗어났습니다.",
-  E3: "날짜 범위를 벗어났습니다.",
-};
 
 export interface ColumnDefsInput {
   columns: Column[];
   baseDateColumnId: number | null;
   canEnter: boolean;
   selectedColumnId: number | null;
+  /** D1 `cell_errors`(셀 오류 코드 -> 쉬운 말). 못 받았으면 기본 문구(formula/messages.ts)를 쓴다. */
+  cellErrors?: Record<string, string>;
 }
 
 const colKey = (column: Column) => String(column.id);
 
 /** 칸 위에 올리는 설명(툴팁/접근성). 표시 규칙의 단일 출처. */
-export function cellTitle(column: Column, row: GridRow | undefined): string {
+export function cellTitle(column: Column, row: GridRow | undefined, cellErrors?: Record<string, string>): string {
   if (!row) return "";
   const key = colKey(column);
   const mark = row.marks[key];
@@ -31,13 +27,13 @@ export function cellTitle(column: Column, row: GridRow | undefined): string {
   if (mark?.kind === "conflict") return "다른 사람이 먼저 바꾼 칸입니다. 아래 충돌 목록에서 내 값과 서버 값 중 고를 수 있습니다.";
   if (mark?.kind === "pending") return "저장하는 중입니다.";
   const code = row.errors[key];
-  if (code) return `계산 오류(${code}): ${CELL_ERROR_TEXT[code] ?? "계산할 수 없는 값입니다."}`;
+  if (code) return `계산 오류(${code}): ${cellErrorText(code, cellErrors)}`;
   if (column.kind === "formula") return "계산 열은 수식으로 채워지므로 직접 고칠 수 없습니다.";
   if (isBlank(row.cells[key])) return "빈 칸(아직 입력하지 않음)";
   return "";
 }
 
-function EntryCell(props: CustomCellRendererProps<GridRow> & { entryColumn?: Column }) {
+function EntryCell(props: CustomCellRendererProps<GridRow> & { entryColumn?: Column; cellErrors?: Record<string, string> }) {
   const column = props.entryColumn;
   const row = props.data;
   if (!row || !column) return null;
@@ -47,10 +43,11 @@ function EntryCell(props: CustomCellRendererProps<GridRow> & { entryColumn?: Col
   const blank = !errorCode && isBlank(row.cells[key]);
   const mark = row.marks[key];
   return (
-    <span className="cell-text" title={cellTitle(column, row)}>
+    <span className="cell-text" title={cellTitle(column, row, props.cellErrors)}>
       <span className="cell-value">
-        {errorCode ? <span aria-label={`계산 오류 ${errorCode}`}>오류</span> : blank ? <span className="cell-blank-mark" aria-label="빈 칸" /> : text}
+        {errorCode ? <span aria-label={`계산 오류 ${errorCode}: ${cellErrorText(errorCode, props.cellErrors)}`}>오류</span> : blank ? <span className="cell-blank-mark" aria-label="빈 칸" /> : text}
       </span>
+      {errorCode ? <span className="cell-errcode" aria-hidden="true"> {errorCode}</span> : null}
       {mark?.kind === "invalid" ? <span className="cell-flag" aria-hidden="true"> !</span> : null}
       {mark?.kind === "conflict" ? <span className="cell-flag" aria-hidden="true"> 충돌</span> : null}
       {mark?.kind === "pending" ? <span className="cell-flag muted" aria-hidden="true"> …</span> : null}
@@ -68,7 +65,7 @@ export function rowLabel(row: GridRow, columns: Column[], baseDateColumnId: numb
 }
 
 export function buildColumnDefs(input: ColumnDefsInput): ColDef<GridRow>[] {
-  const { columns, baseDateColumnId, canEnter, selectedColumnId } = input;
+  const { columns, baseDateColumnId, canEnter, selectedColumnId, cellErrors } = input;
   const rowColumn: ColDef<GridRow> = {
     colId: ROW_COLUMN_ID,
     headerName: "기간 / 행 번호",
@@ -98,7 +95,7 @@ export function buildColumnDefs(input: ColumnDefsInput): ColDef<GridRow>[] {
       valueGetter: (p: ValueGetterParams<GridRow>) => (p.data ? editorText(column, p.data.cells[key]) : ""),
       valueFormatter: (p: ValueFormatterParams<GridRow>) => (p.data ? displayText(column, p.data.cells[key], p.data.errors[key]) : ""),
       cellRenderer: EntryCell,
-      cellRendererParams: { entryColumn: column },
+      cellRendererParams: { entryColumn: column, cellErrors },
       cellClass: (p: CellClassParams<GridRow>) => {
         const row = p.data;
         const mark = row?.marks[key];

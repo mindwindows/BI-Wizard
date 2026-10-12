@@ -86,6 +86,16 @@ describe("describeApiError (05 §3 코드별 문구)", () => {
     expect(describeApiError(err(409, "ALREADY_EXISTS", { field: "display_name" }))).toContain("같은 이름의 열");
   });
 
+  it("1d 수식 코드: 순환 경로, 수식 오류, 계산 불가, 미리보기 바쁨", () => {
+    expect(describeApiError(err(422, "FORMULA_CIRCULAR", { path: ["A", "B", "A"] }))).toContain("순환 경로: A → B → A");
+    expect(describeApiError(err(422, "FORMULA_CIRCULAR", { path: [] }))).not.toContain("경로");
+    expect(describeApiError(err(422, "FORMULA_CIRCULAR", null))).toContain("순환");
+    expect(describeApiError(err(422, "FORMULA_INVALID"))).toContain("고칠 곳");
+    expect(describeApiError(err(422, "FORMULA_RUNTIME_ERROR"))).toContain("계산할 수 없습니다");
+    expect(describeApiError(err(429, "PREVIEW_BUSY", { retry_after: 2 }))).toContain("약 2초");
+    expect(describeApiError(err(429, "PREVIEW_BUSY", null))).not.toContain("약");
+  });
+
   it("DEFINITION_BUSY·WRITE_BUSY는 retry_after가 있으면 몇 초 뒤인지 덧붙인다", () => {
     expect(describeApiError(err(503, "DEFINITION_BUSY", { retry_after: 3 }))).toContain("약 3초");
     expect(describeApiError(err(503, "DEFINITION_BUSY", null))).toContain("잠시 뒤");

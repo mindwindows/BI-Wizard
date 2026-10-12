@@ -1,9 +1,11 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from "react-router-dom";
 import { getConfig } from "./config";
 import { AccessDenied } from "./features/access/AccessDenied";
+import { ChecksPage } from "./features/checks/ChecksPage";
 import { PermissionsPage } from "./features/access/permissions/PermissionsPage";
 import { DatasetCreatePage } from "./features/dataset/DatasetCreatePage";
 import { DatasetListPage } from "./features/dataset/DatasetListPage";
+import { AdminStatusPage } from "./features/status/AdminStatusPage";
 import { WorkspacePage } from "./features/dataset/workspace/WorkspacePage";
 import { Home } from "./pages/Home";
 import { Placeholder } from "./pages/Placeholder";
@@ -30,11 +32,11 @@ export const routes: RouteObject[] = [
       { path: "datasets", element: <DatasetListPage /> },
       { path: "datasets/new", element: <DatasetCreatePage /> },
       { path: "datasets/:datasetId", element: <WorkspacePage /> },
-      { path: "checks", element: <Placeholder screen="S5" title="점검" unit="단위 1d" /> },
+      { path: "checks", element: <ChecksPage /> },
       { path: "admin/permissions", element: <PermissionsPage /> },
       { path: "dashboards", element: <Placeholder screen="S7" title="대시보드" unit="단위 1e" /> },
       { path: "admin/dashboards", element: <Placeholder screen="S8" title="대시보드 연결 관리" unit="단위 1e" /> },
-      { path: "admin/status", element: <Placeholder screen="S9" title="관리자 현황" unit="단위 1e" /> },
+      { path: "admin/status", element: <AdminStatusPage /> },
       { path: "*", element: <NotFound /> },
     ],
   },

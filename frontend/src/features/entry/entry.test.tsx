@@ -624,8 +624,9 @@ describe("엑셀 붙여넣기 (C4)", () => {
     const ctx = await openGrid();
     paste(ctx, "a\r\nb\r\nc", { rowIndex: 2, colId: "3" });
     const alert = await screen.findByRole("alert", { name: "붙여넣기 오류" });
-    expect(alert.textContent).toContain("2번째 줄");
-    expect(alert.textContent).toContain("새 행에는 기준 열 값이 필요합니다");
+    expect(alert.textContent).toContain("2번째 줄 · 새 행에는 기준 열 값이 필요합니다");
+    // 1c 후속: 줄 번호는 항목마다 한 번만 나온다("2번째 줄 · 2번째 줄: …" 중복 없음)
+    for (const item of alert.querySelectorAll("li")) expect(item.textContent?.match(/번째 줄/g)).toHaveLength(1);
     expect(screen.queryByRole("dialog", { name: "붙여넣기 확인" })).toBeNull();
     expect(writes(ctx.calls)).toHaveLength(0);
   });
@@ -878,7 +879,9 @@ describe("엑셀 붙여넣기 (C4)", () => {
     it("기존 행에 걸치는 줄의 칸 수가 모자라면(빈 칸이 지워질 수 있어) 거부한다", async () => {
       const ctx = await openGrid();
       paste(ctx, "1\t가\r\n2", { rowIndex: 0, colId: "2" });
-      expect((await screen.findByRole("alert", { name: "붙여넣기 오류" })).textContent).toContain("2번째 줄의 칸 수(1개)");
+      const alert = await screen.findByRole("alert", { name: "붙여넣기 오류" });
+      expect(alert.textContent).toContain("2번째 줄 · 칸 수(1개)");
+      for (const item of alert.querySelectorAll("li")) expect(item.textContent?.match(/번째 줄/g)).toHaveLength(1);
     });
   });
 

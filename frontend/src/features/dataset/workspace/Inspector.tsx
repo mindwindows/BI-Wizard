@@ -1,5 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { ErrorNotice } from "../../../components";
+import { FormulaEditor, type SaveInput, type SaveOutcome } from "../../formula/FormulaEditor";
+import { FormulaPanel } from "../../formula/FormulaPanel";
 import {
   FORBIDDEN_HINT,
   RESERVED_HINT,
@@ -26,7 +28,7 @@ import {
   type DateUnit,
 } from "../types";
 
-export type Selection = { kind: "dataset" } | { kind: "add" } | { kind: "column"; id: number };
+export type Selection = { kind: "dataset" } | { kind: "add" } | { kind: "addFormula" } | { kind: "column"; id: number };
 export type Feedback = null | { kind: "ok"; text: string } | { kind: "error"; error: unknown };
 
 /** 저장 동작. expected_version은 작업공간이 붙이고, 실패는 Feedback으로 올라가므로 여기서는 던지지 않는다. */
@@ -44,6 +46,8 @@ export interface Actions {
     body: { display_name?: string; required?: boolean; rules?: ColumnRules; tag?: string | null; position?: number },
   ) => Promise<void>;
   updateDataset: (body: { name?: string; date_unit?: DateUnit; base_date_column_id?: number | null }) => Promise<void>;
+  /** 계산 열 만들기(D4)·수식 바꾸기(D5). 실패는 던지지 않고 수식 편집기가 오류 위치와 함께 보여 주도록 돌려준다. */
+  saveFormula: (input: SaveInput) => Promise<SaveOutcome>;
 }
 
 const MIN_WIDTH = 280;
@@ -112,6 +116,9 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
         <DatasetSettingsForm key={`d${detail.def_version}`} detail={detail} columns={columns} readOnly={!canDefine} actions={actions} />
       ) : null}
       {selection.kind === "add" && canDefine ? <ColumnForm key="add" mode="add" readOnly={false} actions={actions} /> : null}
+      {selection.kind === "addFormula" && canDefine ? (
+        <FormulaEditor key="addFormula" datasetId={detail.id} columns={columns} editing={null} initialExpression="" save={actions.saveFormula} />
+      ) : null}
       {selected ? (
         <ColumnForm
           // 낡은 값이 남지 않게, 서버 값이 바뀌면 입력칸을 새 값으로 시작한다.
@@ -120,6 +127,17 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
           column={selected}
           readOnly={!canDefine || selected.kind === "formula"}
           actions={actions}
+        />
+      ) : null}
+      {selected?.kind === "formula" ? (
+        <FormulaPanel
+          key={selected.id}
+          datasetId={detail.id}
+          column={selected}
+          columns={columns}
+          canDefine={canDefine}
+          version={detail.def_version}
+          save={actions.saveFormula}
         />
       ) : null}
       {selection.kind === "column" && !selected ? <p className="muted">선택한 열을 찾을 수 없습니다. 열 목록에서 다시 골라 주세요.</p> : null}
@@ -425,7 +443,7 @@ function ColumnForm(props: ColumnFormProps) {
 
       {readOnly ? (
         column?.kind === "formula" ? (
-          <p className="muted">계산 열은 여기서 고칠 수 없습니다.</p>
+          <p className="muted">계산 열의 이름·위치는 여기서 고칠 수 없습니다. 수식은 아래에서 확인하고 고칩니다.</p>
         ) : null
       ) : (
         <button type="submit" disabled={blocked || !dirty || busy}>
