@@ -54,6 +54,9 @@ type PreviewStatus =
   | { expr: string; status: "error"; error: unknown };
 
 /** S4 Inspector 안의 수식 편집기(계산 열 만들기·수정). 정의 권한이 있을 때만 올린다. */
+/** 이 개수를 넘으면 목록 아래에 '스크롤/입력으로 좁히기' 안내를 보인다(목록은 항상 전체를 담는다). */
+const SUGGEST_VISIBLE = 8;
+
 export function FormulaEditor(props: FormulaEditorProps) {
   const { datasetId, columns, editing, initialExpression, save } = props;
   const checkDelay = props.checkDelayMs ?? DEFAULT_CHECK_DELAY_MS;
@@ -202,7 +205,10 @@ export function FormulaEditor(props: FormulaEditorProps) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActiveState({ key: contextKey, index: (activeIndex + step + suggestions.length) % suggestions.length });
+      const next = (activeIndex + step + suggestions.length) % suggestions.length;
+      setActiveState({ key: contextKey, index: next });
+      // 8개를 넘는 후보도 키보드로 따라가도록 고른 항목을 목록 안에서 보이게 한다(jsdom에는 없을 수 있다).
+      document.getElementById(`${ids.list}-${next}`)?.scrollIntoView?.({ block: "nearest" });
     } else if ((event.key === "Enter" || event.key === "Tab") && activeSuggestion) {
       event.preventDefault();
       accept(activeSuggestion);
@@ -366,6 +372,11 @@ export function FormulaEditor(props: FormulaEditorProps) {
               </li>
             ))}
           </ul>
+        ) : null}
+        {open && suggestions.length > SUGGEST_VISIBLE ? (
+          <p className="muted suggest-more" data-testid="suggest-more">
+            후보 {suggestions.length}개 — 목록을 스크롤하거나 ↑↓로 끝까지 고르고, 계속 입력해 좁힐 수 있습니다.
+          </p>
         ) : null}
         {activeSuggestion?.fn ? (
           <p className="muted hint" data-testid="suggest-help">

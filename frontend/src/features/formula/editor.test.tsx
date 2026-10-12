@@ -111,6 +111,21 @@ describe("함수·열 자동완성", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
+  it("[ 후보는 8개를 넘어도 모두 목록에 있고 안내가 나오며 키보드로 끝까지 간다", async () => {
+    const many: Column[] = Array.from({ length: 12 }, (_, i) => ({ ...SALES[0], id: 100 + i, display_name: `열${i + 1}`, kind: "raw" }) as Column);
+    const fake = makeFormulaFake();
+    installFetch({ ...fake.handlers });
+    render(<FormulaEditor datasetId={7} columns={many} editing={null} initialExpression="" save={vi.fn(async () => ({ ok: true }) as SaveOutcome)} checkDelayMs={20} previewDelayMs={20} />);
+    typeExpr("[");
+    const list = await screen.findByRole("listbox", { name: "자동완성 후보" });
+    expect(within(list).getAllByRole("option")).toHaveLength(12);
+    expect(screen.getByTestId("suggest-more").textContent).toContain("12개");
+    for (let i = 0; i < 11; i++) fireEvent.keyDown(box(), { key: "ArrowDown" });
+    expect(within(list).getAllByRole("option")[11].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(box().value).toBe("[열12]");
+  });
+
   it("Tab으로도 넣고, Esc로 닫으면 같은 자리에서는 다시 열리지 않는다", async () => {
     mount();
     typeExpr("SU");

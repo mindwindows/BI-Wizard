@@ -196,6 +196,35 @@ describe("그리드 렌더링", () => {
     expect(api.getEditingCells()).toHaveLength(0);
   });
 
+  it("계산 열 빈 칸은 입력 열과 같은 빗금(cell-blank)을 유지하고 계산 열 표지(cell-formula)가 함께 붙는다, 오류 칸은 빗금이 아니다", async () => {
+    // jsdom은 CSS를 계산하지 않아 실제 색은 확인하지 못한다. 대신 클래스 조합(스타일 규칙의 입력)을 확인한다.
+    // styles.css: .cell-formula는 배경을 갖지 않고, 배경은 :not(.cell-blank):not(.cell-error)에만 준다(스크린샷으로 눈 확인).
+    const { grid } = await openGrid({ detail: salesDetail() });
+    const blank = cell(grid, "r1", "5");
+    expect(blank.classList.contains("cell-formula")).toBe(true);
+    expect(blank.classList.contains("cell-blank")).toBe(true);
+    const err = cell(grid, "r2", "5");
+    expect(err.classList.contains("cell-error")).toBe(true);
+    expect(err.classList.contains("cell-blank")).toBe(false);
+  });
+
+  it("계산 열 칸을 두 번 누르면 직접 고칠 수 없다는 안내가 나오고 편집기는 열리지 않는다", async () => {
+    const { grid, api } = await openGrid({ detail: salesDetail() });
+    expect(screen.queryByTestId("formula-edit-notice")).toBeNull();
+    fireEvent.doubleClick(cell(grid, "r2", "5"));
+    const notice = await screen.findByTestId("formula-edit-notice");
+    expect(notice.textContent).toContain("계산 열은 수식으로 계산되어 직접 고칠 수 없습니다");
+    expect(notice.textContent).toContain("Inspector");
+    expect(api.getEditingCells()).toHaveLength(0);
+  });
+
+  it("입력 열 칸을 두 번 눌러도 계산 열 안내는 나오지 않는다", async () => {
+    const { grid } = await openGrid({ detail: salesDetail() });
+    fireEvent.doubleClick(cell(grid, "r1", "2"));
+    await sleep(20);
+    expect(screen.queryByTestId("formula-edit-notice")).toBeNull();
+  });
+
   it("선택 목록·예/아니오 열은 선택 편집기를 쓰고 예/아니오는 글자로 보인다", async () => {
     const detail = salesDetail({
       columns: [COL(1, "기준일", "date", { required: true }), COL(4, "등급", "choice", { rules: { options: ["상", "중"] } }), COL(6, "승인", "boolean")],

@@ -66,8 +66,6 @@ export interface Suggestion {
   fn?: FunctionInfo;
 }
 
-const MAX_SUGGESTIONS = 8;
-
 const norm = (value: string) => value.normalize("NFC").toLowerCase();
 
 /** 앞부분이 같은 것을 먼저, 그다음 포함하는 것 */
@@ -80,7 +78,8 @@ function rank<T>(items: T[], name: (item: T) => string, query: string): T[] {
     if (q === "" || n.startsWith(q)) starts.push(item);
     else if (n.includes(q)) contains.push(item);
   }
-  return [...starts, ...contains].slice(0, MAX_SUGGESTIONS);
+  // 개수 제한 없음: 목록이 스크롤되고 키보드(↑↓)로 끝까지 갈 수 있다.
+  return [...starts, ...contains];
 }
 
 export function suggestFunctions(functions: FunctionInfo[], query: string): Suggestion[] {

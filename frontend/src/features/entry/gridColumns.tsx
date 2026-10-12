@@ -7,6 +7,9 @@ import { BOOL_FALSE, BOOL_TRUE, displayText, editorText, isBlank } from "./value
 
 export const ROW_COLUMN_ID = "__row";
 
+/** 계산 열 칸을 고치려 할 때 보이는 안내 */
+export const FORMULA_EDIT_NOTICE = "계산 열은 수식으로 계산되어 직접 고칠 수 없습니다. 수식은 Inspector에서 고칠 수 있습니다.";
+
 export interface ColumnDefsInput {
   columns: Column[];
   baseDateColumnId: number | null;
@@ -87,6 +90,8 @@ export function buildColumnDefs(input: ColumnDefsInput): ColDef<GridRow>[] {
       headerTooltip: `${COLUMN_TYPE_LABELS[column.type] ?? column.type}${column.kind === "formula" ? " · 계산 열" : ""}${column.required ? " · 필수" : ""}`,
       headerClass: [column.id === selectedColumnId ? "header-selected" : "", column.kind === "formula" ? "header-formula" : ""],
       minWidth: 110,
+      // 계산 열 값은 12~20자리까지 길어질 수 있어 기본 폭을 조금 넓힌다(값은 자르거나 반올림하지 않는다).
+      ...(column.kind === "formula" ? { width: 190 } : {}),
       sortable: false,
       resizable: true,
       suppressMovable: true,

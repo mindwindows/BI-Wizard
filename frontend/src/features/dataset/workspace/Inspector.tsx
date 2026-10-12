@@ -119,25 +119,31 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
       {selection.kind === "addFormula" && canDefine ? (
         <FormulaEditor key="addFormula" datasetId={detail.id} columns={columns} editing={null} initialExpression="" save={actions.saveFormula} />
       ) : null}
-      {selected ? (
+      {selected?.kind === "formula" ? (
+        <>
+          <FormulaPanel
+            key={selected.id}
+            datasetId={detail.id}
+            column={selected}
+            columns={columns}
+            canDefine={canDefine}
+            version={detail.def_version}
+            save={actions.saveFormula}
+          />
+          <details className="column-info">
+            <summary>열 정보</summary>
+            <ColumnForm key={`c${selected.id}:${JSON.stringify(selected)}`} mode="edit" column={selected} readOnly actions={actions} />
+          </details>
+        </>
+      ) : null}
+      {selected && selected.kind !== "formula" ? (
         <ColumnForm
           // 낡은 값이 남지 않게, 서버 값이 바뀌면 입력칸을 새 값으로 시작한다.
           key={`c${selected.id}:${JSON.stringify(selected)}`}
           mode="edit"
           column={selected}
-          readOnly={!canDefine || selected.kind === "formula"}
+          readOnly={!canDefine}
           actions={actions}
-        />
-      ) : null}
-      {selected?.kind === "formula" ? (
-        <FormulaPanel
-          key={selected.id}
-          datasetId={detail.id}
-          column={selected}
-          columns={columns}
-          canDefine={canDefine}
-          version={detail.def_version}
-          save={actions.saveFormula}
         />
       ) : null}
       {selection.kind === "column" && !selected ? <p className="muted">선택한 열을 찾을 수 없습니다. 열 목록에서 다시 골라 주세요.</p> : null}

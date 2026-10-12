@@ -93,6 +93,18 @@ describe("수식 보기(D6)와 수식 고치기(D5)", () => {
     error_count: 12,
   };
 
+  it("계산 열을 고르면 수식 보기가 먼저 나오고 읽기 전용 열 정보는 접힌 '열 정보' 구역에 있다", async () => {
+    const { fake } = await openWorkspace();
+    fake.views[5] = VIEW;
+    selectColumn(/^이익/);
+    const view = await within(inspector()).findByRole("region", { name: "수식 보기" });
+    const info = inspector().querySelector("details.column-info") as HTMLDetailsElement;
+    expect(info).not.toBeNull();
+    expect(info.open).toBe(false);
+    expect(info.querySelector("summary")?.textContent).toBe("열 정보");
+    expect(view.compareDocumentPosition(info) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("계산 열을 고르면 현재 열 이름으로 풀어 쓴 수식·쓰는 열·태그 열·오류 칸 수가 읽기 전용으로 보인다", async () => {
     const { fake, calls } = await openWorkspace();
     fake.views[5] = VIEW;

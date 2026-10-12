@@ -13,15 +13,15 @@ import {
   SelectEditorModule,
   TextEditorModule,
   TooltipModule,
-  themeQuartz, type CellEditRequestEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
+  themeQuartz, type CellEditRequestEvent, type CellDoubleClickedEvent, type CellKeyDownEvent, type ColumnHeaderClickedEvent, type GridApi } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ErrorNotice, Loading } from "../../components";
 import type { Column } from "../dataset/types";
 import { useFunctionCatalog } from "../formula/catalog";
 import { ENTRY_ROW, type GridRow } from "./model";
 import { PAGE_SIZES, useEntry, type EntryParams } from "./useEntry";
-import { ROW_COLUMN_ID, buildColumnDefs } from "./gridColumns";
+import { FORMULA_EDIT_NOTICE, ROW_COLUMN_ID, buildColumnDefs } from "./gridColumns";
 import { displayText } from "./values";
 
 // AG Grid Community 모듈 중 이 화면이 쓰는 것만 등록한다(AllCommunityModule 대비 번들 약 20% 감소, ag-grid-enterprise는 설치하지 않는다).
@@ -115,6 +115,29 @@ export function EntryGrid(props: EntryGridProps) {
       else entry.editDraftOrSaved(data.key, columnId, text);
     },
     [entry],
+  );
+
+  // 계산 열 칸을 고치려 하면(두 번 누르기, Enter/F2, 글자 입력) 이유를 잠깐 알린다.
+  const [formulaNotice, setFormulaNotice] = useState(false);
+  useEffect(() => {
+    if (!formulaNotice) return;
+    const timer = setTimeout(() => setFormulaNotice(false), 5000);
+    return () => clearTimeout(timer);
+  }, [formulaNotice]);
+  const isFormulaColId = useCallback((colId: string | undefined) => !!colId && columns.some((c) => String(c.id) === colId && c.kind === "formula"), [columns]);
+  const onCellDoubleClicked = useCallback(
+    (event: CellDoubleClickedEvent<GridRow>) => {
+      if (isFormulaColId(event.column.getColId())) setFormulaNotice(true);
+    },
+    [isFormulaColId],
+  );
+  const onCellKeyDown = useCallback(
+    (event: CellKeyDownEvent<GridRow>) => {
+      const key = (event.event as globalThis.KeyboardEvent | null)?.key;
+      if (!key || !isFormulaColId(event.column.getColId())) return;
+      if (key === "Enter" || key === "F2" || (key.length === 1 && !(event.event as globalThis.KeyboardEvent).ctrlKey && !(event.event as globalThis.KeyboardEvent).metaKey)) setFormulaNotice(true);
+    },
+    [isFormulaColId],
   );
 
   const onHeaderClicked = useCallback(
@@ -339,6 +362,12 @@ export function EntryGrid(props: EntryGridProps) {
       ) : null}
       {entry.status === "loading" && !firstLoad ? <Loading label="행을 불러오는 중" /> : null}
 
+      {formulaNotice ? (
+        <p role="status" className="entry-grid-notice" data-testid="formula-edit-notice">
+          {FORMULA_EDIT_NOTICE}
+        </p>
+      ) : null}
+
       {firstLoad || (entry.status === "error" && rowData.length === 0) ? null : (
         <div className="entry-grid" role="group" aria-label="입력 그리드 표" ref={gridRef}>
           <AgGridReact<GridRow>
@@ -350,6 +379,8 @@ export function EntryGrid(props: EntryGridProps) {
             readOnlyEdit
             onCellEditRequest={onEditRequest}
             onColumnHeaderClicked={onHeaderClicked}
+            onCellDoubleClicked={onCellDoubleClicked}
+            onCellKeyDown={onCellKeyDown}
             onGridReady={(e) => {
               apiRef.current = e.api;
               onGridApi?.(e.api);

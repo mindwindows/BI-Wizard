@@ -55,9 +55,9 @@ describe("제안 목록", () => {
     expect(suggestFunctions(FUNCTIONS, "zzz")).toEqual([]);
   });
 
-  it("목록은 8개까지", () => {
+  it("후보를 자르지 않는다(스크롤로 끝까지 고른다)", () => {
     const many = Array.from({ length: 20 }, (_, i) => fn(`F${i}`));
-    expect(suggestFunctions(many, "f")).toHaveLength(8);
+    expect(suggestFunctions(many, "f")).toHaveLength(20);
   });
 
   it("열 이름은 한글도 앞부분·포함 순, 계산 열 표시", () => {

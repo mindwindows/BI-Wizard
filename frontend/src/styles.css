@@ -511,9 +511,15 @@ button.link {
 }
 
 .entry-grid .cell-formula {
-  background: #eef2f7;
   color: #323f4b;
   font-style: italic;
+  /* 계산 열(읽기 전용) 표지: 왼쪽 세로 선. 배경은 건드리지 않아 빈 칸 빗금·오류 붉은색이 그대로 보인다. */
+  box-shadow: inset 3px 0 0 #9fb3c8;
+}
+
+/* 값이 있는 계산 칸만 회색 배경. 빈 칸(.cell-blank)은 입력 열과 같은 빗금, 오류 칸(.cell-error)은 붉은색을 유지한다. */
+.entry-grid .cell-formula:not(.cell-blank):not(.cell-error) {
+  background: #eef2f7;
 }
 
 .entry-grid .cell-error {
@@ -717,6 +723,15 @@ button.link {
   overflow: auto;
 }
 
+.suggest-more {
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: #f0f2f5;
+  border: 1px solid #9fb3c8;
+  border-top: 0;
+}
+
 .suggest li {
   padding: 3px 8px;
   cursor: pointer;
@@ -782,6 +797,44 @@ button.link {
 
 .preview-table {
   font-size: 12px;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 4px 6px;
+}
+
+.preview-table th:first-child,
+.preview-table td:first-child {
+  white-space: nowrap;
+  min-width: 82px;
+}
+
+.preview-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
+.preview-table td:nth-child(3) {
+  min-width: 120px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.column-info {
+  margin-top: 8px;
+}
+
+.column-info > summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.entry-grid-notice {
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  background: #fff7e0;
+  border: 1px solid #e0b64a;
 }
 
 .preview-table .preview-error {
