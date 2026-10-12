@@ -163,6 +163,11 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 - S3 폼 `.panel-form` 최대 폭 560px. `.panel > button`은 내용 폭(붙여넣기 확인·결과 버튼은 `.actions` 안으로 이동).
 - Inspector: `.inspector-form p`와 `.field > span` 여백 0(타입·종류 줄 사이, 오류 자리 공백 제거). 오류는 있을 때만 렌더(기존 그대로).
 
+#### 화면 변경(1d)
+- 왼쪽 "열 목록" 아래에 정의 담당자에게만 **계산 열 추가** 버튼이 생겼다(원본 열은 기존 **열 추가**). 계산 열은 B5가 아니라 D4(`POST /formulas`)로 만든다.
+- 계산 열을 선택했을 때 Inspector: 열 정보 양식(읽기 전용, 타입·종류 잠김) 아래에 **수식 보기**와(정의 담당자만) **수식 고치기**가 붙는다. 문구 "계산 열은 여기서 고칠 수 없습니다"는 "계산 열의 이름·위치는 여기서 고칠 수 없습니다. 수식은 아래에서 확인하고 고칩니다."로 바뀌었다.
+- 오류 문구 표에 `FORMULA_CIRCULAR`에 순환 경로가 붙고(`details.path`), `FORMULA_INVALID`·`FORMULA_RUNTIME_ERROR` 문구가 추가됐다(B6 태그 변경의 순환 거부도 같은 경로 표시).
+
 ### 화면에 나오는 오류 문구
 | 코드 | 화면 문구 요지 |
 | --- | --- |
