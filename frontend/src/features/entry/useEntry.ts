@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { describeApiError } from "../../errors";
+import { describeApiError, truncationText } from "../../errors";
 import type { Column } from "../dataset/types";
 import { createRow, listRows, pasteRows, patchRow } from "./api";
 import { conflictsOf, describeFieldCode, describePasteError, fieldIssuesOf, isCode } from "./messages";
@@ -46,7 +46,7 @@ export type PasteUi =
   | { stage: "problems"; problems: PasteProblem[] }
   | { stage: "confirm"; plan: PastePlan }
   | { stage: "sending" }
-  | { stage: "result"; kind: "ok" | "conflict" | "invalid" | "error"; headline: string; items: string[]; canRetry: boolean; retry?: () => void };
+  | { stage: "result"; kind: "ok" | "conflict" | "invalid" | "error"; headline: string; items: string[]; canRetry: boolean; retry?: () => void; truncated?: string };
 
 export type LoadStatus = "loading" | "ready" | "error";
 
@@ -422,6 +422,7 @@ export function useEntry(params: EntryParams) {
             headline: "다른 사람이 먼저 바꾼 내용이 있어 붙여넣기를 취소했습니다. 일부만 반영되는 일은 없으며 아무것도 저장되지 않았습니다.",
             items,
             canRetry: pasteMemo.current !== null,
+            truncated: truncationText(error) || undefined,
           });
         } else if (isCode(error, "VALIDATION_ERROR")) {
           const items = fieldIssuesOf(error).map((issue) => {
@@ -438,7 +439,7 @@ export function useEntry(params: EntryParams) {
             const message = describeFieldCode(issue.code, column);
             patchRowByKey(`r${rowId}`, (r) => withMark(r, columnId, { kind: "invalid", message }));
           }
-          setPaste({ stage: "result", kind: "invalid", headline: "붙여넣은 값 중 고쳐야 할 곳이 있어 아무것도 저장하지 않았습니다.", items, canRetry: false });
+          setPaste({ stage: "result", kind: "invalid", headline: "붙여넣은 값 중 고쳐야 할 곳이 있어 아무것도 저장하지 않았습니다.", items, canRetry: false, truncated: truncationText(error) || undefined });
         } else if (isCode(error, "DEFINITION_VERSION_MISMATCH")) {
           setPaste({
             stage: "result",
@@ -542,5 +543,7 @@ function markFieldIssues(
   if (issues.length === 0 && editedColumnId !== null) {
     patch(rowKey, (row) => withMark(row, editedColumnId, { kind: "invalid", message: describeApiError(error) }));
   }
+  const cut = truncationText(error);
+  if (cut && lines.length > 0) lines.push(cut);
   if (setRowIssue) setRowIssue(lines.length > 0 ? lines.join(" / ") : describeApiError(error));
 }

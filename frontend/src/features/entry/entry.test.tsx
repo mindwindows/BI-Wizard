@@ -718,6 +718,62 @@ describe("엑셀 붙여넣기 (C4)", () => {
     await waitFor(() => expect(cell(ctx.grid, "r1", "2").classList.contains("cell-invalid")).toBe(true));
   });
 
+  it("422가 잘렸으면(truncated) 붙여넣기 결과에 '일부만 표시됨'을 보이고 외 N건 계산은 서버 값이 우선", async () => {
+    const ctx = await openGrid({
+      detail: salesDetail({
+        columns: [COL(1, "기준일", "date", { required: true }), COL(2, "매출", "number", { rules: { min: "0", max: "1000000" } })],
+      }),
+      rows: [row(1, { "1": "2026-03-01", "2": "5" })],
+      handlers: {
+        "POST /datasets/7/rows/paste": () =>
+          apiError(422, "VALIDATION_ERROR", "서버 문구", {
+            fields: Array.from({ length: 25 }, () => ({ row_index: 0, column_id: 2, code: "OUT_OF_RANGE", message: "x" })),
+            truncated: true,
+            total: 480,
+          }),
+      },
+    });
+    paste(ctx, "9999999", { rowIndex: 0, colId: "2" });
+    applyPaste();
+    const result = await screen.findByRole("alert", { name: "붙여넣기 결과" });
+    expect(result.textContent).toContain("일부만 표시됨(전체 480건 중 일부)");
+    expect(result.textContent).not.toContain("외 5건");
+    // 범위 문구는 칸 표시와 같은 쉼표 서식
+    expect(result.textContent).toContain("(0 ~ 1,000,000)");
+  });
+
+  it("잘리지 않았으면 일부만 표시됨 문구가 없다", async () => {
+    const ctx = await openGrid({
+      detail: salesDetail({ columns: [COL(1, "기준일", "date", { required: true }), COL(2, "매출", "number", { rules: { min: "0", max: "100" } })] }),
+      rows: [row(1, { "1": "2026-03-01", "2": "5" })],
+      handlers: {
+        "POST /datasets/7/rows/paste": () => apiError(422, "VALIDATION_ERROR", "서버 문구", { fields: [{ row_index: 0, column_id: 2, code: "OUT_OF_RANGE", message: "x" }], truncated: false, total: 1 }),
+      },
+    });
+    paste(ctx, "500", { rowIndex: 0, colId: "2" });
+    applyPaste();
+    const result = await screen.findByRole("alert", { name: "붙여넣기 결과" });
+    expect(result.textContent).not.toContain("일부만 표시됨");
+  });
+
+  it("충돌이 잘렸으면(truncated) 붙여넣기 충돌 결과에 안내를 보인다", async () => {
+    const ctx = await openGrid({
+      rows: [row(1, { "1": "2026-03-01", "2": "5" })],
+      handlers: {
+        "POST /datasets/7/rows/paste": () =>
+          apiError(409, "PASTE_CONFLICT", "서버 문구", {
+            conflicts: [{ row_index: 0, row_id: 1, column_id: 2, kind: "cell", current: "7" }],
+            truncated: true,
+            total: 2500,
+          }),
+      },
+    });
+    paste(ctx, "9", { rowIndex: 0, colId: "2" });
+    applyPaste();
+    const result = await screen.findByRole("alert", { name: "붙여넣기 결과" });
+    expect(result.textContent).toContain("일부만 표시됨(전체 2,500건 중 일부)");
+  });
+
   it("WRITE_BUSY는 다시 시도 버튼으로 같은 요청을 다시 보낸다", async () => {
     let busy = true;
     const ctx = await openGrid({

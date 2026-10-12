@@ -227,6 +227,15 @@ describe("스텁 신원 전환기", () => {
     expect(within(select).getAllByRole("option")).toHaveLength(3);
   });
 
+  it("current가 목록에 없으면(미등록 로그인 ID) '(미등록) 값' 항목으로 보이고 선택 안 함이 아니다", async () => {
+    withMe(() => json(200, ADMIN_ME), { "GET /dev/stub-users": () => json(200, { ...STUBS, current: "ghost-id" }) });
+    open();
+    const select = (await screen.findByLabelText("개발용 신원")) as HTMLSelectElement;
+    expect(select.value).toBe("ghost-id");
+    expect(select.selectedOptions[0].textContent).toBe("(미등록) ghost-id");
+    expect(within(select).getAllByRole("option")).toHaveLength(4);
+  });
+
   it("DV1이 404(운영 설정)이면 전환기가 없다", async () => {
     const { calls } = withMe(() => json(200, ADMIN_ME), { "GET /dev/stub-users": () => apiError(404, "NOT_FOUND") });
     open();

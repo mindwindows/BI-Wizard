@@ -190,7 +190,9 @@ td {
 
 .grid-scroll {
   overflow: auto;
-  max-height: 60vh;
+  /* 위 머리글·안내·아래 쪽 이동줄을 뺀 화면 높이. 마지막 행이 잘려 보이지 않게 스크롤하고 머리글은 고정(.matrix thead th sticky). */
+  max-height: calc(100vh - 120px);
+  min-height: 200px;
   border: 1px solid #cbd2d9;
   background: #fff;
 }
@@ -198,6 +200,19 @@ td {
 .matrix {
   margin: 0;
   width: 100%;
+  table-layout: auto;
+}
+
+.matrix thead th:first-child,
+.matrix tbody th {
+  width: 260px;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.matrix thead th:not(:first-child),
+.matrix tbody td {
+  min-width: 140px;
 }
 
 .matrix th,
@@ -218,7 +233,6 @@ td {
   position: sticky;
   left: 0;
   background: #fff;
-  min-width: 220px;
   font-weight: 400;
 }
 
@@ -604,4 +618,24 @@ button.link {
 .entry .panel ul {
   margin: 4px 0;
   padding-left: 18px;
+}
+
+/* ---- 1b·1c 화면 정리 ---- */
+.panel-form {
+  max-width: 560px;
+}
+
+.panel-form input,
+.panel-form select {
+  max-width: 100%;
+}
+
+/* flex 열 패널 안의 버튼은 내용 폭만 차지한다(붙여넣기 확인창·결과, 폼). */
+.panel > button {
+  align-self: flex-start;
+}
+
+.inspector-form p,
+.inspector-form .field > span {
+  margin: 0;
 }

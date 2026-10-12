@@ -43,6 +43,10 @@ export function StubSwitcher() {
       <label htmlFor={id}>개발용 신원</label>
       <select id={id} value={stub.current ?? ""} onChange={(event) => void change(event.target.value)}>
         <option value="">(선택 안 함)</option>
+        {/* 쿠키 값이 등록 사용자 목록에 없으면(미등록 로그인 ID) 선택 안 함으로 오해하지 않게 따로 보여 준다. */}
+        {stub.current && !stub.items.some((item) => item.login_id === stub.current) ? (
+          <option value={stub.current}>(미등록) {stub.current}</option>
+        ) : null}
         {stub.items.map((item) => (
           <option key={item.login_id} value={item.login_id}>
             {item.display_name} ({item.login_id}){item.is_admin ? " - 관리자" : ""}

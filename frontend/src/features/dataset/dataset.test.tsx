@@ -274,6 +274,16 @@ describe("S3 데이터셋 만들기 (B2)", () => {
     expect(screen.queryByTestId("screen-S4")).toBeNull();
   });
 
+  it("비활성 팀이라는 409 TARGET_INACTIVE(field=team)는 데이터셋 생성 불가 문구", async () => {
+    await openForm(ADMIN_ME, { "POST /datasets": () => apiError(409, "TARGET_INACTIVE", "서버 문구", { field: "team" }) });
+    const form = screen.getByRole("form", { name: "데이터셋 만들기" });
+    fireEvent.change(within(form).getByLabelText("이름"), { target: { value: "x" } });
+    fireEvent.click(within(form).getByRole("button", { name: "만들기" }));
+    const alert = await within(form).findByRole("alert");
+    expect(alert.textContent).toContain("비활성 팀에는 데이터셋을 만들 수 없습니다");
+    expect(alert.textContent).not.toContain("소속");
+  });
+
   it.each([
     [403, "FORBIDDEN", "권한이 없습니다"],
     [503, "DEFINITION_BUSY", "잠시 뒤"],

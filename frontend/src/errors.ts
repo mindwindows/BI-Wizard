@@ -97,10 +97,30 @@ function validationText(details: unknown): string {
   return parts.length > 0 ? `${MESSAGES.VALIDATION_ERROR} (${parts.join(", ")})` : MESSAGES.VALIDATION_ERROR;
 }
 
+/** B2 데이터셋 생성 전용: 비활성 팀(TARGET_INACTIVE, field=team)은 소속 지정 문구가 아니라 생성 불가 문구를 쓴다. */
+export const DATASET_TEAM_INACTIVE_TEXT = "비활성 팀에는 데이터셋을 만들 수 없습니다.";
+
+/** 05 §1 잘림 표시: details.truncated가 true일 때만 전체 건수(없으면 0)를 돌려준다. 안 잘렸으면 null. */
+export function truncationOf(error: unknown): { total: number } | null {
+  if (!(error instanceof ApiError) || !isRecord(error.details) || error.details.truncated !== true) return null;
+  const total = error.details.total;
+  return { total: typeof total === "number" && Number.isFinite(total) ? total : 0 };
+}
+
+/** 서버가 목록을 자른 경우의 안내 문구. 잘리지 않았으면 빈 문자열. */
+export function truncationText(error: unknown): string {
+  const cut = truncationOf(error);
+  if (!cut) return "";
+  return cut.total > 0 ? `일부만 표시됨(전체 ${cut.total.toLocaleString("en-US")}건 중 일부)` : "일부만 표시됨";
+}
+
 /** ApiError를 사용자에게 보여 줄 한국어 문구로 바꾼다. */
 export function describeApiError(error: unknown): string {
   if (!(error instanceof ApiError)) return "화면을 표시하는 중 오류가 발생했습니다.";
-  if (error.code === "VALIDATION_ERROR") return validationText(error.details);
+  if (error.code === "VALIDATION_ERROR") {
+    const cut = truncationText(error);
+    return cut ? `${validationText(error.details)} — ${cut}` : validationText(error.details);
+  }
   if (error.code === "ALREADY_EXISTS") {
     const field = isRecord(error.details) && typeof error.details.field === "string" ? error.details.field : "";
     return EXISTS_BY_FIELD[field] ?? MESSAGES.ALREADY_EXISTS;

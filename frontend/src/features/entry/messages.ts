@@ -1,6 +1,7 @@
 import { ApiError } from "../../api";
 import { describeApiError, fieldCodePhrase } from "../../errors";
 import type { Column } from "../dataset/types";
+import { formatNumber } from "./values";
 import type { ConflictItem, FieldIssue } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,7 +43,9 @@ export function describeFieldCode(code: string | undefined, column: Column | und
   const rules = column?.rules;
   if (!rules) return base;
   if (code === "OUT_OF_RANGE" && (rules.min !== undefined || rules.max !== undefined)) {
-    return `${base}(${rules.min ?? "제한 없음"} ~ ${rules.max ?? "제한 없음"})`;
+    // 칸 표시와 같은 쉼표 서식(소수 자릿수 채움은 하지 않는다). 십진 문자열은 숫자로 바꾸지 않고 문자열로 서식한다.
+    const bound = (value: unknown) => (value === undefined || value === null ? "제한 없음" : column.type === "number" ? formatNumber(String(value)) : String(value));
+    return `${base}(${bound(rules.min)} ~ ${bound(rules.max)})`;
   }
   if (code === "TOO_LONG" && typeof rules.max_length === "number") return `${base}(${rules.max_length}자 이하)`;
   if (code === "NOT_IN_OPTIONS" && Array.isArray(rules.options)) return `${base}(${rules.options.join(", ")} 중에서 고릅니다)`;

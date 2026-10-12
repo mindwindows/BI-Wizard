@@ -389,9 +389,11 @@ function PastePanel({ entry, onKey }: { entry: ReturnType<typeof useEntry>; onKe
             </li>
           ))}
         </ul>
-        <button type="button" onClick={entry.cancelPaste} autoFocus>
-          닫기
-        </button>
+        <div className="actions">
+          <button type="button" onClick={entry.cancelPaste} autoFocus>
+            닫기
+          </button>
+        </div>
       </section>
     );
   }
@@ -409,12 +411,14 @@ function PastePanel({ entry, onKey }: { entry: ReturnType<typeof useEntry>; onKe
         <p>
           기존 행 {plan.existingRows}개의 값을 덮어쓰고, 새 행 {plan.newRows}개를 추가합니다. 충돌이 하나라도 있으면 전부 취소됩니다.
         </p>
-        <button type="button" className="primary" onClick={() => void entry.applyPaste(plan)} autoFocus>
-          붙여넣기 적용
-        </button>{" "}
-        <button type="button" onClick={entry.cancelPaste}>
-          취소
-        </button>
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => void entry.applyPaste(plan)} autoFocus>
+            붙여넣기 적용
+          </button>
+          <button type="button" onClick={entry.cancelPaste}>
+            취소
+          </button>
+        </div>
       </section>
     );
   }
@@ -434,20 +438,28 @@ function PastePanel({ entry, onKey }: { entry: ReturnType<typeof useEntry>; onKe
           ))}
         </ul>
       ) : null}
-      {paste.items.length > MAX_LISTED ? <p className="muted">외 {paste.items.length - MAX_LISTED}건</p> : null}
-      {paste.kind === "conflict" && paste.canRetry ? (
-        <button type="button" onClick={entry.replanPaste}>
-          서버 값 기준으로 다시 붙여넣기
+      {paste.truncated ? (
+        <p className="muted" data-testid="truncated-notice">
+          {paste.truncated}
+        </p>
+      ) : paste.items.length > MAX_LISTED ? (
+        <p className="muted">외 {paste.items.length - MAX_LISTED}건</p>
+      ) : null}
+      <div className="actions">
+        {paste.kind === "conflict" && paste.canRetry ? (
+          <button type="button" onClick={entry.replanPaste}>
+            서버 값 기준으로 다시 붙여넣기
+          </button>
+        ) : null}
+        {paste.retry ? (
+          <button type="button" onClick={paste.retry}>
+            다시 시도
+          </button>
+        ) : null}
+        <button type="button" onClick={entry.cancelPaste}>
+          닫기
         </button>
-      ) : null}{" "}
-      {paste.retry ? (
-        <button type="button" onClick={paste.retry}>
-          다시 시도
-        </button>
-      ) : null}{" "}
-      <button type="button" onClick={entry.cancelPaste}>
-        닫기
-      </button>
+      </div>
     </section>
   );
 }

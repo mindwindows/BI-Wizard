@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api";
-import { describeApiError } from "./errors";
+import { truncationOf, truncationText, describeApiError } from "./errors";
 
 const err = (status: number, code: string, details: unknown = null, message = "서버 문구") =>
   new ApiError(status, { code, message, details, request_id: null });
@@ -111,5 +111,22 @@ describe("describeApiError (05 §3 코드별 문구)", () => {
 
   it("ApiError가 아니면 일반 문구", () => {
     expect(describeApiError(new Error("boom"))).toContain("오류가 발생했습니다");
+  });
+});
+
+describe("잘림 표시 (05 §1, 03b 19-1 결정 4)", () => {
+  it("truncated가 true일 때만 안내 문구를 만든다", () => {
+    expect(truncationOf(err(422, "VALIDATION_ERROR", { fields: [], truncated: true, total: 350 }))).toEqual({ total: 350 });
+    expect(truncationText(err(422, "VALIDATION_ERROR", { truncated: true, total: 1234 }))).toBe("일부만 표시됨(전체 1,234건 중 일부)");
+    expect(truncationText(err(422, "VALIDATION_ERROR", { truncated: true }))).toBe("일부만 표시됨");
+    expect(truncationText(err(422, "VALIDATION_ERROR", { fields: [], truncated: false, total: 3 }))).toBe("");
+    expect(truncationText(err(422, "VALIDATION_ERROR", { fields: [] }))).toBe("");
+    expect(truncationText(new Error("x"))).toBe("");
+  });
+
+  it("검증 오류 문구에 잘림 안내를 붙이고, 안 잘렸으면 붙이지 않는다", () => {
+    const cut = describeApiError(err(422, "VALIDATION_ERROR", { fields: [{ field: "name", code: "REQUIRED" }], truncated: true, total: 350 }));
+    expect(cut).toContain("일부만 표시됨(전체 350건 중 일부)");
+    expect(describeApiError(err(422, "VALIDATION_ERROR", { fields: [{ field: "name", code: "REQUIRED" }] }))).not.toContain("일부만");
   });
 });

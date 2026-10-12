@@ -1,6 +1,8 @@
 import { useId, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ErrorNotice } from "../../components";
+import { ApiError } from "../../api";
+import { DATASET_TEAM_INACTIVE_TEXT } from "../../errors";
 import { useMe } from "../access/MeContext";
 import { ROLE_LABELS, isActiveMembership } from "../access/types";
 import { createDataset } from "./api";
@@ -61,13 +63,20 @@ function CreateForm({ teams, initialTeam }: { teams: Array<{ id: number; name: s
       const created = await createDataset({ team_id: teamId, name: trimmed, date_unit: dateUnit });
       void navigate(`/datasets/${created.id}`);
     } catch (caught) {
-      setError(caught);
+      const inactiveTeam =
+        caught instanceof ApiError &&
+        caught.code === "TARGET_INACTIVE" &&
+        typeof caught.details === "object" &&
+        caught.details !== null &&
+        (caught.details as { field?: unknown }).field === "team";
+      if (inactiveTeam) setMessage(DATASET_TEAM_INACTIVE_TEXT);
+      else setError(caught);
       setBusy(false);
     }
   }
 
   return (
-    <form className="panel" aria-label="데이터셋 만들기" onSubmit={(event) => void submit(event)} noValidate>
+    <form className="panel panel-form" aria-label="데이터셋 만들기" onSubmit={(event) => void submit(event)} noValidate>
       <label htmlFor={ids.team}>팀</label>
       <select id={ids.team} value={teamId} onChange={(event) => setTeamId(Number(event.target.value))}>
         {teams.map((team) => (
