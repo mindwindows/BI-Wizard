@@ -54,12 +54,19 @@ describe("describeApiError (05 §3 코드별 문구)", () => {
   });
 
   it("TARGET_INACTIVE(409)는 details.field별로 비활성 팀·사용자 소속 지정 불가를 안내한다", () => {
-    expect(describeApiError(err(409, "TARGET_INACTIVE", { field: "team_id" }))).toContain("비활성 팀");
-    expect(describeApiError(err(409, "TARGET_INACTIVE", { field: "user_id" }))).toContain("비활성 사용자");
+    expect(describeApiError(err(409, "TARGET_INACTIVE", { field: "team" }))).toContain("비활성 팀");
+    expect(describeApiError(err(409, "TARGET_INACTIVE", { field: "user" }))).toContain("비활성 사용자");
     const generic = describeApiError(err(409, "TARGET_INACTIVE", { field: "zzz" }));
     expect(generic).toContain("비활성");
     expect(generic).toContain("소속");
     expect(describeApiError(err(409, "TARGET_INACTIVE"))).toContain("소속");
+  });
+
+  it("입력 그리드 오류 코드(05 §3)는 쉬운 문구", () => {
+    expect(describeApiError(err(409, "CELL_CONFLICT"))).toContain("다른 사람이 먼저 이 칸");
+    expect(describeApiError(err(409, "PASTE_CONFLICT"))).toContain("아무것도 저장하지 않았습니다");
+    expect(describeApiError(err(409, "PERIOD_CONFLICT"))).toContain("같은 기간의 행");
+    expect(describeApiError(err(404, "ROW_NOT_FOUND"))).toContain("행을 찾을 수 없습니다");
   });
 
   it("METHOD_NOT_ALLOWED(405)", () => {

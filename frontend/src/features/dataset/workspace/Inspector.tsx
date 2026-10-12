@@ -379,7 +379,7 @@ function ColumnForm(props: ColumnFormProps) {
 
       {type === "number" ? (
         <>
-          <Field label="최솟값" htmlFor={ids.min} error={errors.min}>
+          <Field label="최솟값" htmlFor={ids.min} error={errors.min} hint="저장하면 서버가 숫자 표기를 정리합니다(예: -5.50은 -5.5). 저장 뒤 입력칸이 정리된 값으로 바뀌어도 같은 값입니다.">
             <input id={ids.min} inputMode="decimal" value={draft.min} disabled={readOnly} onChange={(event) => setField("min", event.target.value)} />
           </Field>
           <Field label="최댓값" htmlFor={ids.max} error={errors.max}>

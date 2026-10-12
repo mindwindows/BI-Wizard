@@ -20,7 +20,8 @@ export function validateColumnName(raw: string): string | null {
   const name = raw.normalize("NFC").trim();
   if (name === "") return "열 이름을 입력해 주세요.";
   if (/[[\]"]/.test(name) || hasControl(name)) return FORBIDDEN_HINT;
-  if ((RESERVED_COLUMN_NAMES as readonly string[]).includes(name)) return RESERVED_HINT;
+  // 서버는 대소문자를 무시하고 비교한다(Team, ROW_ID 도 예약어). toLowerCase는 casefold의 근사다.
+  if ((RESERVED_COLUMN_NAMES as readonly string[]).includes(name.toLowerCase())) return RESERVED_HINT;
   if (name.length > COLUMN_NAME_MAX) return `열 이름은 ${COLUMN_NAME_MAX}자 이하로 입력해 주세요.`;
   return null;
 }

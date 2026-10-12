@@ -13,7 +13,7 @@ describe("validateColumnName (05 §1 이름 규칙)", () => {
     expect(validateColumnName(name)).toContain("쓸 수 없습니다");
   });
 
-  it.each([["team"], ["팀"], ["row_id"], ["행 번호"], ["  team  "]])("예약어 %j는 안내와 함께 거부한다", (name) => {
+  it.each([["team"], ["팀"], ["row_id"], ["행 번호"], ["  team  "], ["Team"], ["ROW_ID"], ["Row_Id"]])("예약어 %j는 안내와 함께 거부한다", (name) => {
     const message = validateColumnName(name);
     expect(message).toContain("예약");
     expect(message).toContain("행 번호");

@@ -15,6 +15,11 @@ const MESSAGES: Record<string, string> = {
   SERVICE_UNAVAILABLE: "서버가 일시적으로 응답하지 못합니다. 잠시 뒤 다시 시도하세요.",
   DEFINITION_VERSION_MISMATCH:
     "다른 사람이 먼저 바꿨습니다. 최신 내용을 다시 읽었습니다. 내용을 확인한 뒤 다시 시도해 주세요.",
+  CELL_CONFLICT: "다른 사람이 먼저 이 칸을 바꿨습니다. 서버에 있는 값을 보여 드립니다.",
+  PASTE_CONFLICT: "붙여넣는 동안 다른 사람이 바꾼 칸이 있어 아무것도 저장하지 않았습니다.",
+  PERIOD_CONFLICT: "이미 같은 기간의 행이 있습니다. 기간을 바꾸거나 기존 행을 고쳐 주세요.",
+  ROW_NOT_FOUND: "행을 찾을 수 없습니다. 다른 사람이 지웠을 수 있으니 화면을 새로 읽어 주세요.",
+  PREVIEW_BUSY: "지금 계산 요청이 많습니다. 잠시 뒤 다시 시도해 주세요.",
   WRITE_BUSY: "다른 작업이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
   DEFINITION_BUSY: "다른 작업이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
   DATASET_HAS_ROWS: "이미 입력된 행이 있어 날짜 단위와 기준 날짜 열은 바꿀 수 없습니다. 행이 없는 데이터셋에서만 바꿀 수 있습니다.",
@@ -64,11 +69,12 @@ const EXISTS_BY_FIELD: Record<string, string> = {
   display_name: "같은 이름의 열이 이미 있습니다.",
 };
 
-/** TARGET_INACTIVE(409, A8) details.field별 문구. 필드 이름은 구현 제안이라 team/user 계열을 모두 받는다. */
+/** 입력 검증 필드 코드(VALIDATION_ERROR details.fields[].code)의 쉬운 말. 모르는 코드는 undefined. */
+export const fieldCodePhrase = (code: string | undefined): string | undefined => (code ? FIELD_CODE_PHRASES[code] : undefined);
+
+/** TARGET_INACTIVE(409, A8) details.field별 문구. 05 §3 확정값은 team / user 이며, 모르는 값은 통합 문구를 쓴다. */
 const INACTIVE_BY_FIELD: Record<string, string> = {
-  team_id: "비활성 팀에는 소속을 지정할 수 없습니다. 먼저 팀을 다시 사용 상태로 바꿔 주세요.",
   team: "비활성 팀에는 소속을 지정할 수 없습니다. 먼저 팀을 다시 사용 상태로 바꿔 주세요.",
-  user_id: "비활성 사용자에게는 소속을 지정할 수 없습니다. 먼저 사용자를 다시 사용 상태로 바꿔 주세요.",
   user: "비활성 사용자에게는 소속을 지정할 수 없습니다. 먼저 사용자를 다시 사용 상태로 바꿔 주세요.",
 };
 const INACTIVE_GENERIC = "비활성 팀이나 사용자에게는 소속을 지정할 수 없습니다. 먼저 다시 사용 상태로 바꿔 주세요.";

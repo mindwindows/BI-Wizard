@@ -439,3 +439,169 @@ button.link {
   border-bottom: 2px solid #9aa5b1;
   white-space: nowrap;
 }
+
+/* ---- S4 입력 그리드(단위 1c) ---- */
+.workspace-center {
+  border-style: solid;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entry-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-range {
+  min-width: 140px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-help {
+  margin: 0;
+  font-size: 12px;
+}
+
+.state-readonly {
+  margin: 0;
+  padding: 4px 8px;
+  background: #f0f2f5;
+  border: 1px solid #cbd2d9;
+  font-size: 13px;
+}
+
+.entry-grid {
+  height: 62vh;
+  min-height: 360px;
+}
+
+.entry-grid .cell-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-grid .cell-blank {
+  background: repeating-linear-gradient(135deg, #fafbfc, #fafbfc 6px, #f0f2f5 6px, #f0f2f5 8px);
+}
+
+.entry-grid .cell-blank-mark {
+  display: inline-block;
+  min-width: 1px;
+}
+
+.entry-grid .cell-formula {
+  background: #eef2f7;
+  color: #323f4b;
+  font-style: italic;
+}
+
+.entry-grid .cell-error {
+  background: #fde8e8;
+  color: #9b1c1c;
+  font-weight: 600;
+}
+
+.entry-grid .cell-invalid {
+  outline: 2px solid #c81e1e;
+  outline-offset: -2px;
+}
+
+.entry-grid .cell-conflict {
+  outline: 2px solid #b45309;
+  outline-offset: -2px;
+  background: #fff7e0;
+}
+
+.entry-grid .cell-pending {
+  opacity: 0.65;
+}
+
+.entry-grid .cell-draft,
+.entry-grid .row-draft {
+  background: #f4fbf4;
+}
+
+.entry-grid .cell-rowlabel {
+  color: #52606d;
+  font-size: 12px;
+}
+
+.entry-grid .cell-entry-label {
+  color: #1c64f2;
+  font-weight: 600;
+}
+
+.entry-grid .header-selected {
+  background: #d9e8fb;
+}
+
+.entry-grid .header-formula {
+  font-style: italic;
+}
+
+.cell-flag {
+  font-size: 11px;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid #cbd2d9;
+  background: #f8f9fb;
+}
+
+.notice-error {
+  border-color: #e0a3a3;
+  background: #fdf2f2;
+}
+
+.notice-ok {
+  border-color: #9bd2a6;
+  background: #f1faf3;
+}
+
+.panel-conflict,
+.panel-invalid,
+.panel-confirm,
+.panel-draft,
+.panel-ok {
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.panel-conflict {
+  border-color: #e3b04b;
+  background: #fff9e8;
+}
+
+.panel-invalid {
+  border-color: #e0a3a3;
+  background: #fdf2f2;
+}
+
+.panel-ok {
+  border-color: #9bd2a6;
+  background: #f1faf3;
+}
+
+.entry .panel h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.entry .panel ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}

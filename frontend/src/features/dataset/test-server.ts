@@ -56,6 +56,9 @@ export function makeFakeWorkspace(initial: DatasetDetail): FakeWorkspace {
   };
   const handlers: Record<string, Handler> = {
     [`GET /datasets/${id}`]: () => json(200, state),
+    // 1b 시험은 행을 쓰지 않는다. 입력 그리드(1c)가 부르는 C1은 빈 목록으로 답한다.
+    [`GET /datasets/${id}/rows`]: (call) =>
+      json(200, { def_version: state.def_version, items: [], total: 0, limit: Number(call.query.get("limit") ?? 50), offset: Number(call.query.get("offset") ?? 0) }),
     [`POST /datasets/${id}/columns`]: (call) => {
       const forced = take() ?? mismatch(call);
       if (forced) return forced;

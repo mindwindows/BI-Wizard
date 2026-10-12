@@ -43,7 +43,7 @@ const SALES = [
 ];
 
 describe("S4 작업공간 골격", () => {
-  it("좌(데이터셋 정보·열 목록) 중앙(열 헤더 미리보기) 우(Inspector) 3분할", async () => {
+  it("좌(데이터셋 정보·열 목록) 중앙(입력 그리드) 우(Inspector) 3분할", async () => {
     await openWorkspace(makeDetail({ columns: SALES, base_date_column_id: 1 }));
     expect(screen.getByRole("heading", { level: 1, name: /월별 매출/ })).toBeTruthy();
     const info = screen.getByRole("region", { name: "데이터셋 정보" });
@@ -54,8 +54,8 @@ describe("S4 작업공간 골격", () => {
     expect(info.textContent).toContain("기준일"); // 기준 날짜 열
     const list = within(screen.getByRole("region", { name: "열 목록" })).getAllByRole("button").map((b) => b.textContent);
     expect(list.slice(0, 5).map((t) => t?.split(" ")[0])).toEqual(["기준일", "매출", "메모", "등급", "합계"]);
-    const preview = screen.getByRole("table", { name: "열 헤더 미리보기" });
-    expect(within(preview).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(
+    const grid = await screen.findByRole("group", { name: "입력 그리드 표" });
+    expect((await within(grid).findAllByRole("columnheader")).map((h) => h.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining("기준일"), expect.stringContaining("매출"), expect.stringContaining("합계")]),
     );
     expect(inspector()).toBeTruthy();
@@ -70,9 +70,11 @@ describe("S4 작업공간 골격", () => {
 
   it("열은 position 순으로 보인다", async () => {
     await openWorkspace(makeDetail({ columns: [COL(1, "나중", "text", { position: 9 }), COL(2, "먼저", "text", { position: 1 })] }));
-    const names = within(screen.getByRole("table", { name: "열 헤더 미리보기" })).getAllByRole("columnheader").map((h) => h.textContent);
-    expect(names[0]).toContain("먼저");
-    expect(names[1]).toContain("나중");
+    const grid = await screen.findByRole("group", { name: "입력 그리드 표" });
+    const names = (await within(grid).findAllByRole("columnheader")).map((h) => h.textContent);
+    // 맨 앞은 고정 열 "기간 / 행 번호"
+    expect(names[1]).toContain("먼저");
+    expect(names[2]).toContain("나중");
   });
 
   it("없는 데이터셋(404)은 쉬운 문구, 화면 식별자는 유지", async () => {
@@ -92,6 +94,16 @@ describe("S4 작업공간 골격", () => {
     expect(within(aside).queryByLabelText("Inspector 폭")).toBeNull();
     fireEvent.click(within(aside).getByRole("button", { name: "Inspector 펼치기" }));
     expect(within(aside).getByLabelText("Inspector 폭")).toBeTruthy();
+  });
+});
+
+describe("Inspector 숫자 규칙 안내", () => {
+  it("저장하면 서버가 숫자 표기를 정리한다는 도움말이 숫자 열 규칙에 보인다", async () => {
+    await openWorkspace(makeDetail({ columns: SALES }));
+    fireEvent.click(within(screen.getByRole("region", { name: "열 목록" })).getByRole("button", { name: /매출/ }));
+    const form = within(inspector()).getByRole("form", { name: "열 수정: 매출" });
+    expect(form.textContent).toContain("서버가 숫자 표기를 정리합니다");
+    expect(form.textContent).toContain("-5.50은 -5.5");
   });
 });
 
@@ -325,8 +337,10 @@ describe("Inspector 열 수정 (B6)", () => {
 
   it("열 머리글을 눌러도 선택된다", async () => {
     await openWorkspace(detail());
-    fireEvent.click(within(screen.getByRole("table", { name: "열 헤더 미리보기" })).getByRole("button", { name: /메모/ }));
-    expect(within(inspector()).getByRole("form", { name: "열 수정: 메모" })).toBeTruthy();
+    const grid = await screen.findByRole("group", { name: "입력 그리드 표" });
+    const header = (await within(grid).findAllByRole("columnheader")).find((h) => h.textContent?.includes("메모")) as HTMLElement;
+    fireEvent.click(header);
+    await waitFor(() => expect(within(inspector()).getByRole("form", { name: "열 수정: 메모" })).toBeTruthy());
   });
 
   it("COLUMN_LOCKED 422와 순환(FORMULA_CIRCULAR) 422는 쉬운 문구", async () => {

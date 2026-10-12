@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ApiError } from "../../../api";
 import { ErrorNotice, Loading } from "../../../components";
+import { EntryGrid } from "../../entry/EntryGrid";
 import { addColumn, getDataset, sortColumns, updateColumn, updateDataset } from "../api";
 import { formatDate } from "../format";
 import {
@@ -28,6 +29,8 @@ function Workspace({ datasetId }: { datasetId: number }) {
   // 가장 최근에 알게 된 정의 버전. 연속 저장이 낡은 값을 쓰지 않게 ref로도 들고 있다.
   const versionRef = useRef(0);
   const detail = loaded && "detail" in loaded ? loaded.detail : null;
+  // 열 목록은 정의가 바뀔 때만 새 배열이 된다(그리드 열 정의가 불필요하게 다시 만들어지지 않게).
+  const columns = useMemo(() => sortColumns(detail?.columns ?? []), [detail?.columns]);
 
   const apply = useCallback((next: DatasetDetail) => {
     // 더 오래된 응답(느린 재읽기)이 최신 상태를 덮어쓰지 않게 한다.
@@ -44,6 +47,15 @@ function Workspace({ datasetId }: { datasetId: number }) {
       // 재읽기 실패는 무시한다. 다음 저장 때 서버가 버전 불일치를 다시 알려 준다.
     }
   }, [apply, datasetId]);
+
+  const getVersion = useCallback(() => versionRef.current, []);
+  /** 서버가 알려 준 정의 버전이 내가 아는 것보다 크면 다른 사람이 정의를 바꾼 것이므로 정의를 다시 읽는다. */
+  const noteVersion = useCallback(
+    (version: number) => {
+      if (version > versionRef.current) void refetch();
+    },
+    [refetch],
+  );
 
   useEffect(() => {
     let active = true;
@@ -134,7 +146,6 @@ function Workspace({ datasetId }: { datasetId: number }) {
     );
   }
 
-  const columns = sortColumns(detail.columns);
   const canDefine = detail.permissions.define;
   const baseColumn = columns.find((c) => c.id === detail.base_date_column_id);
   const selectedId = selection.kind === "column" ? selection.id : null;
@@ -188,29 +199,23 @@ function Workspace({ datasetId }: { datasetId: number }) {
           </section>
         </div>
 
-        <section aria-label="입력 그리드 자리" className="workspace-center">
+        <section aria-label="입력 그리드 영역" className="workspace-center">
           {columns.length === 0 ? (
             <p className="muted" data-testid="no-columns">
               {canDefine ? "아직 열이 없습니다. 오른쪽에서 열을 추가해 주세요." : "아직 정의된 열이 없습니다."}
             </p>
           ) : (
-            <div className="grid-scroll">
-              <table aria-label="열 헤더 미리보기" className="header-preview">
-                <thead>
-                  <tr>
-                    {columns.map((column) => (
-                      <th key={column.id} scope="col" className={column.id === selectedId ? "selected" : ""}>
-                        <button type="button" className="link" onClick={() => select({ kind: "column", id: column.id })}>
-                          {column.display_name}
-                        </button>
-                        <div className="muted">{COLUMN_TYPE_LABELS[column.type] ?? column.type}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody />
-              </table>
-            </div>
+            <EntryGrid
+              datasetId={datasetId}
+              columns={columns}
+              baseDateColumnId={detail.base_date_column_id}
+              canEnter={detail.permissions.enter}
+              selectedColumnId={selectedId}
+              onSelectColumn={(id) => select({ kind: "column", id })}
+              getVersion={getVersion}
+              onVersion={noteVersion}
+              onDefinitionStale={refetch}
+            />
           )}
         </section>
 
