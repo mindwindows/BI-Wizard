@@ -483,3 +483,19 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 ### 19-2. 이어서 진행
 - 위 1~5와 1c 수정분(reviewer 중요 3건, QA 권고 F-1~F-4)을 qa-engineer가 독립 재검증하고, 화면 수정분은 Playwright로 다시 찍어 `docs/screens/fu1/`의 해당 스크린샷을 교체한다.
 - 그다음 **1d(수식 열)** 를 진행하고 1d를 마친 뒤 보고하고 멈춘다. `lark` 1.3.1은 승인된 버전으로 고정 설치한다. 합격 기준: 07 §6 "미리보기와 뷰 결과 불일치 0건"(차분 시험 전수), X-26 주입 사례 10종과 역슬래시 사례 회귀 고정, K6 함수 시험 사례 전부, K7 빈 칸 전파, 런타임 DDL `bi_app` 실행. 수식 편집기·오류 칸 표시·수식 보기 화면도 스크린샷으로 찍어 `docs/screens/fu1/`에 추가한다.
+
+## 20. FU-1 단위 1d 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 20-1. 결과
+- **구현:** `lark` 1.3.1(승인 AP-15, 고정 설치), 수식 엔진 `backend/app/formula/`(파서·C0·함수 사전 32개 항목·변환기·리터럴 렌더러), revision `0005`(`formulas`·`formula_deps`), 정의 변경 훅이 만드는 `dv_`/`de_` 뷰, 정의 해시와 시작 시 재생성, API D1~D10, `RowViewPort`, 수식 편집기·수식 보기·오류 칸 표시·S5 점검·S9 뷰 재생성 구역, `skills/formula-column`.
+- **합격 기준(QA 독립 재실행, HEAD `42c3619`):** 차분 전수 매트릭스 수식 7,353개(통과 7,057, C0 거부 296 `CONSTANT_ERROR`)·데이터셋 79개·비교 칸 1,353,335개에서 **미리보기와 뷰 불일치 0건, DB 예외 0건**. X-26 주입 10종+역슬래시 L0~L3 회귀 고정(HTTP 재현에서도 `bi_data.evil` 0, 정적 표 행 수 불변, 역할 기본값 `standard_conforming_strings=off`에서도 동일). K6 함수 cases 251개 전부 뷰 경유 통과. K7 빈 칸 전파·글자 비교 대소문자 무시·오류 칸 NULL과 점검 노출 통과. 런타임 DDL `bi_app` 실행(소유자 `bi_app`, `bi_readonly`는 SELECT만). 실제 PG 전체 pytest 2820 passed(skip 98은 SQLite 전용 시험, `pg` 변형 skip 0), 프런트 466(465 passed·1 skipped는 docs 없는 Docker 이미지 한정).
+- **X-26 '남은 22건' 원인 4가지 모두 닫힘:** `10**30` BIGINT 바인드(`Decimal` CAST), 날짜-글자 비교(C0 거부), `%`(문법에 없음), `0/0`·`None+1`(C0 거부/NULL 상수 없음). 이번 매트릭스에서 새 불일치는 나오지 않았다.
+- **reviewer:** 1차 차단 0·중요 5(M1 렌더 문자열 실행 경로, M2 대조 순서, M3 `ROUNDUP` 정밀도, M4 07에 없는 한도, M5 거부 건수 단정). M1·M2·M3·M5는 수정 후 재확인에서 모두 해소, M4는 07 §10-1에 "승인 대기"로 기록(20-2 1번).
+- **QA 재검증:** 수정 후 8/9 항목 통과, 부분 실패 1건(긴 잠금 아래 D3·D7·D8의 문장 시간 초과 57014가 422)은 소규모 수정으로 처리(D7·D8·D6은 503, D3는 07 §5 설계대로 422 유지).
+### 20-2. 사용자 결정 대기
+1. **07 §10-1 한도 승인:** AST 깊이 40(항 41개 이상 덧셈 거부 → `SUM(…)` 안내), 변환 SQL 노드 5만, 단항 부호 `neg`, `DATE` E3 범위 확대, `ROUNDUP` 곱셈 형태. 승인 전까지 코드는 이 값으로 동작한다.
+2. **계산 열 값 표시 자릿수:** `/`·곱셈 결과가 NUMERIC이라 12~20자리 소수로 보인다(그리드 칸이 잘림). 값 반올림·절삭은 하지 않았다. 표시 정책(예: 열 규칙 `decimals` 또는 계산 열 기본 6자리, 전체 값은 툴팁)을 정해야 한다.
+3. **DB 서버 로그의 뷰 생성 실패 문장:** `bi_app`의 `CREATE OR REPLACE VIEW` 가 lock timeout 등으로 실패하면 PostgreSQL 서버 로그(`log_min_error_statement=error` 기본)에 `STATEMENT: CREATE OR REPLACE VIEW …`가 수식 글자 상수와 함께 남는다(앱 로그는 깨끗). 대응 후보: `bi_app` 역할의 `log_min_error_statement` 조정(db-bootstrap 고정 문장, 로그 노출을 막는 보안 강화) 또는 운영 DB 로그 설정 협의(`deploy-coordination.md`). 설정 변경이라 승인이 필요하다.
+4. **계산 열의 이름·위치·태그 변경:** 이번 화면에는 넣지 않았다(B6으로 가능). 후속으로 정할지.
+### 20-3. 알려진 한계·미시험
+- 게이트가 직접 막지 못하는 SQLAlchemy 부품(`custom_op`, `Extract.field`, `BindParameter.callable_`, 숫자 바인드의 `Decimal` 지수)은 formula가 만드는 식에는 나오지 않아 지금은 위험이 낮다(후속 단위에서 거부 추가 권장). 시작 시 `reconcile_all`은 동기로 끝난 뒤 서비스가 시작된다(데이터셋 50개 해시 일치 약 1.1~1.8초, 전체 재생성 약 3.2~4.3초, 행 없는 tmpfs DB 기준).
+- 한글 IME 조합 입력, `PREVIEW_BUSY` 화면 실서버 재현(QA 동시 요청 재현은 통과), 하위 경로 STRIP true 반복, Superset(1e), BAT는 미시험.
