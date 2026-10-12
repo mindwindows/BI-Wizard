@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Protocol
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
@@ -82,3 +83,42 @@ def run_sync_request(port: DatasetSyncPort, team_id: int) -> None:
     except Exception as exc:
         # 상세는 클래스 이름만 남긴다(예외 메시지에 내부 정보가 섞일 수 있다).
         logger.error("팀 동기화 요청 실패: %s (team_id=%s)", type(exc).__name__, team_id)
+
+
+@dataclass(frozen=True)
+class ComputedRow:
+    """한 행의 계산 열 결과. 키는 계산 열 번호(`dataset_columns.id`)다."""
+
+    # DB 값 형(Decimal·date·bool·str·None)
+    values: Mapping[int, Any] = field(default_factory=dict)
+    # 오류 칸의 셀 오류 코드("E1" 등, 05 §3)
+    errors: Mapping[int, str] = field(default_factory=dict)
+
+
+class RowViewPort(Protocol):
+    """행 조회가 계산 열 값과 오류 칸을 받는 포트(04 §3, 07 §3-1). 구현은 formula 모듈(FU-1d).
+
+    `entry`는 데이터셋에 계산 열(`kind='formula'`)이 있을 때만 부른다. 같은 세션(트랜잭션)으로
+    읽으므로 방금 쓴 행도 보인다. 돌려주는 매핑에 없는 행은 계산 열이 모두 빈 값(오류 아님)이다.
+    """
+
+    def read_computed(
+        self,
+        session: Session,
+        dataset_id: int,
+        row_ids: Sequence[int],
+        column_ids: Sequence[int],
+    ) -> Mapping[int, ComputedRow]: ...
+
+
+class PlainRowView:
+    """기본 구현(1c): 계산 열 값이 없고 오류 칸도 없다(`errors`는 항상 `{}`). 1d가 교체한다."""
+
+    def read_computed(
+        self,
+        session: Session,
+        dataset_id: int,
+        row_ids: Sequence[int],
+        column_ids: Sequence[int],
+    ) -> Mapping[int, ComputedRow]:
+        return {}

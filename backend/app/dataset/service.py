@@ -19,11 +19,13 @@ from sqlalchemy.orm import Session
 from app import ddl
 from app.auth.models import CurrentUser
 from app.auth.permissions import can_define, can_enter
+from app.core.db_errors import sqlstate
 from app.core.errors import (
     FieldErrorCode,
     already_exists,
     column_locked,
     dataset_has_rows,
+    definition_version_mismatch,
     not_found,
     validation_failed,
 )
@@ -31,14 +33,41 @@ from app.core.ports import DefinitionHooks
 from app.core.timefmt import to_kst_iso
 from app.dataset import repo, rules
 from app.dataset.definition import (
+    ROW_WRITE_LOCK_TIMEOUT,
     apply_definition_change,
     set_lock_timeout,
     translate_db_error,
 )
 from app.dataset.hashing import structure_hash
 
+# 기준 날짜 열 규칙을 거는 DDL이 기존 값 때문에 실패하는 SQLSTATE: NOT NULL·CHECK·유일 위반.
+_PERIOD_RULE_VIOLATIONS = frozenset({"23502", "23514", "23505"})
 _DATASET_NAME_TAKEN = "같은 팀에 이미 같은 이름의 데이터셋이 있습니다."
 _COLUMN_NAME_TAKEN = "이 데이터셋에 이미 같은 이름의 열이 있습니다."
+
+
+@dataclass(frozen=True)
+class RowColumn:
+    """행 입력(entry)이 읽는 열 정의."""
+
+    id: int
+    display_name: str
+    type: str
+    kind: str
+    required: bool
+    rules: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class RowContext:
+    """행 읽기·쓰기가 쓰는 데이터셋 정의 한 장면(열은 `position`, `id` 순서)."""
+
+    dataset_id: int
+    team_id: int
+    date_unit: str
+    base_date_column_id: int | None
+    def_version: int
+    columns: tuple[RowColumn, ...]
 
 
 @dataclass(frozen=True)
@@ -104,6 +133,55 @@ def get_dataset_detail(session: Session, user: CurrentUser, dataset_id: int) -> 
         "enter": can_enter(user, row["team_id"]),
     }
     return data
+
+
+def _row_context(session: Session, row: RowMapping) -> RowContext:
+    columns = tuple(
+        RowColumn(
+            id=c["id"],
+            display_name=c["display_name"],
+            type=c["type"],
+            kind=c["kind"],
+            required=c["required"],
+            rules=c["rules"],
+        )
+        for c in repo.list_columns(session, row["id"])
+    )
+    return RowContext(
+        dataset_id=row["id"],
+        team_id=row["team_id"],
+        date_unit=row["date_unit"],
+        base_date_column_id=row["base_date_column_id"],
+        def_version=int(row["def_version"]),
+        columns=columns,
+    )
+
+
+def read_row_context(session: Session, dataset_id: int) -> RowContext:
+    """행 조회(C1)용: 잠금 없이 정의를 읽는다. 데이터셋이 없으면 404."""
+    row = repo.get_dataset(session, dataset_id)
+    if row is None:
+        raise not_found()
+    return _row_context(session, row)
+
+
+def lock_row_context(session: Session, dataset_id: int, expected_version: int) -> RowContext:
+    """행 쓰기(C2~C4)의 첫 단계(04 §5, 06 §5): `datasets` 행을 `FOR SHARE`로 잠그고 버전을 확인한다.
+
+    `lock_timeout`(코드 상수)을 걸고, 잠근 **뒤에** 정의(열 목록)를 읽는다. 버전이 다르면 잠금을
+    풀고 409 `DEFINITION_VERSION_MISMATCH`다. 락 대기 초과·교착(`55P03`·`40P01`)은 DBAPIError로
+    올라가며 호출한 쪽(entry service)이 `WRITE_BUSY`로 바꾼다. 잠금은 커밋·롤백할 때 풀린다.
+    """
+    set_lock_timeout(session, ROW_WRITE_LOCK_TIMEOUT)
+    locked = repo.lock_dataset_shared(session, dataset_id)
+    if locked is None:
+        session.rollback()
+        raise not_found()
+    if int(locked["def_version"]) != expected_version:
+        current = int(locked["def_version"])
+        session.rollback()
+        raise definition_version_mismatch(current)
+    return _row_context(session, locked)
 
 
 # --- B2 등록 ----
@@ -194,7 +272,14 @@ def update_dataset(
             if old_base is not None:
                 ddl.drop_period_rules(connection, dataset_id, old_base)
             if new_base is not None:
-                ddl.add_period_rules(connection, dataset_id, new_base, new_unit)
+                try:
+                    ddl.add_period_rules(connection, dataset_id, new_base, new_unit)
+                except DBAPIError as error:
+                    # 잠금 아래에서 행이 0개임을 확인했으므로 일어나지 않아야 한다. 그래도 값이
+                    # 들어와 NOT NULL·CHECK·유일 인덱스가 실패하면 500 대신 같은 422로 답한다.
+                    if sqlstate(error) in _PERIOD_RULE_VIOLATIONS:
+                        raise dataset_has_rows() from None
+                    raise
             if unit_changed:
                 updates["date_unit"] = new_unit
             if base_changed:

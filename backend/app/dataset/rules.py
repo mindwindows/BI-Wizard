@@ -2,7 +2,7 @@
 
 `rules`는 jsonb로 저장하며 열 형별 모양이 정해져 있다.
 - number: `{min?, max?, decimals?}`  min·max는 십진 문자열로 저장한다(05 §1: number 값 표현과 같다).
-  입력은 십진 문자열 또는 JSON 숫자를 받는다.
+  입력은 십진 문자열 또는 JSON 정수만 받는다(JSON 부동소수점은 거부, `parse_decimal`).
 - text: `{max_length?}`
 - date: `{min?, max?}`  `YYYY-MM-DD`
 - choice: `{options}`  목록 필수, 중복·빈 값 불가
@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
 from app.core.errors import FieldErrorCode
@@ -69,18 +69,34 @@ def clean_tag(value: Any) -> tuple[str | None, str | None]:
     return tag, None
 
 
-def _decimal(value: Any) -> Decimal | None:
-    """JSON 숫자·십진 문자열을 유한 `Decimal`로. 불린·NaN·무한·38자리 초과는 None."""
-    if isinstance(value, bool) or not isinstance(value, int | float | str):
+# 십진 표기: 부호(선택) + 정수부 + 소수부(선택). 지수 표기·NaN·무한·공백·`.5`·`5.`는 아니다.
+_DECIMAL_TEXT = re.compile(r"[+-]?[0-9]+(?:\.[0-9]+)?")
+# 38자리 숫자 + 부호 + 소수점이 들어가는 글자 길이. 이보다 길면 `Decimal`로 바꾸기 전에 거부한다.
+_DECIMAL_TEXT_MAX = NUMBER_DIGITS_MAX + 2
+# 38자리 정수가 들어가는 비트 수(10^38 < 2^127). 이보다 큰 정수는 `str()`로 바꾸기 전에 거부한다.
+_INT_BITS_MAX = 127
+
+
+def parse_decimal(value: Any) -> Decimal | None:
+    """십진 문자열 또는 JSON 정수를 유한 `Decimal`로. 아니면 None (05 §1: number는 십진 문자열).
+
+    JSON 부동소수점 숫자(`1.5`)는 거부한다: 2진 근사가 섞여 값이 달라질 수 있기 때문이다. 불린,
+    지수 표기, NaN·무한, 38자리 초과도 None이다. 길이·크기는 `str()`·`Decimal` 변환 **전에** 확인해
+    아주 큰 정수(파이썬의 4300자리 변환 제한)가 예외로 새지 않는다.
+    """
+    if isinstance(value, bool):
         return None
-    if isinstance(value, str) and (not value.strip() or value != value.strip()):
+    if isinstance(value, int):
+        if value.bit_length() > _INT_BITS_MAX:
+            return None
+        text = str(value)
+    elif isinstance(value, str):
+        if len(value) > _DECIMAL_TEXT_MAX or _DECIMAL_TEXT.fullmatch(value) is None:
+            return None
+        text = value
+    else:  # float 등
         return None
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        return None
-    if not number.is_finite():
-        return None
+    number = Decimal(text)
     digits = number.as_tuple()
     exponent = digits.exponent if isinstance(digits.exponent, int) else 0
     if len(digits.digits) + max(exponent, 0) > NUMBER_DIGITS_MAX or -exponent > NUMBER_DIGITS_MAX:
@@ -100,7 +116,7 @@ def _integer(value: Any) -> int | None:
     return value
 
 
-def _iso_date(value: Any) -> date | None:
+def parse_iso_date(value: Any) -> date | None:
     if not isinstance(value, str) or _DATE_TEXT.fullmatch(value) is None:
         return None
     try:
@@ -119,7 +135,7 @@ def _number_rules(rules: dict[str, Any]) -> tuple[dict[str, Any], list[Problem]]
     bounds: dict[str, Decimal] = {}
     for key in ("min", "max"):
         if key in rules and rules[key] is not None:
-            number = _decimal(rules[key])
+            number = parse_decimal(rules[key])
             if number is None:
                 problems.append((f"rules.{key}", FieldErrorCode.BAD_FORMAT))
             else:
@@ -158,7 +174,7 @@ def _date_rules(rules: dict[str, Any]) -> tuple[dict[str, Any], list[Problem]]:
     parsed: dict[str, date] = {}
     for key in ("min", "max"):
         if key in rules and rules[key] is not None:
-            day = _iso_date(rules[key])
+            day = parse_iso_date(rules[key])
             if day is None:
                 problems.append((f"rules.{key}", FieldErrorCode.BAD_FORMAT))
             else:

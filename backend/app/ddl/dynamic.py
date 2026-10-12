@@ -34,6 +34,7 @@ from sqlalchemy import (
     Index,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     Sequence,
     Table,
     Text,
@@ -88,6 +89,8 @@ def _check_table(table: Table) -> None:
     for col in table.columns:
         check_dynamic_name(col.name, "column")
         # 표에 딸려 만들어지는 `row_id`의 Identity(AP-10) 외의 시퀀스·서버 기본값은 만들지 않는다.
+        if col.computed is not None:
+            raise DdlNotAllowedError("계산(생성) 열은 만들지 않는다.")
         if isinstance(col.default, Sequence):
             raise DdlNotAllowedError("독립 시퀀스는 만들지 않는다.")
         if col.server_default is not None and not (
@@ -95,6 +98,10 @@ def _check_table(table: Table) -> None:
         ):
             raise DdlNotAllowedError("서버 기본값은 만들지 않는다(row_id의 Identity만 예외).")
     for constraint in table.constraints:
+        # 표를 만들 때 함께 만들 수 있는 제약은 기본키와 이름 규칙에 맞는 CHECK뿐이다. 외래키·유일
+        # 제약은 허용 목록 밖이다(유일성은 번호 규칙 인덱스 `ux_ds_<번호>_period`가 맡는다).
+        if not isinstance(constraint, PrimaryKeyConstraint | CheckConstraint):
+            raise DdlNotAllowedError("표 생성에는 기본키와 CHECK 제약만 허용한다.")
         if constraint.name is not None:
             check_dynamic_name(constraint.name)
 
@@ -171,7 +178,7 @@ def create_dataset_table(conn: Connection, dataset_id: int) -> None:
 def add_raw_column(conn: Connection, dataset_id: int, column_id: int, column_type: str) -> None:
     """원본 표에 열 `c_<번호>`를 더한다(NULL 허용: 빈 칸이 미입력)."""
     name = check_dynamic_name(column_name(column_id), "column")
-    table_name = dataset_table_name(dataset_id)
+    table_name = check_dynamic_name(dataset_table_name(dataset_id), "table")
     sql_type = _sql_type(column_type)
     operations = Operations(MigrationContext.configure(conn))
     operations.add_column(table_name, Column(name, sql_type, nullable=True), schema=DYNAMIC_SCHEMA)
@@ -192,11 +199,13 @@ def add_period_rules(conn: Connection, dataset_id: int, column_id: int, date_uni
 
     호출한 쪽이 행이 0개임을 확인했다(`DATASET_HAS_ROWS`). 열은 이미 있는 `date` 원본 열이다.
     """
-    name = column_name(column_id)
+    name = check_dynamic_name(column_name(column_id), "column")
     column = Column(name, Date)
     table = _described_table(dataset_id, column)
+    check_dynamic_name(table.name, "table")
     check = CheckConstraint(
-        _period_check_expression(table.c[name], date_unit), name=period_check_name(dataset_id)
+        _period_check_expression(table.c[name], date_unit),
+        name=check_dynamic_name(period_check_name(dataset_id), "constraint"),
     )
     table.append_constraint(check)
     operations = Operations(MigrationContext.configure(conn))
@@ -204,18 +213,25 @@ def add_period_rules(conn: Connection, dataset_id: int, column_id: int, date_uni
         table.name, name, existing_type=Date(), nullable=False, schema=DYNAMIC_SCHEMA
     )
     run_ddl(conn, AddConstraint(check))
-    index = Index(period_index_name(dataset_id), table.c[name], unique=True)
+    index = Index(
+        check_dynamic_name(period_index_name(dataset_id), "index"), table.c[name], unique=True
+    )
     run_ddl(conn, CreateIndex(index))
 
 
 def drop_period_rules(conn: Connection, dataset_id: int, column_id: int) -> None:
     """`add_period_rules`가 건 규칙을 풀고 열을 다시 NULL 허용으로 되돌린다."""
-    name = column_name(column_id)
+    name = check_dynamic_name(column_name(column_id), "column")
     column = Column(name, Date)
     table = _described_table(dataset_id, column)
-    check = CheckConstraint(column.is_not(None), name=period_check_name(dataset_id))
+    check_dynamic_name(table.name, "table")
+    check = CheckConstraint(
+        column.is_not(None), name=check_dynamic_name(period_check_name(dataset_id), "constraint")
+    )
     table.append_constraint(check)
-    index = Index(period_index_name(dataset_id), table.c[name], unique=True)
+    index = Index(
+        check_dynamic_name(period_index_name(dataset_id), "index"), table.c[name], unique=True
+    )
     run_ddl(conn, DropIndex(index))
     run_ddl(conn, DropConstraint(check))
     operations = Operations(MigrationContext.configure(conn))

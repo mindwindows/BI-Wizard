@@ -228,6 +228,51 @@ def test_gate_runs_allowed_ddl_on_valid_names():
             ),
             id="create-bad-constraint-name",
         ),
+        pytest.param(
+            lambda: CreateTable(
+                _table(
+                    "ds_1",
+                    DYNAMIC_SCHEMA,
+                    Column("row_id", sa.BigInteger, primary_key=True),
+                    Column("c_1", sa.Integer, sa.Computed("row_id * 2")),
+                )
+            ),
+            id="create-with-computed-column",
+        ),
+        pytest.param(
+            lambda: CreateTable(
+                _table(
+                    "ds_1",
+                    DYNAMIC_SCHEMA,
+                    Column("row_id", sa.BigInteger, primary_key=True),
+                    Column("c_1", sa.BigInteger, sa.ForeignKey("bi_data.ds_2.row_id")),
+                )
+            ),
+            id="create-with-foreign-key",
+        ),
+        pytest.param(
+            lambda: CreateTable(
+                _table(
+                    "ds_1",
+                    DYNAMIC_SCHEMA,
+                    Column("row_id", sa.BigInteger, primary_key=True),
+                    Column("c_1", sa.Text, unique=True),
+                )
+            ),
+            id="create-with-unique-column",
+        ),
+        pytest.param(
+            lambda: CreateTable(
+                _table(
+                    "ds_1",
+                    DYNAMIC_SCHEMA,
+                    Column("row_id", sa.BigInteger, primary_key=True),
+                    Column("c_1", sa.Text),
+                    sa.UniqueConstraint("c_1", name="ck_ds_1_period"),
+                )
+            ),
+            id="create-with-unique-constraint",
+        ),
     ],
 )
 def test_gate_refuses_everything_outside_the_allow_list(make_element):
@@ -260,6 +305,65 @@ def test_gate_checks_index_and_constraint_names_and_kinds():
     with pytest.raises((ddl.DdlNotAllowedError, ddl.DdlNameError)):
         ddl.run_ddl(conn, CreateIndex(sa.Index("ux_ds_1_period", other.c.c_1)))
     assert len(conn.executed) == 4
+
+
+def test_create_table_allows_primary_key_and_named_check_only():
+    conn = RecordingConnection()
+    table = _table(
+        "ds_1",
+        DYNAMIC_SCHEMA,
+        Column("row_id", sa.BigInteger, primary_key=True),
+        Column("c_1", sa.Date),
+    )
+    table.append_constraint(sa.CheckConstraint("c_1 IS NOT NULL", name="ck_ds_1_period"))
+    ddl.run_ddl(conn, CreateTable(table))
+    assert len(conn.executed) == 1
+
+
+def test_every_ddl_helper_checks_all_the_names_it_uses(monkeypatch):
+    """`add_raw_column`·`add_period_rules`·`drop_period_rules`도 이름 불변식을 거친다."""
+    from app.ddl import dynamic
+
+    seen: list[tuple[str, str | None]] = []
+    real = dynamic.check_dynamic_name
+
+    def recording(name, kind=None):
+        seen.append((name, kind))
+        return real(name, kind)
+
+    class FakeOperations:
+        def __init__(self, _context) -> None:
+            pass
+
+        def add_column(self, *args, **kwargs) -> None:
+            pass
+
+        def alter_column(self, *args, **kwargs) -> None:
+            pass
+
+    monkeypatch.setattr(dynamic, "check_dynamic_name", recording)
+    monkeypatch.setattr(dynamic, "Operations", FakeOperations)
+    monkeypatch.setattr(dynamic.MigrationContext, "configure", staticmethod(lambda conn: None))
+    monkeypatch.setattr(dynamic, "_existing_columns", lambda conn, dataset_id: {"c_7": "date"})
+    conn = RecordingConnection()
+    dynamic.add_raw_column(conn, 3, 7, "date")
+    assert {("ds_3", "table"), ("c_7", "column")} <= set(seen)
+    seen.clear()
+    dynamic.add_period_rules(conn, 3, 7, "month")
+    assert {
+        ("ds_3", "table"),
+        ("c_7", "column"),
+        ("ck_ds_3_period", "constraint"),
+        ("ux_ds_3_period", "index"),
+    } <= set(seen)
+    seen.clear()
+    dynamic.drop_period_rules(conn, 3, 7)
+    assert {
+        ("ds_3", "table"),
+        ("c_7", "column"),
+        ("ck_ds_3_period", "constraint"),
+        ("ux_ds_3_period", "index"),
+    } <= set(seen)
 
 
 def test_unsupported_column_type_and_date_unit_are_refused_before_any_ddl():

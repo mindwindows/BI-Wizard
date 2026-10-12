@@ -45,7 +45,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 `rules` 모양(알 수 없는 키는 422):
 | 타입 | 키 | 비고 |
 | --- | --- | --- |
-| `number` | `min`, `max`, `decimals` | `min`·`max`는 십진 문자열 또는 JSON 숫자(저장·응답은 `"100.5"` 같은 **십진 문자열**, 05 §1의 number 값 표현과 같다). 유한한 값, 38자리 이하, `min ≤ max`. `decimals`는 0~10 정수 |
+| `number` | `min`, `max`, `decimals` | `min`·`max`는 **십진 문자열 또는 JSON 정수**다. JSON 부동소수점(`1.5`)은 `BAD_FORMAT`으로 거부한다(05 §1 십진 문자열, 2진 근사 배제). 지수 표기·`NaN`·무한·38자리 초과도 거부하고, 아주 큰 정수·긴 글자는 변환 전에 걸러 500이 아니라 422다. 저장·응답은 **서버가 정규화한 십진 문자열**이다(`"-5.50"` → `"-5.5"`, `"-0"` → `"0"`; 05 §1의 number 값 표현). `min ≤ max`. `decimals`는 0~10 정수 |
 | `text` | `max_length` | 1~10,000 정수 |
 | `date` | `min`, `max` | `YYYY-MM-DD`, `min ≤ max` |
 | `choice` | `options` | **필수.** 문자열 목록 1~100개, 각 1~100자·제어문자 불가·중복 불가(앞뒤 공백 제거) |
@@ -83,7 +83,9 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - 정의를 바꾸는 모든 요청(B4~B6, 이후 D4·D5)은 한 함수(`backend/app/dataset/definition.py`)를 지난다: ① `lock_timeout 1초` ② `datasets` 행을 `FOR NO KEY UPDATE`로 잠금(읽기는 막지 않는다) ③ `expected_version` 확인 ④ 열 변경(정의 행 + 원본 표 DDL) ⑤ 정의 변경 훅(1b에는 등록된 훅 없음, FU-1d의 formula가 등록해 같은 트랜잭션에서 뷰를 만든다) ⑥ `def_version + 1`과 `def_hash` 기록 후 커밋. 중간에 실패하면 모두 롤백된다(원본 표 DDL 포함).
 - `def_hash`는 FU-1d 전에는 정의 구조(열 번호·종류·타입) 해시다. 표시 이름·필수·규칙·순서는 해시에 들어가지 않는다.
 - 같은 `expected_version`으로 동시에 요청하면 하나만 성공하고 나머지는 `DEFINITION_VERSION_MISMATCH`다.
-- 행 쓰기(FU-1c)는 같은 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다. `FOR SHARE` 보유자가 이어지면 정의 변경이 순서를 못 얻을 수 있다(굶음): 시험으로 확인했고(`test_continuous_for_share_holders…`) 이 경우에도 1초 뒤 `DEFINITION_BUSY`로 끝나며 무한 대기는 없다.
+- 행 쓰기(FU-1c, `data-entry`)는 같은 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다. **굶음은 일어날 수 있다(관찰, PostgreSQL 16.10)**: `FOR SHARE` 보유자가 쥔 동안 정의 변경이 기다리면, 뒤에 들어온 새 `FOR SHARE`(행 쓰기)가 정의 변경을 **앞질러** 잠금을 얻는다(공유 잠금끼리는 호환이라 줄을 서지 않는다). 그래서 행 입력이 끊이지 않으면 정의 변경(열 추가 등)이 계속 순서를 못 얻을 수 있다. 다만 무한 대기는 없다: 1초 뒤 `DEFINITION_BUSY`(503)로 끝나므로 입력이 잠잠할 때 다시 시도한다. 단정으로 고정한 시험: `test_dataset_concurrency.py`의 `test_continuous_for_share_holders_overtake_a_waiting_definition_change`(잠금 보유자만으로 재현)와 `test_entry_concurrency.py`의 `test_continuous_row_writes_overtake_a_waiting_definition_change`(실제 행 쓰기 경로).
+- **이름 변경(B4)은 FK 자식 INSERT를 기다리게 한다(관찰, PostgreSQL 16.10)**: `datasets.name`이 `UNIQUE(team_id, name)`에 들어 있어 이름을 바꾸는 UPDATE는 키 변경으로 취급돼 `FOR UPDATE` 수준의 행 잠금이 걸리고, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`가 커밋까지 기다린다. 열 추가는 `def_version`·`def_hash`만 바꾸므로 기다리게 하지 않는다. 이름 변경 트랜잭션이 짧으면 문제없고(`test_rename_in_progress_makes_fk_child_inserts_wait_until_commit`), 정의 변경 훅이 길어지는 FU-1d부터는 그 시간만큼 `superset_datasets` 같은 자식 INSERT가 기다릴 수 있다.
+- **행이 0개 확인과 INSERT 경쟁**: 기준 날짜 열 지정·날짜 단위 변경의 "행이 0개" 확인은 `FOR NO KEY UPDATE`를 잡은 **뒤에** 실행되므로 진행 중인 행 INSERT가 끝난 뒤의 결과를 본다(`DATASET_HAS_ROWS`). 그래도 규칙 DDL이 기존 값 때문에 실패하면(NOT NULL·CHECK·유일 위반, 방어선) 500이 아니라 같은 422 `DATASET_HAS_ROWS`로, 표 잠금 대기 초과·교착이면 503 `DEFINITION_BUSY`로 답한다. 이름·번호 규칙 위반 같은 `DdlError`는 프로그램 오류라 500으로 둔다.
 
 ## 5. 실행 방법
 ### 사람(화면)
@@ -149,6 +151,8 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 | 409 `ALREADY_EXISTS` | `details.field`가 `name`(팀 안 데이터셋) 또는 `display_name`(데이터셋 안 열) | 다른 이름을 쓴다 |
 | 403 `FORBIDDEN` | 그 데이터셋 팀의 정의 담당자가 아님(관리자 포함) | `skills/permission-management`로 팀 소속·역할 확인 |
 | 500 `INTERNAL_ERROR` | 원본 표 생성·열 추가 실패 등(전부 롤백됨) | 오류 본문 `request_id`로 `docker compose logs backend`. 정의 행과 원본 표가 함께 되돌려졌는지는 `datasets`와 `bi_data`의 `ds_*`를 비교 |
+| 503 `SERVICE_UNAVAILABLE` (모든 API) | DB 장애뿐 아니라 **사용자 조회 설정 오류(권한 거부·표 없음)도 같은 503으로 보인다**(접근을 닫는 fail-closed). 예: `migrate` 전, 접속 계정이 `bi_app`이 아님 | `/api/health/db`, `docker compose logs migrate backend`. `migrate`가 `0004`까지 적용됐는지, 접속 계정이 `bi_app`인지 확인 |
+| `ds_1 already exists`(`downgrade` 뒤 다시 `upgrade`/데이터셋 만들기) | `downgrade 0004`는 `bi_data.ds_*`를 지우지 않는다. 다시 `upgrade`한 뒤 `datasets`의 번호(Identity)는 1부터 다시 시작하므로 남은 `ds_1`과 충돌한다 | **`downgrade` 뒤에는 `bi_data.ds_*`를 `admin-cleanup`으로 정리한 뒤 다시 `upgrade`한다** |
 | backend가 시작하지 않음 | 시작 자가 점검: `bi_data`에 허용 밖 객체(함수·독립 시퀀스·타입 등) | `docker compose logs backend`의 메시지. 누가 만들었는지 확인 후 `admin-cleanup` 방식으로 정리 |
 | `ds_*`에 행/열이 정의와 어긋남 | 수동 SQL로 바꿈 | 정의 변경은 API로만 한다. 어긋나면 `datasets`·`dataset_columns`와 `bi_data` 열 목록을 대조 |
 
@@ -174,9 +178,9 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
   - `test_dataset_api.py` — B1~B6 동작, 이름·규칙·태그 검증, 버전 충돌, 등록 + 원본 표 생성 원자성(실패 시 정의 행과 표가 함께 롤백), 정의 변경 훅, 동기화 요청 시점
   - `test_permission_matrix.py` — A1~A9, B1~B6 × 역할(관리자·정의 담당자·입력자·다른 팀 구성원·비소속 읽기·비활성·인증 없음), 거부된 요청이 데이터를 바꾸지 않음
   - `test_static_acl.py` — 정적 표 `datasets`·`dataset_columns`의 `bi_app` 권한(표·열 단위 카탈로그 대조 + 실제 거부 42501), `bi_readonly` 접근 불가, 제약·복합 FK
-  - `test_ddl.py`, `test_ddl_names.py` — 이름 규칙, 허용 목록 밖 거부(실행 전), `text()`·`exec_driver_sql`·ddl 모듈 밖 DDL이 없음을 코드에서 검사, 실제 DB에서 표·열·기준 날짜 열 규칙, 롤백 시 표가 남지 않음, `bi_app`이 `public`에 만들 수 없음, 시작 자가 점검이 새 객체를 허용, `alembic check`, `downgrade 0004` 뒤 `ds_*` 보존
-  - `test_dataset_concurrency.py` — 동시 정의 변경(`DEFINITION_VERSION_MISMATCH`), 락 대기 초과(`DEFINITION_BUSY`), `FOR NO KEY UPDATE`가 읽기·FK 자식 INSERT를 막지 않음, `FOR SHARE` 상호 대기와 굶음 시나리오, 같은 이름 동시 등록
-  - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리, 구조 해시
+  - `test_ddl.py`, `test_ddl_names.py` — 이름 규칙, 허용 목록 밖 거부(실행 전; 표 생성의 외래키·유일 제약·계산 열 거부 포함, 모든 DDL 보조 함수가 이름 규칙을 거침), `text()`·`exec_driver_sql`·ddl 모듈 밖 DDL이 없음을 코드에서 검사, 실제 DB에서 표·열·기준 날짜 열 규칙, 롤백 시 표가 남지 않음, `bi_app`이 `public`에 만들 수 없음, 시작 자가 점검이 새 객체를 허용, `alembic check`, `downgrade 0004` 뒤 `ds_*` 보존
+  - `test_dataset_concurrency.py` — 동시 정의 변경(`DEFINITION_VERSION_MISMATCH`), 락 대기 초과(`DEFINITION_BUSY`), `FOR NO KEY UPDATE`가 읽기·FK 자식 INSERT를 막지 않음, `FOR SHARE` 상호 대기와 굶음 관찰(앞지름을 단정으로 고정), 이름 변경 중 FK 자식 INSERT 대기 관찰, 같은 이름 동시 등록
+  - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리(JSON 부동소수점·큰 정수 거부 회귀 포함), 구조 해시
   - `test_migrations.py`, `test_roundtrip_tools.py` — 0004 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`)
 - 마이그레이션 왕복(**새** 빈 `postgres-test`에서): `python -m migrations.roundtrip`, `alembic check` (`skills/local-environment/SKILL.md`).
 - 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `\d bi_data.ds_<번호>`에서 `row_id`와 `c_<번호>` 열, 기준 날짜 열의 `NOT NULL`·`ck_ds_<번호>_period`·`ux_ds_<번호>_period`를 본다.
@@ -188,7 +192,7 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 
 ## 9. 연관 Skill
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
-- `data-entry`(예정, FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
+- `data-entry`(FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
 - `formula-column`(예정, FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `dv_`·`de_` 뷰와 `def_hash`(뷰 DDL 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
 - `dashboard-link`(예정, FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)

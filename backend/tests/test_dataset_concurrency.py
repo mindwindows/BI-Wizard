@@ -260,13 +260,18 @@ def test_definition_change_waits_for_for_share_holders_then_proceeds(pg, dataset
     assert worker.error is None and worker.result.def_version == 2
 
 
-def test_continuous_for_share_holders_cannot_make_a_definition_change_wait_forever(pg, dataset_id):
-    """굶음 시나리오(06 §5): FOR SHARE 보유자가 끊기지 않고 이어져도 정의 변경은 한도 안에 끝난다.
+def test_continuous_for_share_holders_overtake_a_waiting_definition_change(pg, dataset_id):
+    """굶음 시나리오(06 §5): 관찰한 사실을 단정으로 고정한다 (PostgreSQL 16.10 관찰).
 
-    첫 보유자 H1이 쥔 동안 정의 변경 D가 기다리고, 그 사이 두 번째 보유자 H2가 FOR SHARE를 얻는다.
-    H1을 놓아도 H2가 쥐고 있으면 D는 계속 기다리다 `lock_timeout`에서 503 `DEFINITION_BUSY`가
-    된다(무한 대기 아님). 이 시험은 PostgreSQL 16이 H2를 D 뒤로 세우는지(굶음 없음)와 D를 앞질러
-    주는지(굶음 있음)를 구분하지 않고 **어느 쪽이든 한도 안에 끝남**을 확인한다.
+    H1이 FOR SHARE를 쥔 동안 정의 변경 D(`FOR NO KEY UPDATE`)가 기다리고, 그 사이 두 번째
+    보유자 H2가 FOR SHARE를 요청한다. **관찰: H2는 D 뒤에 줄 서지 않고 D를 앞질러 즉시 얻는다**
+    (공유 잠금끼리는 서로 호환이라 대기열을 지키지 않는다). 그래서 행 쓰기가 끊이지 않으면
+    정의 변경은 굶을 수 있고, D는 `lock_timeout`(1초)에서 503 `DEFINITION_BUSY`로 끝난다
+    (무한 대기는 없다).
+
+    관찰이 달라지면(다른 PostgreSQL 버전 등) 이 단정이 깨져 Skill의 서술(`dataset-definition`
+    4절, `data-entry`)을 다시 확인하게 한다. H2 스레드의 오류는 무시하지 않는다: 오류가 있으면
+    잠금 대기 초과(55P03, 줄 서서 기다렸다는 뜻)인지 구분해 실패 메시지에 남긴다.
     """
     h1, h2 = Session(pg.engine), Session(pg.engine)
     share = sa.select(datasets.c.id).where(datasets.c.id == dataset_id).with_for_update(read=True)
@@ -274,37 +279,84 @@ def test_continuous_for_share_holders_cannot_make_a_definition_change_wait_forev
     worker = Worker(add_column_call(pg.engine, dataset_id, "정의 변경", DefinitionHooks(), 1))
     worker.start()
     time.sleep(0.2)  # D가 H1을 기다리기 시작한 뒤
-    h2_got_in = threading.Event()
 
     def second_holder():
         h2.execute(sa.select(sa.func.set_config("lock_timeout", "400ms", True)))
         h2.execute(share)
-        h2_got_in.set()
 
     h2_thread = Worker(second_holder)
     h2_thread.start()
     h2_thread.join(timeout=5)
+    assert not h2_thread.is_alive(), "H2 스레드가 끝나지 않았다"
     h1.commit()
     h1.close()
     worker.join(timeout=10)
-    assert not worker.is_alive(), "정의 변경이 한도를 넘어 계속 기다린다(굶음)"
-    started_before_h2 = h2_got_in.is_set()
     h2.rollback()
     h2.close()
-    if worker.error is not None:
-        assert isinstance(worker.error, AppError) and worker.error.code == "DEFINITION_BUSY"
-        assert worker.elapsed < LOCK_TIMEOUT_SECONDS + 3
-    else:
-        assert worker.result.def_version == 2
-    # 관찰 결과를 시험 출력에 남긴다(`-s` 또는 실패 보고용).
+    assert not worker.is_alive(), "정의 변경이 한도를 넘어 계속 기다린다(굶음 + 무한 대기)"
+    if h2_thread.error is not None:
+        state = sqlstate(h2_thread.error) if isinstance(h2_thread.error, DBAPIError) else None
+        pytest.fail(
+            f"H2가 D 뒤에 줄을 섰다(관찰이 달라짐, sqlstate={state}): "
+            f"{type(h2_thread.error).__name__} - Skill의 굶음 서술을 갱신하라"
+        )
+    assert isinstance(worker.error, AppError) and worker.error.code == "DEFINITION_BUSY"
+    assert LOCK_TIMEOUT_SECONDS * 0.8 <= worker.elapsed < LOCK_TIMEOUT_SECONDS + 3
     print(
-        f"[starvation] H2가 D를 앞질러 FOR SHARE를 얻음={started_before_h2}, "
-        f"D 결과={'DEFINITION_BUSY' if worker.error else '성공'}, 대기 {worker.elapsed:.2f}s"
+        f"[starvation] H2가 D를 앞질러 FOR SHARE를 얻음=True, D=DEFINITION_BUSY, "
+        f"대기 {worker.elapsed:.2f}s"
     )
     # 보유자가 모두 풀린 뒤에는 정의 변경이 된다.
-    version = 2 if worker.error is None else 1
-    ok = add_column_call(pg.engine, dataset_id, "마무리", DefinitionHooks(), version)()
-    assert ok.def_version == version + 1
+    ok = add_column_call(pg.engine, dataset_id, "마무리", DefinitionHooks(), 1)()
+    assert ok.def_version == 2
+
+
+def test_rename_in_progress_makes_fk_child_inserts_wait_until_commit(pg, dataset_id):
+    """관찰(PostgreSQL 16.10): 이름 변경(B4) 중에는 FK 자식 INSERT가 커밋까지 **기다린다**.
+
+    `datasets.name`은 `UNIQUE(team_id, name)`에 들어 있다. PostgreSQL은 유일 인덱스에 들어 있는
+    열을 바꾸는 UPDATE를 (FK가 그 인덱스를 참조하든 말든) 키 변경으로 보고 `FOR UPDATE` 수준의
+    행 잠금을 걸어, 자식 INSERT가 부모 행에 거는 `FOR KEY SHARE`와 충돌한다. 열 추가
+    (`def_version`·`def_hash`만 바꿈)는 `FOR NO KEY UPDATE`라 막지 않는다(위 시험). 그래서
+    이름 변경 트랜잭션이 짧으면 자식 INSERT가 잠깐 기다릴 뿐이지만, 정의 변경 훅이 길어지면
+    (1d 뷰 재생성) 그만큼 기다린다.
+    """
+    entered, release = threading.Event(), threading.Event()
+
+    def rename():
+        with Session(pg.engine) as session:
+            return service.update_dataset(
+                session,
+                blocking_hooks(entered, release, wait=15),
+                dataset_id,
+                expected_version=1,
+                name="바뀐 이름",
+                date_unit=None,
+                base_given=False,
+                base_date_column_id=None,
+            )
+
+    def child_insert():
+        with pg.writer.begin() as conn:
+            conn.execute(
+                sa.insert(dataset_columns).values(
+                    dataset_id=dataset_id, display_name="자식", type="text", kind="raw", position=9
+                )
+            )
+
+    holder = Worker(rename)
+    holder.start()
+    assert entered.wait(timeout=5), "이름 변경이 락을 잡지 못했다"
+    child = Worker(child_insert)
+    child.start()
+    time.sleep(0.5)
+    assert child.is_alive(), "관찰이 달라졌다: 자식 INSERT가 이름 변경을 기다리지 않았다"
+    release.set()
+    child.join(timeout=10)
+    holder.join(timeout=10)
+    assert child.error is None and holder.error is None
+    assert holder.result == (True, 2)
+    assert child.elapsed >= 0.5
 
 
 def test_concurrent_creation_of_the_same_name_yields_one_dataset_and_one_table(pg):

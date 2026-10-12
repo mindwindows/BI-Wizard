@@ -195,6 +195,74 @@ def validation_failed(fields: list[tuple[str, str]]) -> AppError:
     )
 
 
+def validation_failed_items(items: list[dict[str, Any]]) -> AppError:
+    """입력 규칙 위반(422)을 항목 단위로 돌려준다. 각 항목은 `code`와 위치 키를 가진다.
+
+    위치 키는 `field`(예: `cells.12`) 또는 `row_index`+`column_id`(붙여넣기, 05 §1 오류 형식)다.
+    `message`는 `code`로 채운다. 입력 값은 응답에 넣지 않는다.
+    """
+    return AppError(
+        ErrorCode.VALIDATION_ERROR,
+        "입력한 내용을 확인해 주세요.",
+        status_code=422,
+        details={
+            "fields": [{**item, "message": _FIELD_MESSAGES.get(item["code"], "")} for item in items]
+        },
+    )
+
+
+# 행 쓰기의 락 대기 초과·교착 때 화면이 다시 시도를 안내할 때까지의 초(05 §3 `retry_after`).
+WRITE_RETRY_AFTER_SECONDS = 2
+
+
+def write_busy() -> AppError:
+    return AppError(
+        ErrorCode.WRITE_BUSY,
+        "다른 사람이 같은 데이터를 입력하고 있습니다. 잠시 후 다시 시도하세요.",
+        status_code=503,
+        details={"retry_after": WRITE_RETRY_AFTER_SECONDS},
+    )
+
+
+def row_not_found() -> AppError:
+    return AppError(ErrorCode.ROW_NOT_FOUND, "요청한 행을 찾을 수 없습니다.", status_code=404)
+
+
+def cell_conflict(conflicts: list[dict[str, Any]]) -> AppError:
+    """C3: 다른 사람이 먼저 칸 값을 바꿨다. `conflicts[{row_id, column_id, current}]`."""
+    return AppError(
+        ErrorCode.CELL_CONFLICT,
+        "다른 사람이 먼저 값을 바꿨습니다. 최신 값을 확인한 뒤 다시 시도하세요.",
+        status_code=409,
+        details={"conflicts": conflicts},
+    )
+
+
+def period_conflict(conflicts: list[dict[str, Any]]) -> AppError:
+    """C2·C3: 같은 기간의 행이 이미 있다. `conflicts[{row_id, column_id, current}]`(그 행)."""
+    return AppError(
+        ErrorCode.PERIOD_CONFLICT,
+        "같은 기간의 행이 이미 있습니다.",
+        status_code=409,
+        details={"conflicts": conflicts},
+    )
+
+
+def paste_conflict(conflicts: list[dict[str, Any]]) -> AppError:
+    """C4: 붙여넣기 충돌(전부 취소). `conflicts[{row_index, row_id, column_id, kind, current}]`."""
+    return AppError(
+        ErrorCode.PASTE_CONFLICT,
+        "붙여넣기가 다른 사람의 변경과 충돌해 아무것도 반영하지 않았습니다.",
+        status_code=409,
+        details={"conflicts": conflicts},
+    )
+
+
+def payload_too_large(limit: int, message: str) -> AppError:
+    """C4 요청 상한 초과. `details.limit`은 넘긴 상한 값이다(행 수 또는 바이트 수, 문구로 구분)."""
+    return AppError(ErrorCode.PAYLOAD_TOO_LARGE, message, status_code=413, details={"limit": limit})
+
+
 def last_admin() -> AppError:
     return AppError(
         ErrorCode.LAST_ADMIN,

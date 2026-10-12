@@ -27,6 +27,7 @@ class World:
     # 데이터셋 정의 시험용(`dataset_world`가 채운다): A팀 데이터셋 하나와 그 원본 열 하나.
     dataset_id: int = 0
     column_id: int = 0
+    row_id: int = 0  # 권한 매트릭스용 기존 행
 
 
 def build_world(db: Db) -> World:

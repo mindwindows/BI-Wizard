@@ -11,6 +11,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, delete, event, insert, update
 from sqlalchemy.engine import URL
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app import ddl
@@ -29,6 +30,16 @@ from app.db_metadata import (
 )
 from app.main import create_app
 from tests.api_helpers import World, build_world, make_caller
+
+
+# SQLite 변형의 한계: SQLite는 `INTEGER PRIMARY KEY`만 자동 번호(rowid)가 된다. 운영 DDL의
+# `row_id`는 `BIGINT … IDENTITY`라 SQLite에서는 번호가 붙지 않으므로, 이 시험 도구에서만
+# SQLite의 BIGINT를 INTEGER로 만든다. 운영 PostgreSQL DDL은 바뀌지 않는다(`pg` 변형과
+# test_ddl.py가 확인).
+@compiles(sa.BigInteger, "sqlite")
+def _sqlite_bigint_as_integer(type_, compiler, **kw):
+    return "INTEGER"
+
 
 # 비밀이 아닌 테스트 전용 값. 실제 DB에는 접속하지 않는다.
 _BASE_ENV = {
@@ -325,7 +336,8 @@ class Db:
             ddl.dataset_table_name(dataset_id), sa.column("row_id"), schema=DYNAMIC_SCHEMA
         )
         with self.engine.begin() as conn:
-            conn.execute(insert(rows), [{"row_id": n} for n in range(1, count + 1)])
+            for _ in range(count):  # row_id는 자동 번호(1부터)다. 번호를 직접 넣지 않는다.
+                conn.execute(insert(rows))
 
     def add_user(
         self,
@@ -382,20 +394,32 @@ def db(request: pytest.FixtureRequest) -> Iterator[Db]:
         sqlite_db = Db("sqlite", engine, engine)
         # 시험 안의 `monkeypatch`와 같은 인스턴스를 써서 되돌리는 순서가 꼬이지 않게 한다.
         patch = request.getfixturevalue("monkeypatch")
-        patch.setattr(
-            ddl,
-            "add_period_rules",
-            lambda conn, dataset_id, column_id, unit: sqlite_db.period_calls.append(
-                (f"add:{unit}", dataset_id, column_id)
-            ),
-        )
-        patch.setattr(
-            ddl,
-            "drop_period_rules",
-            lambda conn, dataset_id, column_id: sqlite_db.period_calls.append(
-                ("drop", dataset_id, column_id)
-            ),
-        )
+
+        def _period_index(dataset_id: int, column_id: int) -> sa.Index:
+            tbl = sa.Table(
+                ddl.dataset_table_name(dataset_id),
+                sa.MetaData(),
+                sa.Column(ddl.column_name(column_id), sa.Date),
+                schema=DYNAMIC_SCHEMA,
+            )
+            return sa.Index(
+                ddl.period_index_name(dataset_id), tbl.c[ddl.column_name(column_id)], unique=True
+            )
+
+        # SQLite 변형의 한계: NOT NULL 변경과 기간 첫날 CHECK는 지원되지 않아 호출 기록으로
+        # 대신한다. 기간 유일 인덱스(`ux_ds_<번호>_period`)만은 실제로 만들어, 같은 기간 충돌
+        # (`PERIOD_CONFLICT`)과 `INSERT … ON CONFLICT DO NOTHING` 경로를 DB 없이도 시험한다.
+        # NULL 거부·첫날 강제는 `pg` 변형만 본다.
+        def _add_period_rules(conn, dataset_id: int, column_id: int, unit: str) -> None:
+            sqlite_db.period_calls.append((f"add:{unit}", dataset_id, column_id))
+            conn.execute(sa.schema.CreateIndex(_period_index(dataset_id, column_id)))
+
+        def _drop_period_rules(conn, dataset_id: int, column_id: int) -> None:
+            sqlite_db.period_calls.append(("drop", dataset_id, column_id))
+            conn.execute(sa.schema.DropIndex(_period_index(dataset_id, column_id)))
+
+        patch.setattr(ddl, "add_period_rules", _add_period_rules)
+        patch.setattr(ddl, "drop_period_rules", _drop_period_rules)
         yield sqlite_db
         engine.dispose()
         return

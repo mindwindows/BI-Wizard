@@ -1,10 +1,12 @@
-"""권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱. A1~A9, B1~B6, DV1~DV3.
+"""권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
+A1~A9, B1~B6, C1~C4, DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
 - 관리자(admin): `users.is_admin`만.
 - 정의(definer): **그 데이터셋 팀의 정의 담당자**만. 관리자라도 팀 소속 정의 담당자가 아니면 거부
   (06 §4-1)하므로 `admin`·`entry`·`other`·`viewer`는 모두 403이다.
+- 입력(enter): **그 데이터셋 팀의 입력자 또는 정의 담당자**. 관리자도 그 팀 소속이 아니면 거부.
 """
 
 from collections.abc import Callable
@@ -32,11 +34,16 @@ ROLES = ["admin", "definer", "entry", "other", "viewer", "inactive", None]
 READERS = {"admin", "definer", "entry", "other", "viewer"}  # 인증된 활성 사용자
 
 # 누가 성공하는가: 읽기 / 관리자 / 그 데이터셋 팀의 정의 담당자
-READER, ADMIN, DEFINER = "reader", "admin", "definer"
+READER, ADMIN, DEFINER, ENTER = "reader", "admin", "definer", "enter"
 
 
 def allowed_roles(who: str) -> set[str]:
-    return {READER: READERS, ADMIN: {"admin"}, DEFINER: {"definer"}}[who]
+    return {
+        READER: READERS,
+        ADMIN: {"admin"},
+        DEFINER: {"definer"},
+        ENTER: {"definer", "entry"},
+    }[who]
 
 
 # (ID, 메서드, 경로 템플릿, 경로 만들기, 본문 만들기, 성공 코드, 누가 성공하는가)
@@ -145,6 +152,49 @@ ENDPOINTS: list[Endpoint] = [
         200,
         DEFINER,
     ),
+    (
+        "C1",
+        "GET",
+        "/api/datasets/{dataset_id}/rows",
+        lambda w: f"/api/datasets/{w.dataset_id}/rows",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "C2",
+        "POST",
+        "/api/datasets/{dataset_id}/rows",
+        lambda w: f"/api/datasets/{w.dataset_id}/rows",
+        lambda w: {"expected_version": 1, "cells": {str(w.column_id): "5"}},
+        201,
+        ENTER,
+    ),
+    (
+        "C3",
+        "PATCH",
+        "/api/datasets/{dataset_id}/rows/{row_id}",
+        lambda w: f"/api/datasets/{w.dataset_id}/rows/{w.row_id}",
+        lambda w: {
+            "expected_version": 1,
+            "changes": [{"column_id": w.column_id, "expected": None, "value": "7"}],
+        },
+        200,
+        ENTER,
+    ),
+    (
+        "C4",
+        "POST",
+        "/api/datasets/{dataset_id}/rows/paste",
+        lambda w: f"/api/datasets/{w.dataset_id}/rows/paste",
+        lambda w: {
+            "expected_version": 1,
+            "column_ids": [w.column_id],
+            "rows": [{"row_id": None, "values": ["3"]}],
+        },
+        200,
+        ENTER,
+    ),
 ]
 
 
@@ -153,7 +203,8 @@ def mworld(db: Db, world: World) -> World:
     """매트릭스용 세계: 기본 세계에 A팀 데이터셋(정의 버전 1)과 원본 열 하나를 더한다."""
     dataset_id = db.add_dataset(world.team_a, "기존 데이터셋", world.ids["definer"])
     column_id = db.add_column(dataset_id, "기존 열", "number")
-    return replace(world, dataset_id=dataset_id, column_id=column_id)
+    db.add_rows(dataset_id, 1)  # C3 대상 행 하나(row_id 1, 빈 칸)
+    return replace(world, dataset_id=dataset_id, column_id=column_id, row_id=1)
 
 
 @pytest.mark.parametrize("role", ROLES, ids=lambda r: r or "anonymous")

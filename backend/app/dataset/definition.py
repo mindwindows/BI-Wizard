@@ -42,6 +42,10 @@ from app.dataset.hashing import structure_hash
 # 정의 변경 락 대기 한도(코드 상수, PostgreSQL `lock_timeout` 표기). 07 §8의 시작값 1초이며 운영
 # 부하를 보고 조정한다.
 DEFINITION_LOCK_TIMEOUT = "1000ms"
+# 행 쓰기(C2~C4) 락 대기 한도(코드 상수). 같은 기간·같은 행을 쓰는 다른 트랜잭션이 끝나기를
+# 기다리는 시간이며, 넘으면 503 `WRITE_BUSY`(재시도 가능)다. 붙여넣기는 행마다 잠금을 잡으므로
+# 정의 변경보다 길다.
+ROW_WRITE_LOCK_TIMEOUT = "3000ms"
 
 # 유일 제약 -> (필드, 문구). 먼저 조회로 막지만 경쟁으로 제약에 걸려도 같은 409로 바꾼다.
 _UNIQUE_MESSAGES = {
@@ -67,11 +71,11 @@ class DefinitionOutcome:
     result: dict[str, Any]
 
 
-def set_lock_timeout(session: Session) -> None:
+def set_lock_timeout(session: Session, timeout: str = DEFINITION_LOCK_TIMEOUT) -> None:
     """이 트랜잭션에서만 락 대기 한도를 건다(PostgreSQL). 다른 엔진(SQLite 시험)은 건너뛴다."""
     if session.get_bind().dialect.name != "postgresql":
         return
-    session.execute(select(func.set_config("lock_timeout", literal(DEFINITION_LOCK_TIMEOUT), True)))
+    session.execute(select(func.set_config("lock_timeout", literal(timeout), True)))
 
 
 def unique_conflict(error: IntegrityError) -> AppError | None:

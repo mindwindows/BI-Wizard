@@ -45,6 +45,7 @@
 - `bi_data`의 `USAGE/CREATE`(`bi_app`)와 `bi_readonly`의 읽기 권한(`USAGE`, 기본 권한 `SELECT`)은 마이그레이션 `0002_bi_data_privileges`가 `bi_owner`로 부여한다(고정 SQL). 동적 객체(`ds_*`, `dv_*`, `de_*`)는 마이그레이션 대상이 아니다: `target_metadata`는 정적 표 `MetaData`(`backend/app/db_metadata.py`) 하나이고 `include_name`/`include_object`가 `bi_data`와 동적 객체 이름을 제외한다(D2 안전장치는 `public` 정적 표의 `DROP` 대상). 왕복 테스트는 `python -m migrations.roundtrip`(테스트 DB), D5 의미는 "권한 상태 복원"이다.
 - `0003_users_teams_members`(FU-1a): 정적 표 `users`·`teams`·`team_members`와 `bi_app` 명시 GRANT(표 단위 SELECT/INSERT, `team_members`는 DELETE도, UPDATE는 열 단위: `users`의 `display_name`·`is_admin`·`is_active`, `teams`의 `name`·`is_active`, `team_members`의 `role`). `login_id`·`code`·`team_id`·`user_id`는 DB가 변경을 막는다. `bi_readonly`에는 아무 권한도 없다. `downgrade()`는 표를 외래키 역순으로 `DROP`하며 `tests/test_migrations.py`의 `DROP_APPROVED`에 기록이 있다. 최초 관리자는 서버 명령 `python -m app.cli create-admin`(`skills/permission-management/SKILL.md`)으로 만든다.
 - `0004_datasets_columns`(FU-1b): 정적 표 `datasets`·`dataset_columns`(순환 FK `fk_datasets_id_dataset_columns`는 표 생성 뒤 `create_foreign_key`로 추가)와 `bi_app` 명시 GRANT(표 단위 SELECT/INSERT, DELETE 없음, UPDATE는 열 단위: `datasets`의 `name`·`date_unit`·`base_date_column_id`·`status`·`def_version`·`def_hash`, `dataset_columns`의 `display_name`·`type`·`required`·`rules`·`tag`·`position`). `team_id`·`created_by`·`created_at`와 `dataset_id`·`kind`는 DB가 변경을 거부한다. `downgrade()`는 순환 FK를 끊고 표를 역순으로 `DROP`하며 `DROP_APPROVED`에 기록이 있고, `bi_data`의 `ds_*`는 건드리지 않는다. `ds_<번호>` 원본 표는 런타임 동적 DDL 모듈 `backend/app/ddl/`(SQLAlchemy 내장 DDL 구문·Alembic `Operations`만, `text()`·`exec_driver_sql` 금지, 이름은 번호 규칙 함수로만, 객체 종류는 표·뷰·인덱스·제약)이 `bi_app`으로 만든다.
+- FU-1c(`backend/app/entry/`, 입력 그리드 C1~C4)는 **새 revision이 없다**: `ds_<번호>` 행 읽기·쓰기는 DML이라 SQLAlchemy 표현식만 쓰고(`text()` 금지, 열 이름은 `c_<번호>` 규칙 함수), 행 쓰기는 `datasets` 행을 `FOR SHARE`로 잡는다(`skills/data-entry/SKILL.md`). 붙여넣기 상한 5,000행·1MiB는 코드 상수다. **`downgrade` 뒤에는 `bi_data.ds_*`를 `skills/admin-cleanup`으로 정리한 뒤 다시 `upgrade`한다**(`datasets`의 번호가 1부터 다시 시작해 `ds_1 already exists`가 난다).
 
 ## 5. 라이선스
 - 허용형만 쓴다: MIT, BSD, Apache 2.0, PSF, PostgreSQL License. `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스는 금지다. 불분명하면 쓰지 말고 질문한다.
@@ -52,7 +53,7 @@
 - LGPL인 `psycopg2`/`psycopg`는 backend에 쓰지 않는다(backend는 pg8000, BSD-3). Superset 이미지(`superset/Dockerfile`)에만 `psycopg2-binary`를 둔다.
 
 ## 6. Skill 규칙
-- 사용자 관점의 주요 기능마다 `skills/<기능>/SKILL.md`를 둔다(형식: `.claude/skills/product-skill-authoring`). 현재는 `skills/local-environment/`, `skills/permission-management/`(FU-1a), `skills/dataset-definition/`(FU-1b)와 수동 운영 절차 `skills/admin-cleanup/`다.
+- 사용자 관점의 주요 기능마다 `skills/<기능>/SKILL.md`를 둔다(형식: `.claude/skills/product-skill-authoring`). 현재는 `skills/local-environment/`, `skills/permission-management/`(FU-1a), `skills/dataset-definition/`(FU-1b), `skills/data-entry/`(FU-1c)와 수동 운영 절차 `skills/admin-cleanup/`다.
 - **Feature Code ↔ Skill ↔ 연관 Skill ↔ 회귀 테스트는 함께 바뀐다.** 코드나 환경만 바꾸고 Skill을 갱신하지 않으면 완료로 보지 않는다. 환경을 바꾸면 `skills/local-environment/SKILL.md`, `README.md`를 같은 작업에서 고친다.
 - `.claude/`(개발 에이전트 정의)와 `skills/`(제품 사용설명서)는 다른 것이다.
 

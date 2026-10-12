@@ -157,6 +157,26 @@ def lock_dataset(session: Session, dataset_id: int) -> RowMapping | None:
     return session.execute(stmt).mappings().first()
 
 
+def lock_dataset_shared(session: Session, dataset_id: int) -> RowMapping | None:
+    """행 쓰기(C2~C4)가 `datasets` 행을 `FOR SHARE`로 잡는다(06 §5 "행 쓰기 ↔ 정의").
+
+    정의 변경(`FOR NO KEY UPDATE`)과는 서로 기다리고 행 쓰기끼리는 서로 막지 않는다. 락 대기는
+    호출한 쪽이 건 `lock_timeout`으로 끊긴다.
+    """
+    stmt = (
+        select(
+            datasets.c.id,
+            datasets.c.team_id,
+            datasets.c.date_unit,
+            datasets.c.base_date_column_id,
+            datasets.c.def_version,
+        )
+        .where(datasets.c.id == dataset_id)
+        .with_for_update(read=True)
+    )
+    return session.execute(stmt).mappings().first()
+
+
 # --- 쓰기 ----
 
 

@@ -357,10 +357,19 @@ DATASET_PATHS = {
 }
 
 
-def test_real_app_routes_are_public_health_plus_access_and_dataset(make_settings, sqlite_engine):
-    """경로는 공개 2개와 A1~A9·B1~B6뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
+ENTRY_PATHS = {
+    "/api/datasets/{dataset_id}/rows",
+    "/api/datasets/{dataset_id}/rows/{row_id}",
+    "/api/datasets/{dataset_id}/rows/paste",
+}
+
+
+def test_real_app_routes_are_public_health_plus_access_dataset_and_entry(
+    make_settings, sqlite_engine
+):
+    """경로는 공개 2개와 A1~A9·B1~B6·C1~C4뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
     app = create_app(make_settings(), engine=sqlite_engine)
-    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS
+    assert set(app.openapi()["paths"]) == PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS | ENTRY_PATHS
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []
 

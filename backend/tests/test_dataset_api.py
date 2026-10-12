@@ -69,12 +69,14 @@ def dataset_row(db: Db, dataset_id: int) -> dict[str, Any]:
 
 
 @contextmanager
-def custom_client(db: Db, settings, sync, *, hooks=None, quiet=False):
+def custom_client(db: Db, settings, sync, *, hooks=None, quiet=False, row_view=None):
     """훅·동기화 대역을 끼운 앱의 호출기. `quiet`이면 서버 예외를 500 응답으로 받는다.
 
     앱이 닫히면 엔진이 정리되어(SQLite 메모리 DB도 사라진다) DB 확인은 `with` 안에서 한다.
     """
-    app = create_app(settings, engine=db.engine, dataset_sync=sync, definition_hooks=hooks)
+    app = create_app(
+        settings, engine=db.engine, dataset_sync=sync, definition_hooks=hooks, row_view=row_view
+    )
     with TestClient(app, raise_server_exceptions=not quiet) as client:
         yield make_caller(client)
 
@@ -593,6 +595,41 @@ def test_add_column_rules_are_validated_and_normalized(api, world):
     assert choice["rules"] == {"options": ["서울", "부산"]}
     plain = make_column(api, dataset, "그냥", "boolean", rules={})
     assert plain["rules"] is None
+
+
+@pytest.mark.parametrize(
+    "raw_rules",
+    [
+        '{"min": 1.5}',
+        '{"min": 0.1234567890123456789}',
+        '{"max": 12345678901234567890.123}',
+        '{"max": 1e400}',
+        '{"min": 1' + "0" * 5000 + "}",  # 5001자리 JSON 정수: 500이 아니라 422
+    ],
+    ids=["float", "float-19-digits", "float-large", "float-overflow", "int-5001-digits"],
+)
+def test_json_float_and_huge_integer_rules_are_rejected_not_500(api, world, raw_rules):
+    dataset = make_dataset(api, world)
+    body = (
+        '{"expected_version": 1, "display_name": "수량", "type": "number", "rules": '
+        + raw_rules
+        + "}"
+    )
+    response = api(
+        "definer",
+        "POST",
+        f"/api/datasets/{dataset['id']}/columns",
+        content=body,
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 422, response.text
+    assert err(response)["code"] == "VALIDATION_ERROR"
+
+
+def test_json_integer_rules_are_accepted(api, world):
+    dataset = make_dataset(api, world)
+    column = make_column(api, dataset, "수량", "number", rules={"min": 1000, "max": 2000})
+    assert column["rules"] == {"min": "1000", "max": "2000"}
 
 
 @pytest.mark.parametrize(
@@ -1327,6 +1364,42 @@ def test_base_date_column_cannot_change_when_rows_exist(api, db, world):
     )
     assert same.status_code == 200 and same.json()["def_version"] == version
     assert dataset_row(db, dataset["id"])["base_date_column_id"] == first["id"]
+
+
+@pytest.mark.parametrize(
+    ("state", "status", "code"),
+    [
+        ("23502", 422, "DATASET_HAS_ROWS"),  # NOT NULL 변경이 기존 NULL 값 때문에 실패
+        ("23514", 422, "DATASET_HAS_ROWS"),  # 기간 첫날 CHECK가 기존 값 때문에 실패
+        ("23505", 422, "DATASET_HAS_ROWS"),  # 유일 인덱스가 기존 중복 때문에 실패
+        ("55P03", 503, "DEFINITION_BUSY"),  # 표 잠금 대기 초과(읽기 중인 ALTER)
+        ("40P01", 503, "DEFINITION_BUSY"),
+        ("XX000", 500, "INTERNAL_ERROR"),  # 알 수 없는 DB 오류는 그대로 내부 오류
+    ],
+)
+def test_period_rule_ddl_failures_are_mapped_not_leaked(
+    api, db, world, monkeypatch, state, status, code
+):
+    """잠금 아래에서 행이 0개임을 확인하므로 일어나지 않아야 하지만, 규칙 DDL이 값 때문에 실패하면
+    `DATASET_HAS_ROWS`(422), 락 대기 초과·교착이면 `DEFINITION_BUSY`(503)로 답한다."""
+    from sqlalchemy.exc import DBAPIError
+
+    dataset = make_dataset(api, world)
+    column = make_column(api, dataset, "기준일", "date")
+
+    def failing(conn, dataset_id, column_id, unit):
+        raise DBAPIError("stmt", {}, Exception({"C": state}))
+
+    monkeypatch.setattr(ddl, "add_period_rules", failing)
+    response = api(
+        "definer",
+        "PATCH",
+        f"/api/datasets/{dataset['id']}",
+        json={"expected_version": dataset["def_version"], "base_date_column_id": column["id"]},
+    )
+    assert (response.status_code, err(response)["code"]) == (status, code)
+    assert dataset_row(db, dataset["id"])["base_date_column_id"] is None  # 롤백됨
+    assert dataset_row(db, dataset["id"])["def_version"] == dataset["def_version"]
 
 
 def test_changing_base_column_or_unit_replaces_the_period_rules(api, db, world):

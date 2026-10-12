@@ -173,4 +173,5 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 ## 9. 연관 Skill
 - `local-environment`: 환경 기동·마이그레이션 왕복·`/health` 필드·스텁 스위치(`AUTH_STUB_ENABLED`) 설정, 시작 자가 점검 실패 대응
 - `dataset-definition`(FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
+- `data-entry`(FU-1c): `입력(팀)` = 그 팀의 `entry` 또는 `definer`(관리자도 소속 역할이 있어야 한다)로 행 입력(C2~C4)을 판정하고, 행 조회(C1)는 인증된 활성 사용자 누구나 한다
 - `dashboard-link`(예정, FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고, 대시보드 연결·입장권 발급에 이 모듈의 신원·권한을 쓴다

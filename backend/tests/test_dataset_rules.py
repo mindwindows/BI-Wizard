@@ -80,7 +80,9 @@ def test_number_rules_are_stored_as_decimal_strings():
     out, problems = norm("number", {"min": 0, "max": "1000.50", "decimals": 2})
     assert problems == []
     assert out == {"min": "0", "max": "1000.5", "decimals": 2}
-    assert norm("number", {"min": 1.5}) == ({"min": "1.5"}, [])
+    assert norm("number", {"min": "1.5"}) == ({"min": "1.5"}, [])
+    assert norm("number", {"min": "-5.50"}) == ({"min": "-5.5"}, [])  # 서버가 정규화한다
+    assert norm("number", {"min": 1000}) == ({"min": "1000"}, [])  # JSON 정수는 허용
     assert norm("number", {"min": "-0"}) == ({"min": "0"}, [])
     assert norm("number", {"min": None, "max": None}) == (None, [])
 
@@ -94,6 +96,20 @@ def test_number_rules_are_stored_as_decimal_strings():
         ({"max": "Infinity"}, "rules.max", F.BAD_FORMAT),
         ({"min": " 1"}, "rules.min", F.BAD_FORMAT),
         ({"min": "1" * 39}, "rules.min", F.BAD_FORMAT),
+        ({"min": "1e5"}, "rules.min", F.BAD_FORMAT),  # 지수 표기
+        ({"min": ".5"}, "rules.min", F.BAD_FORMAT),
+        ({"min": "5."}, "rules.min", F.BAD_FORMAT),
+        ({"min": "1,000"}, "rules.min", F.BAD_FORMAT),
+        # JSON 부동소수점은 거부한다(05 §1 십진 문자열, 2진 근사 배제).
+        ({"min": 1.5}, "rules.min", F.BAD_FORMAT),
+        ({"max": 0.1234567890123456789}, "rules.max", F.BAD_FORMAT),
+        ({"max": 12345678901234567890.0}, "rules.max", F.BAD_FORMAT),
+        ({"max": 1e400}, "rules.max", F.BAD_FORMAT),
+        # 아주 큰 정수·긴 글자는 변환 전에 거부해 예외로 새지 않는다(파이썬 4300자리 변환 제한).
+        ({"min": 10**5000}, "rules.min", F.BAD_FORMAT),
+        ({"min": -(10**5000)}, "rules.min", F.BAD_FORMAT),
+        ({"min": 10**39}, "rules.min", F.BAD_FORMAT),
+        ({"min": "9" * 5000}, "rules.min", F.BAD_FORMAT),
         ({"min": 5, "max": 4}, "rules.max", F.OUT_OF_RANGE),
         ({"decimals": -1}, "rules.decimals", F.OUT_OF_RANGE),
         ({"decimals": 11}, "rules.decimals", F.OUT_OF_RANGE),
@@ -106,6 +122,15 @@ def test_number_rules_are_stored_as_decimal_strings():
 def test_number_rule_problems(value, field, code):
     _, problems = norm("number", value)
     assert (field, code) in problems
+
+
+def test_parse_decimal_never_raises_on_extreme_input():
+    for value in (10**5000, -(10**5000), "9" * 100_000, 1e308, float("nan"), float("inf")):
+        assert rules.parse_decimal(value) is None
+    assert rules.parse_decimal(10**37) is not None  # 38자리
+    assert rules.parse_decimal(10**38) is None  # 39자리
+    assert rules.parse_decimal("0." + "1" * 38) is not None
+    assert rules.parse_decimal("0." + "1" * 39) is None
 
 
 def test_number_rule_boundaries():
