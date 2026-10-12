@@ -64,6 +64,21 @@ class Worker(threading.Thread):
             self.elapsed = time.monotonic() - started
 
 
+def wait_for_lock_waiter(engine: Engine, timeout: float = 10.0) -> None:
+    """`pg_locks`에서 잠금을 얻지 못한 요청(`granted = false`)이 생길 때까지 폴링한다.
+
+    고정 `sleep`으로 "정의 변경 D가 대기 중"이라고 가정하지 않기 위한 동기화다.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with engine.connect() as conn:
+            waiting = conn.execute(sa.text("SELECT count(*) FROM pg_locks WHERE NOT granted"))
+            if waiting.scalar_one() > 0:
+                return
+        time.sleep(0.02)
+    raise AssertionError("잠금 대기자가 나타나지 않았다(pg_locks)")
+
+
 def blocking_hooks(entered: threading.Event, release: threading.Event, wait: float):
     """정의 변경 안(락을 잡은 상태)에서 멈춰 서는 훅."""
     hooks = DefinitionHooks()
@@ -278,7 +293,7 @@ def test_continuous_for_share_holders_overtake_a_waiting_definition_change(pg, d
     h1.execute(share)
     worker = Worker(add_column_call(pg.engine, dataset_id, "정의 변경", DefinitionHooks(), 1))
     worker.start()
-    time.sleep(0.2)  # D가 H1을 기다리기 시작한 뒤
+    wait_for_lock_waiter(pg.engine)  # D가 실제로 H1을 기다리기 시작한 뒤
 
     def second_holder():
         h2.execute(sa.select(sa.func.set_config("lock_timeout", "400ms", True)))

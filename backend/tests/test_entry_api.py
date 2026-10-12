@@ -311,6 +311,7 @@ def test_c2_formula_unknown_and_malformed_keys(api, db: Db, world, ds, kind):
         "leading-zero": (f"0{ds.sales}", "BAD_FORMAT"),
         "negative": ("-1", "BAD_FORMAT"),
     }[kind]
+    shown = key if key.isdigit() else "invalid"  # 숫자가 아닌 키는 응답에 되돌려 쓰지 않는다
     cells = {str(k): v for k, v in good(ds).items()}
     response = api(
         "entry",
@@ -318,7 +319,22 @@ def test_c2_formula_unknown_and_malformed_keys(api, db: Db, world, ds, kind):
         rows_url(ds),
         json={"expected_version": version(api, ds), "cells": {**cells, key: "1"}},
     )
-    assert response.status_code == 422 and field_map(response) == {f"cells.{key}": code}
+    assert response.status_code == 422 and field_map(response) == {f"cells.{shown}": code}
+    assert stored(db, ds) == []
+
+
+def test_c2_unknown_text_key_is_not_echoed_back(api, db: Db, world, ds):
+    secret = "비밀-키-" + "x" * 100
+    cells = {str(k): v for k, v in good(ds).items()}
+    response = api(
+        "entry",
+        "POST",
+        rows_url(ds),
+        json={"expected_version": version(api, ds), "cells": {**cells, secret: "1"}},
+    )
+    assert response.status_code == 422
+    assert field_map(response) == {"cells.invalid": "BAD_FORMAT"}
+    assert "비밀-키" not in response.text
     assert stored(db, ds) == []
 
 
@@ -365,6 +381,30 @@ def test_c2_body_shape_errors(api, world, ds):
         ).status_code
         == 404
     )
+
+
+def test_c4_chunked_body_over_the_limit_is_413_without_content_length(api, db: Db, world, ds):
+    """Content-Length 없는 청크 전송도 1MiB를 넘으면 JSON 413이고 아무것도 쓰지 않는다."""
+    chunk = b" " * 65_536
+
+    def body():
+        yield b'{"expected_version": 1, "column_ids": [], "rows": []'
+        for _ in range(20):  # 1.25MiB
+            yield chunk
+        yield b"}"
+
+    response = api(
+        "entry",
+        "POST",
+        rows_url(ds, "/paste"),
+        content=body(),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert "content-length" not in response.request.headers
+    assert err(response)["details"] == {"limit": 1_048_576}
+    assert response.headers["content-type"].startswith("application/json")
+    assert stored(db, ds) == []
 
 
 def test_c2_dataset_without_required_columns_accepts_an_empty_row(api, world):
@@ -1012,3 +1052,15 @@ def test_error_codes_used_here_exist_in_the_dictionary():
         "DEFINITION_VERSION_MISMATCH",
     ):
         assert hasattr(ErrorCode, name)
+
+
+def test_paste_request_body_schema_is_in_openapi(make_settings, sqlite_engine):
+    """원시 `Request`를 받는 붙여넣기도 OpenAPI에 본문 스키마(`PasteBody`)가 있다."""
+    from app.main import create_app
+
+    app = create_app(make_settings(), engine=sqlite_engine)
+    operation = app.openapi()["paths"]["/api/datasets/{dataset_id}/rows/paste"]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert set(schema["required"]) == {"expected_version", "column_ids", "rows"}
+    assert "$defs" not in schema
+    assert schema["properties"]["rows"]["items"]["properties"].keys() >= {"row_id", "values"}

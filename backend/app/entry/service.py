@@ -50,7 +50,7 @@ PASTE_MAX_BYTES = 1_048_576
 # 응답에 담는 항목 수 상한(오류 목록이 요청 크기에 비례해 커지는 것을 막는다).
 MAX_VALIDATION_ITEMS = 200
 MAX_CONFLICT_ITEMS = 1_000
-_KEY_ECHO_LIMIT = 40  # 필드 이름에 되돌려 쓰는 사용자 키의 최대 글자 수
+_KEY_ECHO_LIMIT = 40  # 필드 이름에 되돌려 쓰는 숫자 키의 최대 글자 수
 
 Problem = dict[str, Any]
 ChangeMap = dict[int, tuple[Any, Any]]  # 열 번호 -> (expected, value)
@@ -98,7 +98,10 @@ def _formula_ids(ctx: RowContext) -> set[int]:
 
 
 def _echo(key: str) -> str:
-    return key if len(key) <= _KEY_ECHO_LIMIT else key[:_KEY_ECHO_LIMIT] + "…"
+    """알 수 없는 `cells` 키의 필드 이름: 짧은 ASCII 숫자만 되돌려 쓰고 그 밖은 `invalid`."""
+    if key.isascii() and key.isdigit() and len(key) <= _KEY_ECHO_LIMIT:
+        return key
+    return "invalid"
 
 
 def _column_key(key: str) -> int | None:

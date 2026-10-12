@@ -54,6 +54,9 @@ def require_dataset_entry(dataset_id: int, user: CurrentUserDep, session: Sessio
     team_id = dataset_service.get_dataset_team_id(session, dataset_id)
     if not can_enter(user, team_id):
         raise forbidden()
+    # 권한 검사가 연 트랜잭션·연결을 돌려준다. 이어지는 본문 읽기(느린 클라이언트)가 풀(5개)을
+    # 붙들면 다른 API까지 굶는다. 이후 service가 새 트랜잭션을 연다.
+    session.rollback()
     return dataset_id
 
 
@@ -153,7 +156,24 @@ def parse_paste_body(raw: bytes) -> PasteBody:
         ) from None
 
 
-@router.post("/datasets/{dataset_id}/rows/paste", dependencies=[EntryDep])
+def _paste_request_schema() -> dict[str, Any]:
+    """원시 `Request`를 받아 FastAPI가 본문 스키마를 모르므로 `PasteBody`를 직접 노출한다."""
+    schema = PasteBody.model_json_schema()
+    defs = schema.pop("$defs", {})
+    schema["properties"]["rows"]["items"] = defs["PasteRow"]
+    return schema
+
+
+@router.post(
+    "/datasets/{dataset_id}/rows/paste",
+    dependencies=[EntryDep],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": _paste_request_schema()}},
+        }
+    },
+)
 async def paste_rows(dataset_id: int, request: Request, session: SessionDep) -> PasteResult:
     """C4: 붙여넣기 일괄. 한 트랜잭션, 충돌이 하나라도 있으면 전부 취소(`PASTE_CONFLICT`)."""
     body = parse_paste_body(await read_limited_body(request, service.PASTE_MAX_BYTES))

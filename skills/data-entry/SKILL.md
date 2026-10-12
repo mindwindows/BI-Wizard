@@ -14,7 +14,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
   - **읽기(C1): 인증된 활성 사용자 누구나**, 다른 팀 포함.
   - **입력(C2~C4): 그 데이터셋 팀의 `entry` 또는 `definer`.** 관리자(`is_admin`)여도 그 팀 소속이 아니면 403 `FORBIDDEN`이다(필요하면 관리자가 자기를 그 팀에 소속시킨다). 다른 팀 구성원·소속 없는 사용자는 403, 비활성 사용자는 403 `USER_INACTIVE`, 신원 없음은 401. 권한 검사는 본문 검증·크기 검사보다 먼저다.
 - 실행 상태: `local-environment` 통과, `migrate`가 `0004`까지 적용. **1c는 새 revision이 없다**(`ds_<번호>` 행 읽기·쓰기는 DML이라 마이그레이션 대상이 아니다).
-- 선행 데이터: 팀·소속(`permission-management`), 데이터셋과 원본 열(`dataset-definition`). 열이 없는 데이터셋에도 빈 행은 저장할 수 있다.
+- 선행 데이터: 팀·소속(`permission-management`), 데이터셋과 원본 열(`dataset-definition`). 열이 없는 데이터셋에도 빈 행은 저장할 수 있다(필수 열이 없으면 `cells: {}`로 빈 행 생성을 허용하는 것은 의도된 동작이다).
 - 임시 행(draft)은 서버에 없다. 필수 칸을 다 채우기 전의 새 행은 화면 메모리에만 있고, 다 채우면 C2 한 번(붙여넣기 새 행은 C4 한 번)으로 저장한다. 새로고침하면 미저장 행은 사라진다.
 
 ## 3. 입력
@@ -61,7 +61,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
 - `def_version`은 현재 정의 버전이다(행 쓰기는 버전을 올리지 않는다).
 - 저장 위치: `bi_data.ds_<번호>`(`row_id` bigint identity PK + 원본 열 `c_<열 번호>`). 기준 날짜 열이 있으면 같은 기간은 한 행(유일 인덱스 `ux_ds_<번호>_period`).
 - 오류(`{"error": {"code", "message", "details", "request_id"}}`):
-  - 422 `VALIDATION_ERROR` + `details.fields[]`: C2는 `{field: "cells.<열 번호>", code, message}`, C3는 `field`가 `changes.<순번>.value|expected|column_id`, C4는 `{row_index, column_id, code, message}` 또는 `{field: "rows.<순번>.values|expected|row_id" / "column_ids.<순번>"}`. **모든 위반을 한 번에 모아** 돌려준다(처음 200건까지). 입력 값은 응답에 되돌려 쓰지 않는다. 깨진 JSON은 `field`가 오류 위치 번호 문자열이다.
+  - 422 `VALIDATION_ERROR` + `details.fields[]`: C2는 `{field: "cells.<열 번호>", code, message}`, C3는 `field`가 `changes.<순번>.value|expected|column_id`, C4는 `{row_index, column_id, code, message}` 또는 `{field: "rows.<순번>.values|expected|row_id" / "column_ids.<순번>"}`. **모든 위반을 한 번에 모아** 돌려준다(처음 200건까지). 입력 값은 응답에 되돌려 쓰지 않는다: 알 수 없는 `cells` 키도 ASCII 숫자(40자 이하)만 `cells.<숫자>`로 보이고 그 밖(글자 키, 음수, 너무 긴 숫자)은 `cells.invalid`다. 붙여넣기 엔드포인트는 원시 요청 본문을 직접 읽지만 OpenAPI에는 `openapi_extra`로 `PasteBody` 스키마를 싣는다. 깨진 JSON은 `field`가 오류 위치 번호 문자열이다.
   - 404 `NOT_FOUND`(없는 데이터셋), 404 `ROW_NOT_FOUND`(C3 없는 행).
   - 409 `DEFINITION_VERSION_MISMATCH` + `details.current_version`.
   - 409 `CELL_CONFLICT`(C3) + `details.conflicts[{row_id, column_id, current}]`: 충돌한 칸과 그 칸의 **지금 값**(응답 표현). 충돌 없는 칸도 반영되지 않았다.
@@ -94,10 +94,10 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
 - 같은 기간의 행이 이미 있으면 `PERIOD_CONFLICT`: "이미 같은 기간의 행이 있습니다…" 안내와 함께 임시 행과 입력한 내용이 남는다. 기간을 고치면 다시 저장된다("다시 저장" 버튼도 있다).
 
 #### 엑셀 붙여넣기 (C4)
-1. 엑셀에서 범위를 복사한다. 그리드에서 **붙여넣기를 시작할 칸을 눌러 선택**하고 Ctrl+V. (칸을 편집하는 중이면 그 칸 안의 글자 붙여넣기로 동작한다.)
+1. 엑셀에서 범위를 복사한다. 그리드에서 **붙여넣기를 시작할 칸을 눌러 선택**하고 Ctrl+V. (칸을 편집하는 중이거나 다른 입력창에 커서가 있으면 그 입력창 안의 글자 붙여넣기로 동작한다.) 붙여넣기는 `document` 수준에서 받아, 그리드 밖 글자(안내 문단 등)가 선택된 채로 칸을 눌러도 동작한다. 조건은 그리드 안에 DOM 포커스가 있거나 이벤트 대상이 그리드 안일 때뿐이고, 입력창·편집기가 대상이면 가로채지 않는다.
 2. "붙여넣기 확인" 창이 `N줄 × M열을 "열 A" ~ "열 B" 칸에… 기존 행 K개를 덮어쓰고 새 행 J개를 추가합니다`를 보여 준다. "붙여넣기 적용"(Enter)을 누를 때까지 서버에 아무것도 보내지 않는다. Esc나 "취소"로 닫는다.
 3. 채우는 규칙: 선택 칸부터 아래/오른쪽으로 열 순서대로 채운다. 쪽의 마지막 행을 넘는 줄은 새 행이 된다(**마지막 쪽에서만**; 아니면 거부 안내). 맨 아래 "새 행 입력" 줄에서 시작하면 전부 새 행이다. 기존 행은 `row_id`와 화면 이전 값(`expected[]`)을 함께 보내고, 새 행은 `row_id=null`이다. 값은 문자열 또는 `null`(빈 칸) 그대로 보내고 해석은 서버가 한다. 공백은 자르지 않는다.
-4. 서버에 보내기 전에 막는 경우(모두 "붙여넣을 수 없습니다" 안내, 아무것도 저장 안 됨): 5,000행 초과, 요청 1MiB 초과, 계산 열에 걸침, **기존 행의 기준 날짜 열(기간)을 바꾸려 함**(기간 이동은 칸 편집으로), 열이 모자람, 기존 행에 걸치는 줄의 칸 수가 모자람, 모호한 숫자·날짜(`1,234.50`, `12.5%`, `₩1,000`, `2026년 10월 11일`은 쉼표·단위 없는 `1234.5`, `2026-10-11` 형식으로), 닫히지 않은 따옴표, NUL 문자, 시작 칸을 고르지 않음.
+4. 서버에 보내기 전에 막는 경우(모두 "붙여넣을 수 없습니다" 안내, 아무것도 저장 안 됨): 5,000행 초과, 요청 1MiB 초과, 계산 열에 걸침, **기존 행의 기준 날짜 열(기간)을 바꾸려 함**(앞뒤 공백을 뺀 글자가 저장된 `YYYY-MM-DD`와 정확히 같으면 통과 — 서버도 같은 값은 무시하고 `values`에 그대로 실어 보낸다. 기간 이동은 칸 편집으로), **새 행에 기준 날짜 열 값이 없음**(열이 붙는 범위에 없거나 빈 칸이면 "새 행에는 기준 열 값이 필요합니다"; 서버 REQUIRED와 같은 취지), 입력이 4Mi 문자를 넘음(파싱 전 거부), 열이 모자람, 기존 행에 걸치는 줄의 칸 수가 모자람, 모호한 숫자·날짜(`1,234.50`, `12.5%`, `₩1,000`, `2026년 10월 11일`은 쉼표·단위 없는 `1234.5`, `2026-10-11` 형식으로), 닫히지 않은 따옴표, NUL 문자, 시작 칸을 고르지 않음.
 5. 결과: 성공이면 "N행을 고치고 M행을 새로 추가했습니다"(`updated`/`created`) 후 표를 다시 읽는다.
 
 #### 충돌과 해결
@@ -140,11 +140,12 @@ curl -b jar -X POST -H 'content-type: application/json' \
 - DB: `bi_data.ds_<번호>`(`bi_app` 소유, 행 DML), `public.datasets`(행 쓰기가 `FOR SHARE`로 잡음), `public.dataset_columns`(읽기). 동적 DML도 SQLAlchemy 표현식만 쓰고 `text()`·SQL 문자열 조립이 없으며, 열 이름은 `c_<번호>` 규칙 함수(`app/ddl`)로만 만든다. `bi_app`은 자기가 만든 `ds_*`의 소유자라 DML 권한이 있고(`bi_readonly`는 `SELECT`만), 시작 자가 점검과 충돌하지 않는다(새 객체 종류 없음).
 
 ### 동시성 설계 (06 §5, 시험으로 확인한 사실)
+- **본문 읽기 동안 DB 연결을 쥐지 않는다**: 입력 권한 검사(`require_dataset_entry`)가 연 트랜잭션은 검사 직후 `rollback()`으로 돌려준다(검사가 크기 검사보다 먼저인 순서는 그대로). 청크를 천천히 보내는 붙여넣기 요청이 풀(`pool_size=5`, `max_overflow=0`)을 붙들어 다른 API를 굶기지 않는다. `test_slow_paste_bodies_do_not_exhaust_the_connection_pool`(pg)이 느린 본문 8건 진행 중 `/api/me`·`/api/health/db` 응답을 단정한다(되돌리면 실패함을 확인).
 - **행 쓰기 = `datasets` 행 `FOR SHARE`**: C2~C4는 첫 단계에서 그 데이터셋 행을 `FOR SHARE`로 잡고 `def_version`을 비교한다. 행 쓰기끼리는 서로 막지 않고, 정의 변경(`FOR NO KEY UPDATE`)과는 서로 기다린다. 잠금 순서는 항상 `datasets` 행 → `ds_` 행이다. 락 대기 한도는 코드 상수 3초(`ROW_WRITE_LOCK_TIMEOUT`)이고 넘기거나 교착(`40P01`)이면 503 `WRITE_BUSY`다. 읽기(C1)는 잠금이 없다.
 - **칸 단위 값 비교 갱신**: `UPDATE ds_<번호> SET 칸=새값 WHERE row_id=… AND (칸 IS NOT DISTINCT FROM 이전값 OR 칸 IS NOT DISTINCT FROM 새값)`, 칸마다 반복. 영향받은 행 수(`rowcount`)가 0이면 다시 읽어 행 없음(`ROW_NOT_FOUND`/`row_missing`)과 칸 충돌을 구분한다. "이미 같은 값"은 가드 안에 포함돼 성공이다.
 - **pg8000 사실(1c에서 처음 실제 PostgreSQL로 확인)**: `UPDATE`의 `rowcount`는 맞은 행 수다(불일치 0, 일치 1, NULL 가드 일치 1, 없는 행 0). `INSERT … ON CONFLICT DO NOTHING RETURNING row_id`는 넣었으면 그 행 번호를, 충돌로 건너뛰었으면 **행이 없다**(`scalar()`가 `None`)이고 트랜잭션은 중단되지 않아 충돌을 모아 끝에서 한꺼번에 롤백할 수 있다(SAVEPOINT 불필요). 같은 기간을 먼저 넣은 다른 트랜잭션이 아직 끝나지 않았으면 그 끝을 기다린 뒤 충돌로 판정한다(한도를 넘으면 `WRITE_BUSY`). 시험: `backend/tests/test_entry_concurrency.py`의 `test_pg8000_rowcount_returning_and_on_conflict_facts`.
 - **교착 방지**: 기존 행은 `row_id` 오름차순, 새 행은 기간 오름차순으로 잡는다. 두 붙여넣기가 같은 행을 반대 순서로 적어도 교착이 없다(15회 반복 시험). 일부러 반대 순서로 갱신하면 PostgreSQL이 교착을 끊고(`40P01`) 이것이 `WRITE_BUSY`로 바뀐다.
-- **굶음(관찰, PostgreSQL 16.10)**: 행 쓰기가 `FOR SHARE`를 쥐고 있는 동안 기다리는 정의 변경(열 추가 등)을 **뒤에 들어온 새 행 쓰기가 앞지른다**(공유 잠금끼리는 호환이라 줄을 서지 않는다). 그래서 행 입력이 끊이지 않는 데이터셋에서는 정의 변경이 1초 뒤 `DEFINITION_BUSY`(503)로 끝나는 일이 반복될 수 있다. 무한 대기는 없다(`lock_timeout`). 이럴 때는 입력이 잠잠할 때 다시 시도한다. 이 서술은 `test_entry_concurrency.py`의 `test_continuous_row_writes_overtake_a_waiting_definition_change`와 `test_dataset_concurrency.py`의 `test_continuous_for_share_holders_overtake_a_waiting_definition_change`가 단정으로 고정한다(관찰이 달라지면 시험이 깨져 이 서술을 다시 보게 한다).
+- **굶음(관찰, PostgreSQL 16.10)**: 행 쓰기가 `FOR SHARE`를 쥐고 있는 동안 기다리는 정의 변경(열 추가 등)을 **뒤에 들어온 새 행 쓰기가 앞지른다**(공유 잠금끼리는 호환이라 줄을 서지 않는다). 그래서 행 입력이 끊이지 않는 데이터셋에서는 정의 변경이 1초 뒤 `DEFINITION_BUSY`(503)로 끝나는 일이 반복될 수 있다. 무한 대기는 없다(`lock_timeout`). 이럴 때는 입력이 잠잠할 때 다시 시도한다. 시험은 'D가 대기 중'을 고정 `sleep`이 아니라 `pg_locks`의 `granted=false`를 폴링해 확인한 뒤 H2를 시작하고, H2가 D의 한도(1초) 안에 잠금을 얻었는지는 5초 여유로 기다리되 D가 아직 대기 중일 때 얻은 경우만 앞지름으로 센다(느린 CI의 거짓 실패 방지). 이 서술은 `test_entry_concurrency.py`의 `test_continuous_row_writes_overtake_a_waiting_definition_change`와 `test_dataset_concurrency.py`의 `test_continuous_for_share_holders_overtake_a_waiting_definition_change`가 단정으로 고정한다(관찰이 달라지면 시험이 깨져 이 서술을 다시 보게 한다).
 - **정의 변경과 행 INSERT 경쟁**: 기준 날짜 열 지정·날짜 단위 변경(행이 0개일 때만 가능)은 `FOR NO KEY UPDATE`를 잡은 **뒤에** 행 존재를 확인하므로, 진행 중인 INSERT가 끝난 뒤에 확인한다 → `DATASET_HAS_ROWS`(422). 반대로 정의 변경이 먼저면 행 쓰기는 기다렸다가 버전이 달라 `DEFINITION_VERSION_MISMATCH`(409)다. 기다림이 3초를 넘으면 `WRITE_BUSY`. 500이 되는 경로는 없다.
 
 ## 7. 실패 시 확인 방법
@@ -193,7 +194,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
   - `test_permission_matrix.py` — C1~C4 × 역할(관리자·정의 담당자·입력자·다른 팀 구성원·비소속 읽기·비활성·인증 없음), 거부된 요청이 데이터를 바꾸지 않음
   - `test_dataset_api.py`·`test_ddl.py`·`test_dataset_concurrency.py` — 기준 날짜 열 규칙 DDL 실패의 오류 변환, 동적 DDL 게이트(FK·유일·계산 열 거부), 이름 변경 중 FK 자식 INSERT 대기, `FOR SHARE` 굶음
 - 마이그레이션: 1c는 새 revision이 없다. `python -m migrations.roundtrip`·`alembic check`가 그대로 통과해야 한다(`skills/local-environment/SKILL.md`).
-- 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `SELECT * FROM bi_data.ds_<번호>`. 두 터미널에서 같은 칸을 `expected`가 같은 두 요청으로 동시에 수정해 한쪽이 `CELL_CONFLICT`가 되는지 본다. 5,000행 붙여넣기는 tmpfs PostgreSQL에서 약 3초(시험 환경 측정)이며 운영 DB에서는 달라질 수 있다.
+- 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `SELECT * FROM bi_data.ds_<번호>`. 두 터미널에서 같은 칸을 `expected`가 같은 두 요청으로 동시에 수정해 한쪽이 `CELL_CONFLICT`가 되는지 본다. 5,000행 붙여넣기 소요 시간은 측정 조건에 따라 다르다: tmpfs PostgreSQL에서 pytest로 약 3~4초, 볼륨 PostgreSQL + nginx 경유 실측 4.7~6.5초(QA 2026-10-12). 운영 DB에서는 더 달라질 수 있다.
 
 - 프런트 자동 시험:
   - `frontend/src/features/entry/paste/parser.test.ts`: 붙여넣기 파서. `docs/samples/clipboard-cases.json` 42건(거부 3건 포함)과 속성 시험 `parse(serialize(x)) == x`(무작위 표 2,000개 x CRLF/LF, 외부 라이브러리 없음). 이미지 빌드(`docker build --target test frontend`)는 frontend/ 폴더만 쓰므로 사본을 `paste/fixtures/clipboard-cases.json`에 두었고, 저장소 전체가 있을 때는 원본과 같은지 확인한다. 원본을 고치면 사본도 같이 고친다.

@@ -33,7 +33,12 @@ from app.db_metadata import datasets
 from app.entry import repo as entry_repo
 from app.entry import service as entry_service
 from tests.conftest import Db
-from tests.test_dataset_concurrency import Worker, add_column_call, blocking_hooks
+from tests.test_dataset_concurrency import (
+    Worker,
+    add_column_call,
+    blocking_hooks,
+    wait_for_lock_waiter,
+)
 
 ROW_LOCK_SECONDS = 3.0  # entry 락 대기 한도(ROW_WRITE_LOCK_TIMEOUT)와 같은 값(아래 시험이 확인한다)
 
@@ -342,7 +347,7 @@ def test_insert_waits_for_the_uncommitted_same_period_then_conflicts(pg, hold_in
     assert entered.wait(timeout=10)
     waiter = named("waiter", lambda: create(pg, fx, {fx.period: "2026-01-01"}))
     waiter.start()
-    time.sleep(0.5)
+    wait_for_lock_waiter(pg.engine)
     assert waiter.is_alive(), "같은 기간 INSERT는 앞 트랜잭션이 끝나기를 기다려야 한다"
     release.set()
     holder.join(timeout=10)
@@ -551,7 +556,7 @@ def test_setting_the_base_column_after_a_racing_insert_is_dataset_has_rows(pg, h
 
     definer = named("definer", set_base)
     definer.start()
-    time.sleep(0.3)
+    wait_for_lock_waiter(pg.engine)
     assert definer.is_alive(), "정의 변경은 진행 중인 행 쓰기(FOR SHARE)를 기다려야 한다"
     release.set()
     holder.join(timeout=10)
@@ -584,7 +589,7 @@ def test_changing_the_date_unit_after_a_racing_insert_is_dataset_has_rows(pg, ho
 
     definer = named("definer", change_unit)
     definer.start()
-    time.sleep(0.3)
+    wait_for_lock_waiter(pg.engine)
     release.set()
     holder.join(timeout=10)
     definer.join(timeout=10)
@@ -605,7 +610,7 @@ def test_insert_waiting_for_a_definition_change_gets_version_mismatch(pg):
     assert entered.wait(timeout=5)
     writer = Worker(lambda: create(pg, fx, {fx.period: "2026-01-01"}, version=version))
     writer.start()
-    time.sleep(0.4)
+    wait_for_lock_waiter(pg.engine)
     assert writer.is_alive(), "행 쓰기(FOR SHARE)는 진행 중인 정의 변경을 기다려야 한다"
     release.set()
     definer.join(timeout=10)
@@ -647,7 +652,7 @@ def test_definition_change_waits_for_a_row_write_then_proceeds(pg, hold_inserts)
     version = current_version(pg, fx)
     definer = Worker(add_column_call(pg.engine, fx.id, "열 하나", DefinitionHooks(), version))
     definer.start()
-    time.sleep(0.3)
+    wait_for_lock_waiter(pg.engine)
     assert definer.is_alive()
     release.set()
     holder.join(timeout=10)
@@ -677,10 +682,12 @@ def test_continuous_row_writes_overtake_a_waiting_definition_change(pg, hold_ins
         add_column_call(pg.engine, fx.id, "굶는 정의 변경", DefinitionHooks(), version)
     )
     definer.start()
-    time.sleep(0.3)  # D가 H1을 기다리기 시작한 뒤
+    wait_for_lock_waiter(pg.engine)  # D가 실제로 H1을 기다리기 시작한 뒤
     h2 = named("holder2", lambda: create(pg, fx, {fx.period: "2026-02-01"}, version=version))
     h2.start()
-    overtook = entered2.wait(timeout=0.6)  # D의 대기 한도(1초) 안에 H2가 FOR SHARE를 얻었는가
+    # H2가 FOR SHARE를 얻었는가. 느린 CI에서 거짓 실패하지 않게 여유를 두되(5초), D가 한도(1초)로
+    # 끝나기를 기다렸다가 얻은 경우(= D 뒤에 줄 섬)는 앞지르기로 세지 않는다.
+    overtook = entered2.wait(timeout=5) and definer.is_alive()
     definer.join(timeout=10)  # H1·H2가 쥔 채로 D의 lock_timeout을 기다린다
     release.set()
     h1.join(timeout=10)
@@ -694,3 +701,69 @@ def test_continuous_row_writes_overtake_a_waiting_definition_change(pg, hold_ins
         f"D=DEFINITION_BUSY, 대기 {definer.elapsed:.2f}s"
     )
     assert len(stored_values(pg, fx, fx.period)) == 2
+
+
+# --- 느린 본문이 연결 풀을 붙들지 않는다 ----
+
+
+def test_slow_paste_bodies_do_not_exhaust_the_connection_pool(pg, make_settings):
+    """권한 검사 뒤 본문을 읽는 동안 DB 연결을 쥐지 않는다(풀 `pool_size=5, max_overflow=0`).
+
+    청크를 천천히 보내는 붙여넣기 요청을 풀 크기보다 많이(8개) 걸어 둔 채로 `/api/me`와
+    `/api/health/db`가 제때 응답해야 한다. 권한 검사가 연 트랜잭션을 돌려주지 않으면 5개 요청이
+    연결을 모두 쥐어 다른 요청이 풀 대기(기본 30초)에 빠진다.
+    """
+    import asyncio
+    from urllib.parse import quote
+
+    import httpx
+
+    from app.auth.stub import STUB_COOKIE
+    from app.main import create_app
+
+    fx = make(pg)
+    settings = make_settings(AUTH_STUB_ENABLED="true", APP_ENV="test")
+    app = create_app(settings, engine=pg.engine)
+    release = asyncio.Event
+    cookies = {STUB_COOKIE: quote("entry", safe="")}
+
+    async def run() -> None:
+        gate = release()
+        started = 0
+
+        async def slow_body():
+            nonlocal started
+            started += 1
+            yield b'{"expected_version": 1, '
+            await gate.wait()
+            yield b'"column_ids": [], "rows": []}'
+
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://t", cookies=cookies
+            ) as client:
+                slow = [
+                    asyncio.create_task(
+                        client.post(
+                            f"/api/datasets/{fx.id}/rows/paste",
+                            content=slow_body(),
+                            headers={"content-type": "application/json"},
+                        )
+                    )
+                    for _ in range(8)
+                ]
+                try:
+                    deadline = asyncio.get_running_loop().time() + 10
+                    while started < 8 and asyncio.get_running_loop().time() < deadline:
+                        await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.5)  # 권한 검사를 지나 본문을 기다리는 상태가 되게 한다
+                    assert started == 8
+                    for path in ("/api/me", "/api/health/db"):
+                        response = await asyncio.wait_for(client.get(path), timeout=5)
+                        assert response.status_code == 200, (path, response.text)
+                finally:
+                    gate.set()
+                    await asyncio.gather(*slow, return_exceptions=True)
+
+    asyncio.run(run())
