@@ -24,7 +24,7 @@ const made = [];    // 촬영한 파일
 const notes = [];   // 시나리오 점검 메모
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ['--no-sandbox'], ignoreDefaultArgs: ['--hide-scrollbars'] });
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
   const apiUrl = (p) => `${ORIGIN}${BASE}/api${p}`;
   const loginAs = async (user) => {
@@ -85,6 +85,13 @@ const notes = [];   // 시나리오 점검 메모
   const rowsOf = async (user, ds) => (await api(user, `/datasets/${ds.id}/rows?order=desc&limit=200`))[1];
   const rowByDate = async (user, ds, dateColName, date) => (await rowsOf(user, ds)).items.find((r) => r.cells[ds.cols[dateColName]] === date);
   const verOf = async (user, ds) => (await api(user, `/datasets/${ds.id}`))[1].def_version;
+  // S6 격자(헤더 고정, 높이 calc(100vh - 120px))가 보이도록 마지막 행을 화면에 들인다. keepPending이면 변경 목록을 가리지 않게 격자만 안쪽 스크롤한다.
+  const scrollGridIn = async (page, keepPending = false) => {
+    const last = page.locator('table.matrix tbody tr').last();
+    await last.scrollIntoViewIfNeeded();
+    if (keepPending) await page.locator('section.pending').scrollIntoViewIfNeeded();
+    await sleep(300);
+  };
   const gridReady = async (page) => { await page.waitForSelector('[role=row][row-id^="r"]'); await settle(page, 500); };
 
   const scenarios = {
@@ -126,7 +133,8 @@ const notes = [];   // 시나리오 점검 메모
     async 'fu1a-s6'() {
       const page = await newPage();
       await loginAs('stub-admin'); await open(page, '/admin/permissions');
-      await page.waitForSelector('table.matrix'); await shot(page, 'fu1a-s6-permissions-grid');
+      await page.waitForSelector('table.matrix');
+      await scrollGridIn(page); await shot(page, 'fu1a-s6-permissions-grid');
       // 변경 쌓기
       await page.getByLabel('김비소속 - 시험 A팀 역할').selectOption('entry');
       await page.getByLabel('이영업 - 시험 B팀 역할').selectOption('definer');
@@ -145,6 +153,7 @@ const notes = [];   // 시나리오 점검 메모
       await tedit.getByLabel('팀 이름').fill('시험 B팀(개편)'); await tedit.getByRole('button', { name: '변경 목록에 담기' }).click();
       await page.locator('section.pending').scrollIntoViewIfNeeded();
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await scrollGridIn(page, true);
       await shot(page, 'fu1a-s6-changes-staged');
       await page.getByRole('button', { name: '저장하기' }).click();
       await page.waitForSelector('[role=dialog]'); await shot(page, 'fu1a-s6-confirm-dialog');
@@ -339,6 +348,56 @@ const notes = [];   // 시나리오 점검 메모
       await paste(page, lines.join('\r\n') + '\r\n');
       await page.waitForSelector('[aria-label="붙여넣기 오류"]');
       await shot(page, 'fu1c-s4-paste-rejected-over-5000-rows');
+      await page.close();
+    },
+    async 'fu1c-truncated'() {
+      // 검증 오류 201건 이상: 새 행 250줄의 매출이 모두 최댓값(1,000,000) 초과 -> 422 + details.truncated
+      const page = await newPage();
+      await loginAs('stub-entry'); await open(page, `/datasets/${IDS.sales.id}`); await gridReady(page);
+      await page.locator(`[role=row][row-id="entry"] [col-id="${S['기준월']}"]`).click(); await sleep(250);
+      const lines = [];
+      for (let i = 0; i < 250; i++) { const d = new Date(Date.UTC(2040, i, 1)); lines.push(`${d.toISOString().slice(0, 10)}\t${9999999 + i}`); }
+      await paste(page, lines.join('\r\n') + '\r\n');
+      await page.waitForSelector('[aria-label="붙여넣기 확인"]');
+      await page.locator('[aria-label="붙여넣기 확인"] button.primary').click();
+      await page.waitForSelector('[aria-label="붙여넣기 결과"]'); await sleep(700);
+      await page.waitForSelector('[data-testid=truncated-notice]');
+      await shot(page, 'fu1c-s4-truncated-notice-validation-errors');
+      await page.close();
+    },
+    async 'fu1c-conflict-truncated'() {
+      // 충돌 1,001건 이상: 일별 방문자에 1,100일을 붙여넣는 동안 다른 클라이언트가 같은 1,100일을 먼저 만든다.
+      const page = await newPage();
+      await loginAs('stub-entry'); await open(page, `/datasets/${IDS.daily.id}`); await gridReady(page);
+      await page.locator(`[role=row][row-id="entry"] [col-id="${IDS.daily.cols['기준일']}"]`).click(); await sleep(250);
+      const days = []; for (let i = 0; i < 1100; i++) days.push(new Date(Date.UTC(2030, 0, 1 + i)).toISOString().slice(0, 10));
+      await paste(page, days.map((d, i) => `${d}\t${100 + i}`).join('\r\n') + '\r\n');
+      await page.waitForSelector('[aria-label="붙여넣기 확인"]');
+      const v = await verOf('stub-definer', IDS.daily);
+      let bad = 0;
+      for (const d of days) {
+        const [st] = await api('stub-definer', `/datasets/${IDS.daily.id}/rows`, 'POST', { expected_version: v, cells: { [IDS.daily.cols['기준일']]: d, [IDS.daily.cols['방문자']]: '1' } });
+        if (st !== 201 && st !== 200) bad++;
+      }
+      notes.push('conflict-truncated 선행 API 실패 ' + bad);
+      await page.locator('[aria-label="붙여넣기 확인"] button.primary').click();
+      await page.waitForSelector('[aria-label="붙여넣기 결과"]'); await sleep(700);
+      await shot(page, 'fu1c-s4-paste-conflict-truncated');
+      await page.close();
+    },
+    async 'fu1b-inactive-team'() {
+      // 폼을 연 채 팀을 비활성화한 뒤 저장해 서버 409(TARGET_INACTIVE, field=team)를 유발한다.
+      let [, t] = await api('stub-admin', '/teams', 'POST', { code: 'tmp_plan', name: '임시 기획팀' });
+      if (!t || !t.id) t = (await api('stub-admin', '/teams'))[1].items.find((x) => x.code === 'tmp_plan'); // 재실행 대비
+      await api('stub-admin', `/teams/${t.id}/members/${IDS.users['stub-definer']}`, 'PUT', { role: 'definer' });
+      const page = await newPage();
+      await loginAs('stub-definer'); await open(page, '/datasets/new'); await page.waitForSelector('form[aria-label="데이터셋 만들기"]');
+      await page.getByLabel('팀', { exact: true }).last().selectOption({ label: '임시 기획팀' });
+      await page.getByLabel('이름', { exact: true }).fill('임시 데이터셋');
+      const [st] = await api('stub-admin', `/teams/${t.id}`, 'PATCH', { is_active: false });
+      notes.push('inactive-team 비활성화 API ' + st);
+      await page.getByRole('button', { name: '만들기' }).click(); await page.waitForSelector('[role=alert]'); await sleep(400);
+      await shot(page, 'fu1b-s3-create-form-error-inactive-team');
       await page.close();
     },
   };
