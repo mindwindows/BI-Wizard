@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiError, installFetch, json, type Handler } from "../../test-utils";
-import { DashboardEmbed, EMPTY_CHECK_MS, looksEmpty } from "./DashboardEmbed";
+import { DashboardEmbed, EMPTY_CHECK_MS, RECHECK_MS, looksEmpty } from "./DashboardEmbed";
 import type { Dashboard } from "./types";
 
 vi.mock("@superset-ui/embedded-sdk", () => ({ embedDashboard: vi.fn() }));
@@ -299,6 +299,37 @@ describe("허용 도메인 불일치 휴리스틱", () => {
     const hint = screen.getByTestId("embed-blank-hint");
     expect(hint.textContent).toContain("임베드 허용 도메인 설정을 확인하세요");
     expect(hint.textContent).toContain(window.location.origin);
+  });
+
+  it("빈 화면이면 iframe을 숨기고(원문 403 본문이 안 보이게) 포털 대시보드 번호와 다시 시도만 보인다", async () => {
+    await readyWithFakeTimers();
+    const frame = () => screen.getByTestId("dashboard-embed").querySelector(".embed-frame") as HTMLElement;
+    expect(frame().hidden).toBe(false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMPTY_CHECK_MS + 100);
+    });
+    expect(frame().hidden).toBe(true);
+    const hint = screen.getByTestId("embed-blank-hint");
+    expect(hint.textContent).toContain(`문의 시 대시보드 번호 ${DASH_A.id}를 알려 주세요.`);
+    expect(hint.textContent).not.toContain(DASH_A.embedded_uuid);
+    expect(hint.querySelector("button")?.textContent).toBe("다시 시도");
+  });
+
+  it("한 번 비었다고 판정된 뒤 늦게 #app이 채워지면 안내를 걷고 iframe을 다시 보인다", async () => {
+    await readyWithFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMPTY_CHECK_MS + 100);
+    });
+    expect(screen.getByTestId("embed-blank-hint")).toBeTruthy();
+    const doc = instances[0].iframe.contentDocument!;
+    doc.body.innerHTML = '<div id="app"><div>대시보드</div></div>';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK_MS + 100);
+    });
+    expect(screen.queryByTestId("embed-blank-hint")).toBeNull();
+    expect((screen.getByTestId("dashboard-embed").querySelector(".embed-frame") as HTMLElement).hidden).toBe(false);
+    // 채워진 뒤에는 더 이상 주기 확인 타이머가 남지 않는다.
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("안에 화면이 그려져 있으면(#app에 내용) 안내하지 않는다", async () => {

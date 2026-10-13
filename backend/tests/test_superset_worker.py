@@ -10,6 +10,7 @@ import sqlalchemy as sa
 
 from app.config import Settings
 from app.db_metadata import superset_datasets, teams
+from app.superset.constants import SYNC_DEBOUNCE_SECONDS
 from app.superset.errors import summarize
 from app.superset.runtime import build_superset_services
 from tests.conftest import Db
@@ -182,7 +183,8 @@ def test_change_during_processing_keeps_pending_and_runs_again(db, fake, sync):
         return httpx.Response(200, json={"id": 1, "result": {}})
 
     fake.respond_once(lambda c: c.method == "PUT" and c.path == "/api/v1/dataset/1", interrupt)
-    sync.process_next()
+    assert sync.process_next(force=True) is True
+    assert fake.inject == []  # 끼어들기가 실제로 실행됐다
     assert row(db, dataset_id)["sync_status"] == "pending"  # 낡은 결과를 registered로 쓰지 않는다
     assert sync.pending_ids() == [dataset_id]
     sync.drain()
@@ -321,6 +323,7 @@ def loop_sync(superset_settings, fake, db: Db):
         retry_interval=0.02,
         breaker_cooldown=0.05,
         poll_seconds=0.005,
+        debounce_seconds=0.0,  # 이 부품을 쓰는 시험은 지연 없이 바로 처리되길 기대한다
     )
     assert built is not None
     built.sync.bind(db.engine)
@@ -354,6 +357,7 @@ def test_loop_gives_up_waiting_for_health_after_the_max_wait_but_keeps_retrying(
         health_max_wait=0.03,
         retry_interval=0.02,
         poll_seconds=0.005,
+        debounce_seconds=0.0,
     )
     assert built is not None
     built.sync.bind(db.engine)
@@ -418,3 +422,220 @@ def test_real_thread_registers_in_the_background(db, fake, loop_sync):
         )
     finally:
         loop_sync.stop()
+
+
+# --- 디바운스(not_before): 같은 데이터셋의 요청은 지연 안에 모여 Superset 호출 한 번이 된다 ----
+
+DEBOUNCE = SYNC_DEBOUNCE_SECONDS
+
+
+def mutating_calls(fake) -> int:
+    return sum(
+        1
+        for c in fake.calls
+        if c.method in ("POST", "PUT") and c.path.startswith("/api/v1/dataset")
+    )
+
+
+def test_a_burst_of_requests_inside_the_delay_is_one_superset_sync(db, fake, sync, clock):
+    burst, _, _ = make_dataset(db, fake, team="가", name="연타")
+    single, _, _ = make_dataset(db, fake, team="나", name="한 번")
+    sync.request_dataset_sync(single)
+    clock.advance(DEBOUNCE)
+    assert sync.process_next() is True
+    per_sync = mutating_calls(fake)  # 한 번의 동기화가 보내는 쓰기 호출 수
+    assert per_sync > 0
+    fake.calls.clear()
+    for _ in range(20):  # 지연 안에 20번 연달아 요청
+        sync.request_dataset_sync(burst)
+        clock.advance(0.1)
+    assert sync.pending_ids() == [burst]
+    assert sync.process_next() is False and fake.calls == []  # 지연 중에는 Superset을 부르지 않는다
+    assert row(db, burst)["sync_status"] == "pending"
+    clock.advance(DEBOUNCE)
+    assert sync.process_next() is True
+    assert sync.process_next() is False
+    assert mutating_calls(fake) == per_sync  # 20건이 한 번의 동기화로 합쳐졌다
+    assert row(db, burst)["sync_status"] == "registered"
+    assert len(fake.datasets) == 2
+
+
+def test_the_delay_window_starts_at_the_first_request_and_is_not_extended(db, fake, sync, clock):
+    dataset_id, _, _ = make_dataset(db, fake)
+    sync.request_dataset_sync(dataset_id)
+    clock.advance(DEBOUNCE - 0.2)
+    sync.request_dataset_sync(dataset_id)  # 창이 끝나기 직전의 요청이 창을 늘리지 않는다
+    assert sync.process_next() is False
+    clock.advance(0.2)
+    assert sync.process_next() is True
+    assert row(db, dataset_id)["sync_status"] == "registered"
+
+
+def test_delays_are_independent_per_dataset(db, fake, sync, clock):
+    first, _, _ = make_dataset(db, fake, team="가", name="먼저")
+    second, _, _ = make_dataset(db, fake, team="나", name="나중")
+    sync.request_dataset_sync(first)
+    clock.advance(2.0)
+    sync.request_dataset_sync(second)
+    clock.advance(DEBOUNCE - 2.0)  # first의 지연만 끝났다
+    assert sync.process_next() is True
+    assert row(db, first)["sync_status"] == "registered"
+    assert row(db, second)["sync_status"] == "pending"
+    assert sync.process_next() is False and sync.pending_ids() == [second]
+    clock.advance(2.0)
+    assert sync.process_next() is True
+    assert row(db, second)["sync_status"] == "registered"
+
+
+def test_a_delayed_dataset_does_not_block_a_ready_one_behind_it(db, fake, sync, clock):
+    delayed, _, _ = make_dataset(db, fake, team="가", name="지연")
+    ready, _, _ = make_dataset(db, fake, team="나", name="즉시")
+    sync.request_dataset_sync(delayed)
+    sync._enqueue([ready])  # 지연 없는 경로(시작 대조 등)가 뒤에 넣은 항목
+    assert sync.pending_ids() == [delayed, ready]  # 지연된 항목이 큐 앞에 있다
+    assert sync.process_next() is True  # 앞의 지연 항목을 건너뛰고 준비된 것을 처리한다
+    assert row(db, ready)["sync_status"] == "registered"
+    assert row(db, delayed)["sync_status"] == "pending"
+    assert sync.process_next() is False
+
+
+def test_startup_reconcile_and_unavailable_retry_are_not_held_back_by_the_delay(
+    db, fake, sync, clock
+):
+    waiting, _, _ = make_dataset(db, fake, team="가", name="디바운스 중")
+    retry, _, _ = make_dataset(db, fake, team="나", name="재시도")
+    sync.request_dataset_sync(retry)
+    fake.up = False
+    sync.drain()  # retry는 연결 문제로 failed
+    fake.up = True
+    sync.request_dataset_sync(waiting)
+    assert sync.process_next() is False  # waiting은 아직 지연 중이다
+    assert sync.requeue_unavailable() == 1  # 자동 재시도 경로: 지연 없음
+    assert sync.process_next() is True
+    assert row(db, retry)["sync_status"] == "registered"
+    assert sync.process_next() is False  # waiting은 여전히 지연 중
+    assert sync.reconcile_all() == 1  # 시작 대조 경로: 지연 중인 항목을 당겨 온다
+    assert sync.process_next() is True
+    assert row(db, waiting)["sync_status"] == "registered"
+
+
+def test_request_during_processing_reruns_after_its_own_delay_not_immediately(
+    db, fake, sync, clock
+):
+    dataset_id, _, _ = make_dataset(db, fake)
+    sync.request_dataset_sync(dataset_id)
+    clock.advance(DEBOUNCE)
+
+    def interrupt(call):
+        sync.request_dataset_sync(dataset_id)  # 처리 도중 정의가 또 바뀌었다
+        return httpx.Response(200, json={"id": 1, "result": {}})
+
+    fake.respond_once(lambda c: c.method == "PUT" and c.path == "/api/v1/dataset/1", interrupt)
+    assert sync.process_next() is True
+    assert fake.inject == []
+    assert row(db, dataset_id)["sync_status"] == "pending"  # 세대가 바뀌어 registered로 쓰지 않는다
+    assert sync.pending_ids() == [dataset_id]
+    assert sync.process_next() is False  # 재큐는 새 요청의 지연을 따른다
+    clock.advance(DEBOUNCE)
+    assert sync.process_next() is True
+    assert row(db, dataset_id)["sync_status"] == "registered"
+    assert len(fake.datasets) == 1
+
+
+def test_team_rename_requests_are_delayed_per_dataset(db, fake, sync, clock):
+    first, team_id, _ = make_dataset(db, fake, team="영업팀", name="월간")
+    sync.request_team_sync(team_id)
+    assert sync.pending_ids() == [first]
+    assert sync.process_next() is False
+    clock.advance(DEBOUNCE)
+    assert sync.process_next() is True
+
+
+def test_drain_skips_the_delay_for_tests_and_diagnostics(db, fake, sync, clock):
+    dataset_id, _, _ = make_dataset(db, fake)
+    sync.request_dataset_sync(dataset_id)
+    assert sync.process_next() is False
+    assert sync.drain() == 1
+    assert row(db, dataset_id)["sync_status"] == "registered"
+
+
+def test_loop_honors_the_delay_with_an_injected_clock(db, fake, superset_settings, clock):
+    built = build_superset_services(
+        superset_settings,
+        transport=fake.transport,
+        clock=clock,
+        poll_seconds=0.001,
+        retry_interval=10_000.0,
+    )
+    assert built is not None
+    sync = built.sync
+    sync.bind(db.engine)
+    sync._startup_pending = False  # 시작 대조는 지연을 당기므로 이 시험에서는 끈다
+    dataset_id, _, _ = make_dataset(db, fake)
+    sync.request_dataset_sync(dataset_id)
+    seen_before_delay: list[int] = []
+
+    def condition():
+        clock.advance(0.5)  # 루프가 한 바퀴 돌 때마다 시간이 0.5초 간다
+        if clock() < 1000.0 + DEBOUNCE:
+            seen_before_delay.append(len(fake.calls))
+        r = row(db, dataset_id)
+        return r is not None and r["sync_status"] == "registered"
+
+    run_loop(sync, condition)
+    assert seen_before_delay and set(seen_before_delay) == {0}  # 지연이 끝나기 전에는 호출 0건
+    assert clock() >= 1000.0 + DEBOUNCE
+    built.stop()
+
+
+def test_real_thread_start_reconcile_registers_before_the_delay_ends(db, fake, superset_settings):
+    """실제 스레드: 시작 대조가 지연 중인 항목을 당겨 오므로 3초를 기다리지 않고 등록된다."""
+    if db.kind == "sqlite":
+        pytest.skip("SQLite 시험 DB는 연결 하나를 스레드 사이에 공유한다(PostgreSQL 변형에서 확인)")
+    built = build_superset_services(
+        superset_settings,
+        transport=fake.transport,
+        health_interval=0.01,
+        retry_interval=10_000.0,
+        poll_seconds=0.005,
+    )
+    assert built is not None
+    built.sync.bind(db.engine)
+    dataset_id, _, _ = make_dataset(db, fake)
+    built.sync.request_dataset_sync(dataset_id)
+    started = time.monotonic()
+    built.sync.start()
+    try:
+        assert settled(
+            lambda: (r := row(db, dataset_id)) is not None and r["sync_status"] == "registered",
+            timeout=SYNC_DEBOUNCE_SECONDS - 0.5,
+        )
+        assert time.monotonic() - started < SYNC_DEBOUNCE_SECONDS
+    finally:
+        built.stop()
+
+
+def test_real_thread_stops_promptly_with_a_delayed_item_and_it_stays_pending(
+    db, fake, superset_settings
+):
+    if db.kind == "sqlite":
+        pytest.skip("SQLite 시험 DB는 연결 하나를 스레드 사이에 공유한다(PostgreSQL 변형에서 확인)")
+    built = build_superset_services(
+        superset_settings,
+        transport=fake.transport,
+        health_interval=0.01,
+        retry_interval=10_000.0,
+        poll_seconds=0.005,
+    )
+    assert built is not None
+    built.sync.bind(db.engine)
+    built.sync._startup_pending = False
+    dataset_id, _, _ = make_dataset(db, fake)
+    built.sync.start()
+    built.sync.request_dataset_sync(dataset_id)
+    time.sleep(0.2)  # 스레드가 지연 항목을 보고도 처리하지 않는 것을 확인할 시간
+    started = time.monotonic()
+    built.stop()
+    assert time.monotonic() - started < 2.0  # 지연 때문에 종료가 막히지 않는다
+    assert row(db, dataset_id)["sync_status"] == "pending"  # 다음 시작 대조가 처리한다
+    assert fake.count("POST", "/api/v1/dataset/") == 0

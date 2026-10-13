@@ -216,13 +216,18 @@ class FakeSuperset:
             return self._json(
                 {"message": {"resources": {"0": {"type": ["Must be one of: dashboard."]}}}}, 400
             )
-        if resource.get("id") not in self.embedded_uuids:
-            # 훅은 형식을 먼저 본다(대문자도 통과시키지만 우리는 소문자만 보낸다).
-            try:
-                if str(uuid.UUID(str(resource.get("id")))) != resource.get("id"):
-                    return reject
-            except ValueError:
-                return reject
+        # 실제 6.1.0(프로브 P-3): 훅의 형식 검사는 `str(uuid.UUID(v)) == v.lower()`라 **대문자도 통과**하고
+        # Superset 기본 검사의 임베드 조회도 대소문자를 가리지 않는다(토큰의 resource id는 보낸 그대로).
+        resource_id = resource.get("id")
+        try:
+            well_formed = isinstance(resource_id, str) and (
+                str(uuid.UUID(resource_id)) == resource_id.lower()
+            )
+        except ValueError:
+            well_formed = False
+        if not well_formed:
+            return reject
+        if resource_id.lower() not in {u.lower() for u in self.embedded_uuids}:
             return self._json({"message": "EmbeddedDashboard not found."}, 400)
         if not isinstance(user, dict) or not user.get("username"):
             return reject

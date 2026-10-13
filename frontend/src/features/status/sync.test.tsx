@@ -67,6 +67,12 @@ describe("S9 Superset 동기 구역", () => {
       ["[영업] 데이터셋3", "등록 실패", "", "SUPERSET_UNAVAILABLE: 연결 실패"],
       ["[영업] 데이터셋4", "등록됨", "2026-10-12 09:30", ""],
     ]);
+    // 줄바꿈 방지 CSS가 걸리는 훅(표는 가로 스크롤 영역 안, 이름·사유 칸만 줄바꿈 허용)
+    const table = sync.getByRole("table", { name: "Superset 동기 목록" });
+    expect(table.classList.contains("sync-table")).toBe(true);
+    expect(table.closest(".table-scroll")).not.toBeNull();
+    expect(rows[2].querySelector("td.sync-error")?.textContent).toBe("SUPERSET_UNAVAILABLE: 연결 실패");
+    expect(rows[2].querySelector("td.sync-name")).not.toBeNull();
     expect(within(rows[2]).getByRole("link", { name: "[영업] 데이터셋3" }).getAttribute("href")).toBe(`${BASE}/datasets/3`);
     // 다시 동기 버튼은 등록되지 않은 항목에만 있다.
     expect(within(rows[0]).queryByRole("button")).toBeNull();

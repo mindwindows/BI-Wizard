@@ -45,7 +45,7 @@ export function DashboardsPage() {
   const truncated = (loaded?.list?.total ?? 0) > (loaded?.list?.items.length ?? 0);
 
   return (
-    <section data-testid="screen-S7" className="console">
+    <section data-testid="screen-S7" className="console dashboards-page">
       <div className="screen-head">
         <h1>S7 대시보드</h1>
         {superset ? (

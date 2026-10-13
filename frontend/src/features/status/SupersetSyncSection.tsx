@@ -154,7 +154,8 @@ export function SupersetSyncSection() {
               {items.length === 0 ? "등록할 데이터셋이 없습니다." : "이 상태의 데이터셋이 없습니다."}
             </p>
           ) : (
-            <table aria-label="Superset 동기 목록" className="list-table">
+            <div className="table-scroll" data-testid="sync-table-scroll">
+            <table aria-label="Superset 동기 목록" className="list-table sync-table">
               <thead>
                 <tr>
                   <th scope="col">데이터셋 (Superset에서의 이름)</th>
@@ -169,14 +170,14 @@ export function SupersetSyncSection() {
               <tbody>
                 {pageItems.map((item) => (
                   <tr key={item.dataset_id}>
-                    <td>
+                    <td className="sync-name">
                       <Link to={`/datasets/${item.dataset_id}`}>{item.superset_name || `데이터셋 ${item.dataset_id}`}</Link>
                     </td>
                     <td>
                       <SyncBadge status={item.sync_status} />
                     </td>
                     <td>{formatMinute(item.synced_at)}</td>
-                    <td>{item.last_error ?? ""}</td>
+                    <td className="sync-error">{item.last_error ?? ""}</td>
                     <td>
                       {item.sync_status !== "registered" ? (
                         <button type="button" disabled={requesting} onClick={() => void request([item.dataset_id])}>
@@ -188,6 +189,7 @@ export function SupersetSyncSection() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
           {visible.length > PAGE_SIZE ? (
             <div className="pager">

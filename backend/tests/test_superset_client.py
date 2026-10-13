@@ -6,9 +6,10 @@ import httpx
 import pytest
 
 from app.superset.client import DatasetApi, rison_string
+from app.superset.constants import LOGIN_RETRY_BACKOFF_SECONDS
 from app.superset.errors import SupersetRejected, SupersetUnavailable
 from tests.fake_superset import new_fake
-from tests.superset_helpers import ISSUER, SERVICE, make_api, make_session
+from tests.superset_helpers import ISSUER, SERVICE, Clock, make_api, make_session
 
 DATASET_PATH = "/api/v1/dataset/related/database"
 
@@ -299,3 +300,139 @@ def test_first_write_after_the_token_expired_refreshes_before_fetching_csrf():
     )
     assert new_id == 1
     assert fake.refreshes == 1 and fake.logins == 1
+
+
+# --- 로그인 거부 뒤 재시도 백오프 ----
+
+
+def test_login_rejection_backs_off_then_retries_once_after_the_window():
+    fake = new_fake()
+    clock = Clock()
+    session = make_session(fake, ("bi_service", "wrong-password-XYZ"), clock=clock)
+    for _ in range(12):  # 사용자 요청이 몰려도 로그인 시도는 한 번뿐이다
+        with pytest.raises(SupersetRejected) as error:
+            session.request("GET", DATASET_PATH)
+        assert error.value.code == "AUTH_FAILED"
+    assert fake.count("POST", "/api/v1/security/login") == 1
+    clock.advance(LOGIN_RETRY_BACKOFF_SECONDS - 1)
+    with pytest.raises(SupersetRejected):
+        session.request("GET", DATASET_PATH)
+    assert fake.count("POST", "/api/v1/security/login") == 1
+    clock.advance(1)  # 창이 끝났다: 한 번 더 시도하고 다시 막는다
+    with pytest.raises(SupersetRejected):
+        session.request("GET", DATASET_PATH)
+    with pytest.raises(SupersetRejected):
+        session.request("GET", DATASET_PATH)
+    assert fake.count("POST", "/api/v1/security/login") == 2
+
+
+def test_login_succeeds_after_the_account_is_fixed_and_the_window_passes():
+    fake = new_fake()
+    clock = Clock()
+    session = make_session(fake, ("bi_service", "new-password-1"), clock=clock)
+    with pytest.raises(SupersetRejected):
+        session.request("GET", DATASET_PATH)
+    fake.add_account("bi_service", "new-password-1", "service")  # 관리자가 계정을 고쳤다
+    with pytest.raises(SupersetRejected):  # 창 안에서는 아직 막혀 있다
+        session.request("GET", DATASET_PATH)
+    clock.advance(LOGIN_RETRY_BACKOFF_SECONDS)
+    assert session.request("GET", DATASET_PATH).status_code == 200
+    session.request("GET", DATASET_PATH)
+    assert fake.count("POST", "/api/v1/security/login") == 2  # 실패 1 + 성공 1, 이후 재사용
+
+
+def test_connection_failures_do_not_start_the_login_backoff():
+    fake = new_fake()
+    clock = Clock()
+    session = make_session(fake, clock=clock)
+    fake.up = False
+    for _ in range(3):
+        with pytest.raises(SupersetUnavailable):
+            session.request("GET", DATASET_PATH)
+    fake.up = True
+    assert session.request("GET", DATASET_PATH).status_code == 200  # 기다릴 필요가 없다
+
+
+# --- httpx.HTTPError가 아닌 예외도 클래스 이름만 남기고 사유 코드로 바뀐다 ----
+
+SECRET_DETAIL = "secret-detail http://superset:8088/bi-wizard/superset/api/v1/x?token=abc"
+
+
+def _raise(error: BaseException):
+    def respond(call):
+        raise error
+
+    return respond
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.InvalidURL(SECRET_DETAIL),
+        httpx.CookieConflict(SECRET_DETAIL),
+        httpx.StreamClosed(),
+        RuntimeError(SECRET_DETAIL),
+    ],
+    ids=lambda e: type(e).__name__,
+)
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/security/login", "/api/v1/security/csrf_token/", DATASET_PATH],
+    ids=["login", "csrf", "request"],
+)
+def test_non_http_exceptions_become_a_reason_code_without_url_message_or_traceback(
+    path, error, caplog
+):
+    caplog.set_level(logging.DEBUG)
+    fake = new_fake()
+    session = make_session(fake)
+    if path != "/api/v1/security/login":
+        session.request("GET", DATASET_PATH)  # 로그인은 미리 해 둔다
+    fake.respond_once(lambda c: c.path == path, _raise(error))
+    with pytest.raises(SupersetRejected) as raised:
+        if path == "/api/v1/security/csrf_token/":
+            session.request("POST", "/api/v1/dataset/", json={}, csrf=True)
+        else:
+            session.request("GET", DATASET_PATH)
+    assert raised.value.code == "INTERNAL"
+    assert raised.value.__cause__ is None and raised.value.__suppress_context__ is True
+    text = "\n".join(f"{r.getMessage()} {r.exc_text or ''}" for r in caplog.records)
+    assert type(error).__name__ in text  # 클래스 이름만 남는다
+    for leaked in ("secret-detail", "superset:8088", "token=abc", "http"):
+        assert leaked not in text
+    assert all(r.exc_info is None for r in caplog.records)  # 트레이스백 없음
+
+
+def test_non_http_exception_in_health_is_just_not_ready(caplog):
+    caplog.set_level(logging.DEBUG)
+    fake = new_fake()
+    session = make_session(fake)
+    fake.respond_once(lambda c: c.path == "/health", _raise(httpx.InvalidURL(SECRET_DETAIL)))
+    assert session.health() is False
+    text = "\n".join(f"{r.getMessage()} {r.exc_text or ''}" for r in caplog.records)
+    assert "InvalidURL" in text and "secret-detail" not in text
+    assert all(r.exc_info is None for r in caplog.records)
+    assert session.health() is True
+
+
+def test_fake_superset_accepts_uppercase_embedded_uuid_like_the_real_hook():
+    """프로브 P-3: 실제 6.1.0은 대문자 uuid를 통과시키고 토큰에는 보낸 글자가 그대로 들어간다."""
+    fake = new_fake()
+    value = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    fake.embedded_uuids.add(value)
+    session = make_session(fake, ISSUER)
+    for sent, status in (
+        (value, 200),
+        (value.upper(), 200),  # 대문자도 200
+        (value.replace("-", ""), 400),  # 하이픈 없는 형태는 훅이 거부
+        ("{" + value + "}", 400),
+        ("bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", 400),  # 임베드되지 않은 uuid
+    ):
+        response = session.request(
+            "POST",
+            "/api/v1/security/guest_token/",
+            json={"user": {"username": "1"}, "resources": [{"type": "dashboard", "id": sent}], "rls": []},
+            csrf=True,
+            accept=(400,),
+        )
+        assert response.status_code == status, sent

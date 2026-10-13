@@ -6,6 +6,8 @@ import type { Dashboard, TokenProblem } from "./types";
 
 /** iframe이 뜬 뒤 이 시간이 지나도 안이 비어 있으면 임베드 허용 도메인 설정을 의심하는 안내를 보여 준다(ms). */
 export const EMPTY_CHECK_MS = 15_000;
+/** 빈 화면으로 판정한 뒤, 늦게 로딩이 끝났는지 다시 보는 간격(ms). 채워지면 안내를 걷고 iframe을 다시 보인다. */
+export const RECHECK_MS = 3_000;
 
 type Phase = "loading" | "ready" | "failed";
 
@@ -92,9 +94,15 @@ function EmbedInstance({ dashboard, onRetry }: InstanceProps) {
           }
           handle = embedded;
           setPhase("ready");
-          emptyTimer = setTimeout(() => {
-            if (!disposed && looksEmpty(mountPoint.querySelector("iframe"))) setLooksBlank(true);
-          }, EMPTY_CHECK_MS);
+          // 판정은 휴리스틱이다. 처음 한 번은 15초 뒤에 보고, 빈 화면으로 판정한 동안에는 RECHECK_MS마다 다시 봐서
+          // 느린 정상 로딩으로 #app이 채워지면 안내를 걷는다.
+          const check = () => {
+            if (disposed) return;
+            const blank = looksEmpty(mountPoint.querySelector("iframe"));
+            setLooksBlank(blank);
+            if (blank) emptyTimer = setTimeout(check, RECHECK_MS);
+          };
+          emptyTimer = setTimeout(check, EMPTY_CHECK_MS);
         },
         (error: unknown) => {
           if (disposed) return;
@@ -139,9 +147,15 @@ function EmbedInstance({ dashboard, onRetry }: InstanceProps) {
       {phase === "ready" && looksBlank ? (
         <div role="status" className="state state-error" data-testid="embed-blank-hint">
           <p>대시보드 화면이 비어 있습니다. 관리자라면 Superset에서 이 대시보드의 임베드 허용 도메인 설정을 확인하세요. 허용 도메인에는 이 포털의 주소({window.location.origin})가 들어 있어야 합니다.</p>
+          <p className="muted" data-testid="embed-blank-ref">
+            문의 시 대시보드 번호 {dashboardId}를 알려 주세요.
+          </p>
+          <button type="button" onClick={onRetry}>
+            다시 시도
+          </button>
         </div>
       ) : null}
-      <div ref={containerRef} className="embed-frame" hidden={phase === "failed"} />
+      <div ref={containerRef} className="embed-frame" hidden={phase === "failed" || (phase === "ready" && looksBlank)} />
     </div>
   );
 }

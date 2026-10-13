@@ -12,23 +12,31 @@
 - **오류에는 사유 코드만 담는다.** 응답 본문·URL·토큰·비밀번호·쿠키는 로그, 예외 메시지, 호출한 쪽
   어디에도 넘기지 않는다(422 중복 메시지에는 URL 인코딩된 이름이 들어 있다). `httpx`·`httpcore`
   로거는 요청 URL을 INFO로 남기므로 WARNING으로 고정한다.
+- **`httpx.HTTPError`가 아닌 예외**(`InvalidURL`, `CookieConflict` 등)도 이 파일의 호출 경계에서
+  `SupersetRejected("INTERNAL")`로 바꾼다. 로그에는 **예외 클래스 이름만** 남기고(메시지·URL 없음)
+  원인 예외는 붙이지 않는다(`from None`). 전역 500 핸들러까지 올라가지 않는다.
+- 로그인이 거부(`AUTH_FAILED`)되면 `LOGIN_RETRY_BACKOFF_SECONDS` 동안 로그인을 다시 시도하지 않고
+  곧바로 같은 거부를 돌려준다(틀린 비밀번호로 사용자 요청마다 로그인을 퍼붓지 않는다).
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Collection
+import time
+from collections.abc import Callable, Collection
 from typing import Any
 
 import httpx
 from pydantic import SecretStr
 
-from app.superset.constants import DATABASE_NAME, HEALTH_TIMEOUT
+from app.superset.constants import DATABASE_NAME, HEALTH_TIMEOUT, LOGIN_RETRY_BACKOFF_SECONDS
 from app.superset.errors import SupersetRejected, SupersetUnavailable
 
 for _noisy in ("httpx", "httpcore"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 _API = "/api/v1"
 
@@ -59,7 +67,12 @@ class SupersetSession:
         password: SecretStr,
         timeout: httpx.Timeout,
         transport: httpx.BaseTransport | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        login_backoff: float = LOGIN_RETRY_BACKOFF_SECONDS,
     ) -> None:
+        self._clock = clock
+        self._login_backoff = login_backoff
+        self._login_blocked_until: float | None = None
         self._origin = base_url.rstrip("/")
         self._root = root
         self._username = username
@@ -91,10 +104,33 @@ class SupersetSession:
             return SupersetUnavailable("UNAVAILABLE_CONNECT")
         return SupersetRejected("BAD_RESPONSE")
 
+    @staticmethod
+    def _unexpected(error: Exception) -> SupersetRejected:
+        """`httpx.HTTPError`가 아닌 예외. 클래스 이름만 남기고 사유 코드로 바꾼다."""
+        logger.error("Superset 호출 중 예기치 않은 예외: %s", type(error).__name__)
+        return SupersetRejected("INTERNAL")
+
+    def _exchange(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """HTTP 요청 한 번. 모든 예외를 사유 코드 예외로 바꾼다(원인 예외는 붙이지 않는다)."""
+        try:
+            return self._client.request(method, url, **kwargs)
+        except httpx.HTTPError as error:
+            raise self._wrap(error) from None
+        except Exception as error:
+            raise self._unexpected(error) from None
+
     # --- 로그인·토큰 ---
 
     def _login(self) -> None:
-        """접근/갱신 토큰을 새로 받는다(`_lock` 안에서 부른다)."""
+        """접근/갱신 토큰을 새로 받는다(`_lock` 안에서 부른다).
+
+        거부(`AUTH_FAILED`) 뒤 `LOGIN_RETRY_BACKOFF_SECONDS` 동안은 Superset을 부르지 않고 바로 같은
+        거부를 낸다.
+        """
+        if self._login_blocked_until is not None:
+            if self._clock() < self._login_blocked_until:
+                raise SupersetRejected("AUTH_FAILED")
+            self._login_blocked_until = None
         body = {
             "username": self._username,
             "password": self._password.get_secret_value(),
@@ -102,14 +138,13 @@ class SupersetSession:
             "refresh": True,
         }
         try:
-            response = self._client.post(self._url(f"{_API}/security/login"), json=body)
-        except httpx.HTTPError as error:
-            raise self._wrap(error) from None
+            response = self._exchange("POST", self._url(f"{_API}/security/login"), json=body)
         finally:
             body.clear()
         if response.status_code >= 500:
             raise SupersetUnavailable("UNAVAILABLE_5XX")
         if response.status_code != 200:
+            self._login_blocked_until = self._clock() + self._login_backoff
             raise SupersetRejected("AUTH_FAILED")
         data = self._json(response)
         access, refresh = data.get("access_token"), data.get("refresh_token")
@@ -118,6 +153,7 @@ class SupersetSession:
         self._access = access
         self._refresh = refresh if isinstance(refresh, str) and refresh else None
         self._csrf = None
+        self._login_blocked_until = None
 
     def _renew_access(self, used_token: str | None) -> None:
         """401 뒤에 접근 토큰을 갱신한다. 다른 스레드가 이미 갱신했으면 다시 하지 않는다."""
@@ -125,13 +161,11 @@ class SupersetSession:
             if self._access is not None and self._access != used_token:
                 return
             if self._refresh is not None:
-                try:
-                    response = self._client.post(
-                        self._url(f"{_API}/security/refresh"),
-                        headers={"Authorization": f"Bearer {self._refresh}"},
-                    )
-                except httpx.HTTPError as error:
-                    raise self._wrap(error) from None
+                response = self._exchange(
+                    "POST",
+                    self._url(f"{_API}/security/refresh"),
+                    headers={"Authorization": f"Bearer {self._refresh}"},
+                )
                 if response.status_code >= 500:
                     raise SupersetUnavailable("UNAVAILABLE_5XX")
                 if response.status_code == 200:
@@ -158,13 +192,11 @@ class SupersetSession:
             if self._csrf is not None:
                 return self._csrf, access
             for attempt in range(2):
-                try:
-                    response = self._client.get(
-                        self._url(f"{_API}/security/csrf_token/"),
-                        headers={"Authorization": f"Bearer {access}"},
-                    )
-                except httpx.HTTPError as error:
-                    raise self._wrap(error) from None
+                response = self._exchange(
+                    "GET",
+                    self._url(f"{_API}/security/csrf_token/"),
+                    headers={"Authorization": f"Bearer {access}"},
+                )
                 if response.status_code >= 500:
                     raise SupersetUnavailable("UNAVAILABLE_5XX")
                 if response.status_code == 401 and attempt == 0:
@@ -189,7 +221,7 @@ class SupersetSession:
     def _json(response: httpx.Response) -> dict[str, Any]:
         try:
             data = response.json()
-        except ValueError:
+        except Exception:  # JSON이 아니거나 본문을 읽을 수 없다(원인 예외는 붙이지 않는다)
             raise SupersetRejected("BAD_RESPONSE") from None
         if not isinstance(data, dict):
             raise SupersetRejected("BAD_RESPONSE")
@@ -223,6 +255,8 @@ class SupersetSession:
                 raise SupersetUnavailable("UNAVAILABLE_CONNECT") from None
             except httpx.HTTPError as error:
                 raise self._wrap(error) from None
+            except Exception as error:
+                raise self._unexpected(error) from None
             return response, access
         raise SupersetUnavailable("UNAVAILABLE_CONNECT")  # pragma: no cover
 
@@ -270,6 +304,9 @@ class SupersetSession:
         try:
             response = self._client.get(self._url("/health"), timeout=HEALTH_TIMEOUT)
         except httpx.HTTPError:
+            return False
+        except Exception as error:
+            self._unexpected(error)  # 클래스 이름만 기록한다
             return False
         return response.status_code == 200
 

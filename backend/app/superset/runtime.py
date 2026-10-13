@@ -80,6 +80,7 @@ def build_superset_services(
         password=settings.superset_service_password,
         timeout=SERVICE_TIMEOUT,
         transport=transport,
+        clock=clock,
     )
     issuer_session = SupersetSession(
         root=root,
@@ -88,6 +89,7 @@ def build_superset_services(
         password=settings.superset_guest_issuer_password,
         timeout=ISSUER_TIMEOUT,
         transport=transport,
+        clock=clock,
     )
     sync = SupersetDatasetSync(
         session=service_session,

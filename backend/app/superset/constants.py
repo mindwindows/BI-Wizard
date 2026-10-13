@@ -37,6 +37,17 @@ ISSUER_MAX_CONCURRENT = 4
 BREAKER_FAILURE_THRESHOLD = 3
 BREAKER_COOLDOWN_SECONDS = 30.0
 
+# 로그인 거부(`AUTH_FAILED`) 뒤 재로그인을 막는 시간(초). 이 시간 안의 호출은 Superset을 부르지 않고
+# 곧바로 같은 거부(`AUTH_FAILED`, E6은 502)로 답한다. 비밀번호가 틀린 계정으로 사용자 요청마다
+# 로그인 시도를 퍼붓는 일을 막는다(프로세스를 다시 띄우면 곧바로 다시 시도한다).
+LOGIN_RETRY_BACKOFF_SECONDS = 30.0
+
+# 동기화 디바운스(초): 같은 데이터셋의 동기화 요청은 첫 요청 뒤 이 시간 동안 모여 한 번만 실행된다
+# (창은 연장하지 않는다). Superset의 `refresh`와 포털 뷰 DDL이 같은 뷰를 잠그다 교착하는 일을
+# 줄인다.
+# 시작 대조·연결 문제 자동 재시도는 이 지연을 받지 않는다.
+SYNC_DEBOUNCE_SECONDS = 3.0
+
 # Superset 준비 확인(`{root}/health`)과 복구 재시도 간격.
 STARTUP_HEALTH_INTERVAL_SECONDS = 10.0
 STARTUP_HEALTH_MAX_WAIT_SECONDS = 600.0

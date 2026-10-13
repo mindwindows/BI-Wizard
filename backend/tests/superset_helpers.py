@@ -23,8 +23,12 @@ SUPERSET_ENV = {
 
 
 def make_session(
-    fake: FakeSuperset, account: tuple[str, str] = SERVICE, timeout: float = 5.0
+    fake: FakeSuperset,
+    account: tuple[str, str] = SERVICE,
+    timeout: float = 5.0,
+    clock: Callable[[], float] | None = None,
 ) -> SupersetSession:
+    extra = {} if clock is None else {"clock": clock}
     return SupersetSession(
         root=ROOT,
         base_url=BASE_URL,
@@ -32,6 +36,7 @@ def make_session(
         password=SecretStr(account[1]),
         timeout=httpx.Timeout(timeout),
         transport=fake.transport,
+        **extra,
     )
 
 

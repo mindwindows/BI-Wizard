@@ -7,6 +7,11 @@
 
 - 큐는 같은 데이터셋 번호를 합친다(중복 병합). 요청이 올 때마다 데이터셋별 세대 번호를 올리고,
   처리 도중 세대가 바뀌면 `registered`로 쓰지 않고 `pending`으로 남겨 다시 처리한다.
+- **디바운스:** 요청 경로(`request_*`)로 들어온 항목은 `SYNC_DEBOUNCE_SECONDS` 뒤에야 꺼낼 수 있다
+  (`not_before`). 같은 데이터셋의 반복 요청은 첫 요청의 시각을 유지한 채 합쳐져(창을 연장하지
+  않는다) Superset 호출 한 번이 된다. 데이터셋마다 독립이다. 시작 대조·자동 재시도가 넣는 항목은
+  지연이 없고, 이미 지연 중인 항목이면 가장 이른 시각으로 당겨진다. `drain()`(시험·진단용)은 지연을
+  건너뛴다. 시계는 주입된다.
 - 서킷 브레이커: 연결 실패·시간 초과·5xx가 연속 3회면 30초 동안 Superset을 부르지 않고 대기 항목을
   `failed`(`UNAVAILABLE_*`)로 기록한다.
 - 상태 기계: `pending` → `registered` | `failed`. `failed` 중 연결 문제(`UNAVAILABLE_*`)는
@@ -39,6 +44,7 @@ from app.superset.constants import (
     RETRY_INTERVAL_SECONDS,
     STARTUP_HEALTH_INTERVAL_SECONDS,
     STARTUP_HEALTH_MAX_WAIT_SECONDS,
+    SYNC_DEBOUNCE_SECONDS,
 )
 from app.superset.errors import (
     UNAVAILABLE_CODES,
@@ -68,6 +74,7 @@ class SupersetDatasetSync:
         health_max_wait: float = STARTUP_HEALTH_MAX_WAIT_SECONDS,
         retry_interval: float = RETRY_INTERVAL_SECONDS,
         poll_seconds: float = _POLL_SECONDS,
+        debounce_seconds: float = SYNC_DEBOUNCE_SECONDS,
     ) -> None:
         self._session = session
         self._api = api
@@ -77,9 +84,10 @@ class SupersetDatasetSync:
         self._health_max_wait = health_max_wait
         self._retry_interval = retry_interval
         self._poll = poll_seconds
+        self._debounce = debounce_seconds
         self._engine: Engine | None = None
         self._cond = threading.Condition()
-        self._queue: OrderedDict[int, None] = OrderedDict()
+        self._queue: OrderedDict[int, float] = OrderedDict()  # 데이터셋 번호 -> not_before
         self._generation: dict[int, int] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -115,7 +123,7 @@ class SupersetDatasetSync:
         with self._cond:
             self._generation[dataset_id] = self._generation.get(dataset_id, 0) + 1
         self._mark_pending([dataset_id])
-        self._enqueue([dataset_id])
+        self._enqueue([dataset_id], delay=self._debounce)
 
     def request_team_sync(self, team_id: int) -> None:
         """팀의 모든 가상 데이터셋 이름 갱신을 요청한다(팀 이름 변경 뒤, 05 A4)."""
@@ -128,23 +136,40 @@ class SupersetDatasetSync:
 
     # --- 큐 ---
 
-    def _enqueue(self, dataset_ids: list[int]) -> None:
+    def _enqueue(self, dataset_ids: list[int], *, delay: float = 0.0) -> None:
+        """큐에 넣는다. 이미 있으면 합치되 `not_before`는 더 이른 쪽을 유지한다(창 연장 없음)."""
         with self._cond:
+            not_before = self._clock() + delay
             for dataset_id in dataset_ids:
-                self._queue.setdefault(dataset_id, None)
+                current = self._queue.get(dataset_id)
+                if current is None or not_before < current:
+                    self._queue[dataset_id] = not_before
             self._cond.notify_all()
 
     def pending_ids(self) -> list[int]:
         with self._cond:
             return list(self._queue)
 
-    def _take(self, timeout: float) -> int | None:
+    def _next_ready(self, force: bool) -> int | None:
+        """지금 꺼낼 수 있는 가장 앞의 항목(`force`면 지연 무시). 없으면 None. 잠금 안에서 쓴다."""
+        now = self._clock()
+        for dataset_id, not_before in self._queue.items():
+            if force or not_before <= now:
+                return dataset_id
+        return None
+
+    def _take(self, timeout: float, *, force: bool = False) -> int | None:
         with self._cond:
-            if not self._queue and timeout > 0:
-                self._cond.wait(timeout)
-            if not self._queue:
+            dataset_id = self._next_ready(force)
+            if dataset_id is None and timeout > 0:
+                # 가장 이른 not_before까지만 기다린다(시계가 주입돼도 timeout이 상한이다).
+                wake = min(self._queue.values(), default=None)
+                wait = timeout if wake is None else min(timeout, max(0.0, wake - self._clock()))
+                self._cond.wait(max(wait, 0.001))
+                dataset_id = self._next_ready(force)
+            if dataset_id is None:
                 return None
-            dataset_id, _ = self._queue.popitem(last=False)
+            del self._queue[dataset_id]
             return dataset_id
 
     # --- DB ---
@@ -190,7 +215,8 @@ class SupersetDatasetSync:
                         )
                     if stale:
                         repo.record_superset_id(session, dataset_id, display_name, superset_id)
-                        self._enqueue([dataset_id])
+                        # 처리 중 온 요청이 이미 지연 항목을 넣었다: 그 시각을 유지해 합친다.
+                        self._enqueue([dataset_id], delay=self._debounce)
                     else:
                         repo.mark_registered(session, dataset_id, display_name, superset_id)
                 session.commit()
@@ -199,18 +225,18 @@ class SupersetDatasetSync:
 
     # --- 한 건 처리 ---
 
-    def process_next(self, timeout: float = 0.0) -> bool:
-        """큐에서 하나 꺼내 처리한다. 처리했으면 True."""
-        dataset_id = self._take(timeout)
+    def process_next(self, timeout: float = 0.0, *, force: bool = False) -> bool:
+        """지연이 끝난 항목 하나를 꺼내 처리한다. 처리했으면 True. `force`면 지연을 무시한다."""
+        dataset_id = self._take(timeout, force=force)
         if dataset_id is None:
             return False
         self._process(dataset_id)
         return True
 
     def drain(self) -> int:
-        """큐가 빌 때까지 처리한다(시험·진단용). 처리한 건수를 돌려준다."""
+        """큐가 빌 때까지 처리한다(시험·진단용, 지연을 건너뛴다). 처리한 건수를 돌려준다."""
         count = 0
-        while self.process_next():
+        while self.process_next(force=True):
             count += 1
         return count
 

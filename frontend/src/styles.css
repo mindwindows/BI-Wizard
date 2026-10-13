@@ -105,6 +105,8 @@ td {
 }
 
 .stub-switcher {
+  flex: none;
+  white-space: nowrap;
   padding: 2px 8px;
   border: 1px dashed #f0b429;
   border-radius: 4px;
@@ -114,6 +116,21 @@ td {
 .stub-error,
 .state-error-inline {
   color: #8a1c1c;
+}
+
+/* 개발용 신원 선택 상자: 가장 긴 항목("이름 (login_id) - 관리자")이 잘리지 않게 내용 폭 그대로 둔다. */
+.stub-switcher select {
+  flex: none;
+  width: max-content;
+  max-width: none;
+}
+
+.topbar-right {
+  flex: none;
+}
+
+.who {
+  white-space: nowrap;
 }
 
 .stub-error {
@@ -646,7 +663,14 @@ button.link {
 
 /* ---- 1b·1c 화면 정리 ---- */
 .panel-form {
-  max-width: 560px;
+  max-width: 720px;
+}
+
+/* 한국어 안내·오류 문구가 단어 중간에서 갈라지지 않게 어절 단위로 줄을 바꾼다. */
+.panel-form p,
+.state-error-inline {
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .panel-form input,
@@ -915,16 +939,49 @@ button.link {
   line-height: 1.6;
 }
 
+/*
+ * S7은 화면(뷰포트) 높이에 맞춘다: 헤더·안내를 뺀 나머지를 임베드가 채우고, 안쪽 스크롤은 Superset이 처리한다.
+ * 페이지 자체의 세로 스크롤바가 이중으로 생기지 않도록 이 화면에서만 앱 높이를 100vh로 고정한다.
+ * 안내문을 펼쳐 공간이 모자라면 임베드는 최소 높이를 지키고 본문(.content)이 한 겹으로만 스크롤한다.
+ */
+.app:has(.dashboards-page) {
+  height: 100vh;
+  min-height: 0;
+}
+
+.app:has(.dashboards-page) > .content {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.dashboards-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboards-page > * {
+  flex: none;
+}
+
+.dashboards-page > .dashboards-layout {
+  flex: 1 1 auto;
+}
+
 .dashboards-layout {
   display: flex;
   gap: 16px;
-  align-items: flex-start;
+  align-items: stretch;
   margin-top: 8px;
+  min-height: 0;
 }
 
 .dashboard-list {
   flex: 0 0 260px;
-  max-height: calc(100vh - 220px);
+  min-height: 0;
   overflow: auto;
   border: 1px solid #cbd2d9;
   background: #fff;
@@ -960,6 +1017,9 @@ button.link {
 .dashboard-view {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .dashboard-view h2 {
@@ -968,9 +1028,20 @@ button.link {
 }
 
 /* SDK iframe은 높이 100%로 채우므로 칸의 높이를 명시한다. */
+.embed-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.embed-wrap > .state {
+  flex: none;
+}
+
 .embed-frame {
-  height: calc(100vh - 260px);
-  min-height: 720px;
+  flex: 1 1 auto;
+  min-height: 320px;
   border: 1px solid #cbd2d9;
   background: #fff;
 }
@@ -996,6 +1067,33 @@ button.link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* S9 동기 목록: 배지·버튼·날짜·헤더는 한 줄로 두고, 좁으면 표 영역이 가로로 스크롤한다. */
+.status-grid > * {
+  min-width: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.sync-table th,
+.sync-table td {
+  white-space: nowrap;
+}
+
+.sync-table td.sync-name,
+.sync-table td.sync-error {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  min-width: 200px;
+}
+
+.sync-table .badge,
+.sync-table button {
+  white-space: nowrap;
 }
 
 .status-sync .toolbar {

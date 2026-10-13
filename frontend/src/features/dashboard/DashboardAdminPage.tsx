@@ -126,7 +126,7 @@ export function DashboardAdminPage() {
         <h2>새 대시보드 연결</h2>
         <label>
           이름 (사용자에게 보이는 이름)
-          <input value={name} maxLength={200} onChange={(event) => setName(event.target.value)} aria-invalid={nameWrong !== ""} />
+          <input value={name} maxLength={MAX_NAME} onChange={(event) => setName(event.target.value)} aria-invalid={nameWrong !== ""} />
         </label>
         {nameWrong ? (
           <p className="state-error-inline" role="alert">
@@ -195,7 +195,7 @@ export function DashboardAdminPage() {
                         <input
                           aria-label="새 이름"
                           value={editing.name}
-                          maxLength={200}
+                          maxLength={MAX_NAME}
                           onChange={(event) => setEditing({ id: item.id, name: event.target.value })}
                         />
                         <button

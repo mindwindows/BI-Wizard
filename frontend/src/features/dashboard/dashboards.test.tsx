@@ -142,6 +142,12 @@ describe("S7 대시보드 목록·보기 (E3, E6)", () => {
     expect(text).not.toMatch(/guest|token|RLS|uuid/i);
   });
 
+  it("작성자 안내문: 차트별 숫자 형식 지정 방법(y_axis_format, number_format, column_config, D3 형식, 자릿수 한계)", async () => {
+    open("/dashboards", { "GET /dashboards": () => page(DASHBOARDS) });
+    const text = (await screen.findByTestId("number-format-guide")).textContent ?? "";
+    for (const word of ["y_axis_format", "number_format", "column_config", ",.2f", ",.6~f", "보조 축", "소수 6자리", "약 16자리"]) expect(text).toContain(word);
+  });
+
   it("supersetRoot가 비어 있으면 임베드·링크 없이 안내만 보인다", async () => {
     window.__APP_CONFIG__ = { basePath: BASE, supersetRoot: "" };
     open("/dashboards?d=1", { "GET /dashboards": () => page(DASHBOARDS) });
@@ -193,6 +199,13 @@ describe("S8 대시보드 연결 관리 (E3 include_inactive, E4, E5)", () => {
     expect(help.textContent).toContain(window.location.origin);
     expect(screen.getByTestId("admin-warning").textContent).toBe("운영 주의: Superset에 다른 DB 연결을 추가하지 마세요.");
     expect(await screen.findByTestId("no-dashboards")).toBeTruthy();
+  });
+
+  it("이름 입력 maxLength는 서버 상한 100에 맞춘다(등록 폼과 이름 변경 모두)", async () => {
+    open("/admin/dashboards", ADMIN_HANDLERS({ items: [{ id: 1, name: "a", embedded_uuid: UUID_1, is_active: true }] }), ADMIN_ME);
+    expect((await screen.findByLabelText(/^이름/) as HTMLInputElement).maxLength).toBe(100);
+    fireEvent.click(await screen.findByRole("button", { name: "이름 변경" }));
+    expect((screen.getByLabelText("새 이름") as HTMLInputElement).maxLength).toBe(100);
   });
 
   describe("등록", () => {
