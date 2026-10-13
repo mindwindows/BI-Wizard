@@ -111,6 +111,8 @@ dataset의 **정의 변경 진입점**(04 §5)이 순서대로 한다: `datasets
 - 열 단위 숨김은 Superset에서 불가능하고 방어선은 `bi_readonly` 권한뿐이므로 `bi_data`에 둔 것은 모두 공개다(불변식, 03b 3-1, 03c X-25). 권한 매트릭스 시험은 정상과 부정(위 "없는 권한")을 모두 자동화한다(03b 3-6 BY4).
 
 ## 5. 동시 편집 필드 (03b 3-4, 03c X-24)
+
+- **소속 지정(A8, FU-2a):** `team_members` 한 행을 `FOR NO KEY UPDATE`로 잠근 뒤 INSERT만 하거나 UPDATE만 한다(감사의 `role_from` 정확성 때문). 아래 순서의 다른 잠금과 무관하다(reviewer 지적 반영).
 | 대상 | 방식 | 필드·규칙 |
 | --- | --- | --- |
 | 칸 수정 | 칸 단위 값 비교 갱신 | `UPDATE ds_<id> SET c_a=:새값 WHERE row_id=:id AND c_a IS NOT DISTINCT FROM :이전값`. 바꾸는 칸의 이전 값만 가드(빈 칸은 `IS NOT DISTINCT FROM`). 0행이면 앱이 다시 읽어 원인 구분(칸 충돌 / 행 없음), 이미 같은 값이면 성공. 한 요청에서 여러 칸이면 칸 전체가 가드라 하나라도 충돌하면 전체 취소 |

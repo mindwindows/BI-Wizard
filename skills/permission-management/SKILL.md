@@ -9,7 +9,7 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 관리자가 팀을 만들고, 사용자를 사전 등록하고, 사용자를 팀에 정의 담당자(`definer`) 또는 입력자(`entry`)로 넣고 빼며, 비활성화한다. 모든 사용자는 자기 정보와 소속 팀을 본다. 인증된 모든 사용자는 모든 팀의 데이터를 열람할 수 있고(별도 역할 값 없음), 관리자는 팀 소속 역할이 없으면 데이터셋 정의·입력 권한이 없다(06 §4-1).
 
 ## 2. 사용 조건 / 사전 요구사항
-- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0007`로 데이터셋 표, 수식 표(`formulas`·`formula_deps`), Superset 등록 표, 감사 기록 표(`audit_log`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
+- `local-environment` 통과(`migrate`가 최신 revision까지 적용. 이 Skill의 권한 표는 `0003`이고, 지금 head는 `0007`로 데이터셋 표, 수식 표(`formulas`·`formula_deps`), Superset 등록 표, 감사 기록 표(`audit_log`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
 - 로그인 방식(미결정 8번)이 정해지기 전에는 **인증 스텁**으로만 신원을 만든다. 스텁은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 켜진다(그 밖이면 backend가 시작하지 않는다).
 - 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`. **사용자를 조회하는 중에 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다**(로그아웃과 구분하며 접근은 계속 닫혀 있다. 모든 보호 경로가 같다). 신원 어댑터 자체의 예외는 기존대로 401이다.
 - 최초 관리자는 아래 서버 명령으로 만든다(화면·API로는 만들 수 없다: 관리자가 한 명도 없기 때문).
@@ -157,7 +157,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 - 시작 자가 점검은 정적 표 정의에 `audit_log`가 있어 `0007`이 적용되지 않은 DB에서는 backend가 시작하지 않는다(`migrate`가 끝났는지 확인).
 
 ### 화면 (S10 감사 기록 목록)
-화면은 위 API만 부른다. 비관리자에게는 메뉴 항목이 없고, 주소로 직접 열면 403을 받아 "관리자만 볼 수 있습니다"를 보여 준다. 수정·삭제·내보내기 버튼은 없다.
+화면은 위 API만 부른다. 비관리자에게는 메뉴 항목이 없고, 주소로 직접 열어도 화면이 "관리자만 볼 수 있습니다"만 보여 주고 API를 부르지 않는다(관리자로 알려졌는데 서버가 403을 주는 경우에도 같은 안내). 수정·삭제·내보내기 버튼은 없다.
 
 #### 화면 절차
 ##### 여는 법
