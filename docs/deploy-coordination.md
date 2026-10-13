@@ -74,6 +74,38 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 42 | **접두를 떼는 프록시 뒤의 SPA fallback** | 앞단 프록시가 `APP_BASE_PATH` 접두를 떼고(`APP_PROXY_STRIP_PREFIX=true`) 정적 요청을 넘기면 `/datasets/42` 같은 딥링크가 접두 밖 경로로 온다. frontend nginx는 이 경우 루트 SPA fallback(`/index.html`)으로 응답하도록 바꿨다(03b 17-1 결정 6). 앞단이 접두를 떼는 방식이면 딥링크·새로고침이 동작하는지, 앞단 자체가 별도 fallback을 하는지 확인한다. | 협의 필요 | 배포 협의 시 확인 |
 | 43 | **뷰 DDL 실패 시 DB 서버 로그에 남는 문장** | 수식 열이 있는 데이터셋의 뷰 DDL(`CREATE OR REPLACE VIEW`)이 잠금 시간 초과 등으로 실패하면 PostgreSQL 서버 로그의 `STATEMENT:` 줄에 그 문장이 수식의 글자 상수와 함께 남을 수 있다(앱 로그에는 남지 않음). 비밀값(비밀번호·키·토큰)은 포함되지 않는다. 운영 DB의 `log_min_error_statement` 설정과 로그 보관·접근 범위를 확인한다(우리는 `bi_app` 역할 수준 로그 설정을 바꾸지 않기로 했다, 03b 21-1 결정 3). | 협의 필요 | 운영 설정 준비 시 확인 |
 | 44 | **Superset에 다른 DB 연결을 추가하지 말 것** | 훅의 embedded uuid 등록 대조는 H0(라이브 대조 없음)으로 종결했다(03b 23-1 B). 대신 Superset에 등록된 DB 연결이 `bi_readonly` 하나뿐이어야 하고 `bi_author`가 DB 연결을 추가할 수 없어야 하며, 관리자·서비스 계정 외에 대시보드 임베드 설정 권한을 가진 역할이 없어야 한다. 운영에서 관리자는 다른 DB 연결을 추가하지 않는다(추가하면 `bi_data` 밖 데이터가 입장권으로 노출될 수 있음). | 운영 설정 준비 시 확인 | 협의 필요 |
+| 45 | **PG `max_connections` 대비 전체 연결 수** | 사용자 결정(2026-10-13)으로 backend 연결 풀을 10+5(최대 15)로 올렸다. 운영 PG의 `max_connections`가 아래 합계보다 충분히 큰지 확인한다. 계산 근거와 표는 아래 "45번 상세" | 협의 필요(운영 `max_connections` 확인), QA 실측 칸 비어 있음 | 2026-10-13 표 작성(추정 포함) |
+
+### 45번 상세: PG 전체 연결 수 (2026-10-13)
+
+**근거(확인한 것)**
+- PG 서버 값: `compose.yml`은 `max_connections`를 지정하지 않는다(`postgres -c shared_buffers=256MB`만). `postgres:16.10-bookworm` 임시 인스턴스(`bf1g`)에서 `SHOW max_connections` = **100**, `superuser_reserved_connections` = **3** 이었다. 일반 계정(`bi_app`, `bi_readonly`, `superset_meta`, `bi_owner`)이 쓸 수 있는 연결은 **97개**다. 운영 PG(별도 관리형이면 값이 다를 수 있음)는 운영자가 확인한다.
+- backend: `backend/app/db.py`의 `POOL_SIZE=10`, `POOL_MAX_OVERFLOW=5`(코드 상수, 환경변수 아님). `python -m app` 단일 프로세스(worker 1, `backend/Dockerfile` CMD). 풀은 필요할 때만 연결을 열고 유휴 연결을 유지하므로 최댓값은 15다. `pool_pre_ping`은 같은 연결로 확인한다.
+- Superset 메타 DB(`superset_meta`): 이미지 안 `run-server.sh`가 `gunicorn --workers ${SERVER_WORKER_AMOUNT:-1} --worker-class gthread --threads ${SERVER_THREADS_AMOUNT:-20}`이고, compose가 `SERVER_WORKER_AMOUNT=1`을 주며 `SERVER_THREADS_AMOUNT`는 주지 않는다(기본 20). `superset/superset_config.py`는 `SQLALCHEMY_ENGINE_OPTIONS`를 설정하지 않아 상류 기본값 `{}`(`superset/config.py`)이다. Flask-SQLAlchemy 2.5.1이 풀 옵션을 주지 않으면 SQLAlchemy 1.4.54의 `QueuePool` 기본(`pool_size=5`, `max_overflow=10`)이므로 워커 1개 기준 최대 **15**다(스레드 20개가 한 엔진 풀을 공유, 초과 요청은 풀에서 대기). Redis/Celery가 없어 별도 비동기 워커의 연결은 없다.
+- Superset의 분석 DB(`bi_readonly`): 상류 `superset/models/core.py`의 `_get_sqla_engine(nullpool=True)` 기본이 `poolclass=NullPool`이다. 즉 연결을 풀에 두지 않고 **엔진을 쓰는 동안만 1연결**을 연다. 동시 질의 상한은 요청 스레드 수(20)에 묶인다고 **추정**한다(요청 하나가 분석 DB 연결을 둘 이상 동시에 쥐는 경로는 확인하지 않았다).
+- 일회성 서비스(`db-bootstrap`, `migrate`, `superset-init`)는 `restart: "no"`로 시작 때만 돈다. `migrate`는 Alembic이 `NullPool`(`backend/migrations/env.py`)이라 1연결이다.
+
+| 항목 | 접속 계정 | 최댓값 | 계산 | 근거 구분 | QA 실측(`pg_stat_activity`) |
+| --- | --- | --- | --- | --- | --- |
+| backend 런타임 | `bi_app` | 15 | 풀 10 + 초과 5, worker 1 | 확인(코드) | |
+| 관리 명령(`docker exec`로 수동 실행) | `bi_app` | 1 | CLI 한 번에 1연결 | 추정 | |
+| Superset 메타 DB | `superset_meta` | 15 | gthread 워커 1 × QueuePool(5 + 10), 스레드 20이 공유 | 확인(설정·상류 기본값), 실제 수치는 추정 | |
+| Superset 분석 DB | `bi_readonly` | 20 | NullPool, 동시 요청 스레드 20 × 1연결 | 추정(상한은 스레드 수) | |
+| `db-bootstrap`(시작 때) | 슈퍼유저 | 1 | `psql` 한 세션 | 추정 | |
+| `migrate`(시작 때) | `bi_owner` | 1 | Alembic NullPool | 확인(코드) | |
+| `superset-init`(시작 때) | `superset_meta` 2, `bi_readonly` 1 | 3 | 명령이 순서대로 실행(메타 DB 1~2, 연결 등록·권한 동기화 때 분석 DB 1) | 추정 | |
+| 헬스체크·모니터링 | (`pg_isready`는 인증 전 순간 연결) | 2 | compose `pg_isready`(5초 간격, 순간 1연결) + 운영 모니터링 1. `/api/health/db`는 backend 풀 안이라 중복 계산하지 않는다 | 추정 | |
+| 운영자 수동 `psql` | 임의 | 2 | 점검용 | 추정 | |
+| **합계** | | **60** | 15 + 1 + 15 + 20 + 1 + 1 + 3 + 2 + 2 | | |
+| 사용 가능 연결 | | 97 | 100 - 예약 3 | 확인(`SHOW`) | |
+| **여유** | | **37** | 97 - 60 (약 38%) | | |
+
+해석과 주의
+- 위 합계는 **모든 풀이 동시에 최대**인 이론 상한이다. 일회성 서비스는 시작 때만 돌고 Superset 서비스가 뜨기 전에 끝나므로 실제로 겹치는 정도는 더 작다.
+- 재배포(`up -d`) 중 옛 컨테이너와 새 컨테이너가 잠깐 겹치면 backend 15, Superset 메타 15, 분석 DB 20이 한 번 더 잡혀 이론 상한이 약 110으로 97을 넘는다(실제로는 옛 컨테이너가 먼저 종료되고 풀이 가득 차는 일도 드물어 도달 가능성은 낮다고 **추정**). 롤링 배포(옛것을 종료하기 전에 새것 시작)를 쓰면 운영 PG `max_connections`를 올리거나 풀을 줄여야 한다.
+- backend worker를 2 이상으로 늘리면 `bi_app` 최댓값이 15 × worker 수가 된다(전역 동시 제한·사용자별 제한 같은 메모리 상태도 worker 1을 전제한다).
+- 운영 PG가 다른 시스템과 공유되면 그쪽 연결 수를 더해야 한다. `bi_app` 등 계정에 `CONNECTION LIMIT`은 걸지 않았다.
+- QA가 실측 칸을 채운다: 부하(예: 열 추가 5개 흐름 동시, 차트 여러 개 동시 로딩) 중 `SELECT usename, count(*) FROM pg_stat_activity GROUP BY 1`의 최댓값을 위 표 계정별로 기록하고 추정과 다르면 이 표를 고친다.
 
 ## 이미 확인된 사항
 

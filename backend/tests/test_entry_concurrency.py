@@ -707,11 +707,11 @@ def test_continuous_row_writes_overtake_a_waiting_definition_change(pg, hold_ins
 
 
 def test_slow_paste_bodies_do_not_exhaust_the_connection_pool(pg, make_settings):
-    """권한 검사 뒤 본문을 읽는 동안 DB 연결을 쥐지 않는다(풀 `POOL_SIZE`+`POOL_MAX_OVERFLOW`, 현재 10+5).
+    """권한 검사 뒤 본문을 읽는 동안 DB 연결을 쥐지 않는다(풀은 `POOL_SIZE`+`POOL_MAX_OVERFLOW`).
 
-    청크를 천천히 보내는 붙여넣기 요청을 풀 크기보다 많이(8개) 걸어 둔 채로 `/api/me`와
-    `/api/health/db`가 제때 응답해야 한다. 권한 검사가 연 트랜잭션을 돌려주지 않으면 5개 요청이
-    연결을 모두 쥐어 다른 요청이 풀 대기(기본 30초)에 빠진다.
+    청크를 천천히 보내는 붙여넣기 요청을 풀 최대치보다 많이(최대치 + 3개) 걸어 둔 채로
+    `/api/me`와 `/api/health/db`가 제때 응답해야 한다. 권한 검사가 연 트랜잭션을 돌려주지 않으면
+    풀 최대치 요청이 연결을 모두 쥐어 다른 요청이 풀 대기(기본 30초)에 빠진다.
     """
     import asyncio
     from urllib.parse import quote
@@ -719,12 +719,14 @@ def test_slow_paste_bodies_do_not_exhaust_the_connection_pool(pg, make_settings)
     import httpx
 
     from app.auth.stub import STUB_COOKIE
+    from app.db import POOL_MAX_OVERFLOW, POOL_SIZE
     from app.main import create_app
 
     fx = make(pg)
     settings = make_settings(AUTH_STUB_ENABLED="true", APP_ENV="test")
     app = create_app(settings, engine=pg.engine)
     release = asyncio.Event
+    slow_count = POOL_SIZE + POOL_MAX_OVERFLOW + 3
     cookies = {STUB_COOKIE: quote("entry", safe="")}
 
     async def run() -> None:
@@ -751,14 +753,14 @@ def test_slow_paste_bodies_do_not_exhaust_the_connection_pool(pg, make_settings)
                             headers={"content-type": "application/json"},
                         )
                     )
-                    for _ in range(8)
+                    for _ in range(slow_count)
                 ]
                 try:
                     deadline = asyncio.get_running_loop().time() + 10
-                    while started < 8 and asyncio.get_running_loop().time() < deadline:
+                    while started < slow_count and asyncio.get_running_loop().time() < deadline:
                         await asyncio.sleep(0.05)
                     await asyncio.sleep(0.5)  # 권한 검사를 지나 본문을 기다리는 상태가 되게 한다
-                    assert started == 8
+                    assert started == slow_count
                     for path in ("/api/me", "/api/health/db"):
                         response = await asyncio.wait_for(client.get(path), timeout=5)
                         assert response.status_code == 200, (path, response.text)

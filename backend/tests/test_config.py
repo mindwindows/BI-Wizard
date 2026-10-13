@@ -354,6 +354,6 @@ def test_runtime_engine_pool_sizes_are_pinned_code_constants(make_settings):
     engine = create_db_engine(make_settings(POSTGRES_APP_PASSWORD="app-pw"))
     try:
         assert engine.pool.size() == 10
-        assert engine.pool._max_overflow == 5  # noqa: SLF001
+        assert engine.pool._max_overflow == 5
     finally:
         engine.dispose()

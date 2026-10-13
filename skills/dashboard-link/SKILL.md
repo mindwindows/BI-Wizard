@@ -99,6 +99,7 @@ backend는 Superset을 기다리지 않고 바로 시작한다. 작업 스레드
 
 #### 운영 주의
 - **Superset에 다른 데이터베이스 연결을 추가하지 않는다**(`docs/deploy-coordination.md` 44번). 이 안전 전제 때문에 훅의 포털 등록 번호 대조를 하지 않는다(`docs/decisions/08-superset-embedding.md` §9). 임베드를 켠 대시보드는 포털 등록과 일치시킨다.
+- **로그인 백오프 30초(운영 안내):** 서비스 계정 또는 발급 계정의 Superset 로그인이 거부(`AUTH_FAILED`)되면 backend는 그 뒤 **30초 동안 Superset을 부르지 않고** 같은 사유로 즉시 실패시킨다(동기 상태 `failed`+`AUTH_FAILED`, E6 502 `SUPERSET_REJECTED`). 이 30초 동안은 관리자가 E2로 다시 시도하거나 사용자가 화면을 새로 고쳐도 같은 결과다. 비밀번호(`SUPERSET_SERVICE_PASSWORD`, `SUPERSET_GUEST_ISSUER_PASSWORD`)나 계정을 고친 뒤에는 **30초를 기다린 다음** 다시 시도하거나 backend를 다시 시작(`docker compose restart backend`)한다. 30초는 코드 상수(`backend/app/superset/constants.py`의 `LOGIN_RETRY_BACKOFF_SECONDS`)이며 환경변수·설정 파일로 바꿀 수 없다.
 - Superset에서 관리자가 가상 데이터셋(서비스 계정 소유)을 지우면 다음 동기화 때 새 번호로 다시 만들어지고 기존 차트는 데이터 오류가 된다. 가상 데이터셋 이름·열 표시 이름을 Superset 화면에서 손으로 바꾸지 않는다(다음 동기화가 포털 값으로 되돌린다).
 
 ### AI / curl (스텁 로그인 쿠키 `bi_stub_login`은 `permission-management` 참고)
@@ -179,7 +180,10 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 4. **시작 대기 10분 포기 뒤의 `pending`:** Superset이 10분 안에 준비되지 않으면 시작 대조를 포기하고 주기 재시도(약 1분)만 돈다. 주기 재시도는 연결 문제로 `failed`가 된 데이터셋만 다시 넣으므로, 그 시점까지 요청이 없었던 `pending`(또는 등록 행 없음) 데이터셋은 관리자가 E2를 누르거나 backend를 다시 시작할 때까지 `pending`으로 남는다.
 5. **디바운스 중 종료:** 대기열은 메모리라 3초 지연 중에 backend가 내려가면 그 항목이 사라진다. 상태는 DB에 `pending`으로 남아 있어 다음 시작 대조가 처리한다.
 6. **`registered` 순간 표시(R2):** `_write_result`가 세대를 확인한 뒤 커밋하기 전의 틈에 새 요청이 `pending`을 커밋하면 DB가 잠시 `registered`일 수 있다. 큐에 새 항목이 남아 약 3초 안에 수렴하고, 중간에 종료되면 시작 대조가 잡는다.
-7. **열 추가 동시 폭주 시 503:** 5개 흐름이 동시에 열을 추가하면 연결 풀(당시 `pool_size=5`, `max_overflow=0`) 고갈로 일부 요청이 503(`SERVICE_UNAVAILABLE`)이 되었다(회귀 아님). 사용자 결정(2026-10-13)으로 풀을 10+5(`app/db.py`의 `POOL_SIZE`·`POOL_MAX_OVERFLOW`, 환경변수 아님)로 올렸다. 같은 부하 재측정은 후속 QA다.
+7. **열 추가 동시 폭주 시 503:** 5개 흐름이 동시에 열을 추가하면 연결 풀(당시 `pool_size=5`, `max_overflow=0`) 고갈로 일부 요청이 503(`SERVICE_UNAVAILABLE`)이 되었다(회귀 아님). 사용자 결정(2026-10-13)으로 풀을 10+5(`app/db.py`의 `POOL_SIZE`·`POOL_MAX_OVERFLOW`, 환경변수 아님)로 올렸다. 같은 부하 재측정은 후속 QA다. PG 전체 연결 수 계산은 `docs/deploy-coordination.md` 45번.
+8. **502 안내 문구가 임베드 해제 원인을 구분하지 못한다**(2026-10-13 기록). 구분하려면 오류 코드 추가가 필요하며 후속이다.
+9. **1024px 화면 폭에서 가로 스크롤이 생긴다**(2026-10-13 기록). 대상 해상도는 1920×1080이다.
+10. **개발용 신원 선택 상자 문구가 오른쪽 끝에서 여백이 거의 없다**(2026-10-13 기록).
 
 ### Embedded SDK 설치 기록
 - `frontend/package.json`: `"@superset-ui/embedded-sdk": "0.4.0"` (정확한 고정, `^`·`~` 없음). `package-lock.json` 커밋 대상.
@@ -206,6 +210,13 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
   - `test_permission_matrix.py`: 모든 보호 경로(E1~E6 포함) × 7가지 역할
   - `test_definition_deadlock_pg.py`(실제 PostgreSQL 전용): 뷰 DDL(`CREATE OR REPLACE VIEW`) 중 **진짜 교착**(다른 슈퍼유저 연결이 뷰 잠금을 쥔 채 반대 순서로 `datasets` 행을 기다림)에서 포털 요청이 희생자(40P01)가 되면 503 `DEFINITION_BUSY`, 롤백(정의·열·뷰·해시 이전 상태, 동기화 요청 없음), 같은 요청 재전송이 정상 처리
 - 자동(실제 PostgreSQL): `skills/permission-management/SKILL.md` 8절 절차로 tmpfs 시험 DB를 띄우고 `REQUIRE_PG=1 pytest -m "not slow"`(`pg` 변형 skip 0). `test_static_acl.py`가 `0006` 두 표의 `bi_app` 표·열 권한(DELETE·TRUNCATE·불변 열 거부, 업서트 동작), `bi_readonly` 접근 거부, 제약을 확인한다. 마이그레이션: `python -m migrations.roundtrip`(0006 한 단계 포함)와 `alembic check`.
+- 수동 스모크 스크립트(실제 Superset 필요, CI에서 돌지 않는다): `scripts/manual/superset-guest-list-check.py`가 포털 E6 입장권으로 Superset 목록 API를 부른다. 단정: `GET /api/v1/dashboard/` 200·결과 1개(토큰 대시보드 id), `/chart/` 200·0개, `/dataset/` 403, 입장권 `exp - iat == 300`. 표준 라이브러리만 쓰고 비밀값은 필요 없다(입장권은 E6 응답으로만 얻고 출력·저장하지 않으며 출력은 건수·상태 코드·숫자뿐). 실행(저장소 루트, 스택은 `_workspace/qa/`의 git 제외 더미 env 파일로 띄운다):
+  ```
+  python3 scripts/manual/superset-guest-list-check.py --origin http://127.0.0.1:<프런트 포트> \
+    --base-path /bi-wizard --portal-dashboard <포털 대시보드 번호> --superset-dashboard-id <Superset 숫자 id> \
+    --cookie-name bi_stub_login --user <더미 스텁 사용자> --label strip-true
+  ```
+  `APP_PROXY_STRIP_PREFIX`를 `true`로 띄운 스택에서 한 번, env 파일을 `false`로 바꿔 `up -d`로 다시 띄운 스택(`down -v` 금지)에서 `--label strip-false`로 한 번 더 돌린다. 종료 코드 0 통과, 1 단정 실패, 2 입장권을 받지 못함(전제: 스텁 켜짐·포털 연결 등록·Superset 임베드 켜짐). Superset 업그레이드와 `bi_guest` 역할·훅 변경 뒤에 돌린다. 가짜 서버로 로직만 확인했고(통과·실패 두 경우), 실제 Superset 대상 실행은 이 변경에서 하지 않았다.
 - 수동(Superset이 떠 있는 환경): 데이터셋을 만들고 S9/E1에서 `pending` → `registered`, Superset 화면에서 `[팀] 이름` 데이터셋과 열 표시 이름 확인, `docker compose stop superset` 뒤 데이터셋을 만들면 `failed`(`UNAVAILABLE_CONNECT`)인데 입력 API는 정상이고 `docker compose start superset` 뒤 자동으로 `registered`가 되며 Superset에 중복이 없는지, 임베드를 켠 대시보드를 S8에 등록해 S7에서 보이는지.
 
 - 프런트 자동 시험:
