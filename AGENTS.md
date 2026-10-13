@@ -50,7 +50,7 @@
 - `0006_superset`(FU-1e): 정적 표 `superset_datasets`(데이터셋마다 Superset 동기 상태 한 줄: `superset_dataset_id`, `display_name`, `sync_status` CHECK(`pending`·`registered`·`failed`), `synced_at`, `last_error`)·`superset_dashboards`(포털 `id` ↔ 임베드 `embedded_uuid`, 유일·소문자 정규형 CHECK, `is_active`)와 `bi_app` 명시 GRANT(두 표 모두 SELECT·INSERT와 열 단위 UPDATE: `superset_datasets`는 `superset_dataset_id`·`display_name`·`sync_status`·`synced_at`·`last_error`, `superset_dashboards`는 `name`·`is_active`; `dataset_id`·`id`·`embedded_uuid`·`created_at`은 DB가 변경을 막고 DELETE 없음). `bi_readonly`·Superset에는 공개하지 않는다. `downgrade()`는 두 표를 `DROP`하며 `DROP_APPROVED`에 기록이 있다. backend는 `backend/app/superset/`에서 서비스 계정으로 가상 데이터셋을 등록하고(고정 SQL `SELECT * FROM bi_data.dv_<번호>` 한 가지, `naming.virtual_sql` 한 곳) 발급 전용 계정으로 입장권을 요청한다(`skills/dashboard-link/SKILL.md`). 요청 처리 중에는 Superset을 부르지 않고 단일 작업 스레드가 처리하며, `httpx==0.28.1`(전이 `httpcore`, `certifi` MPL-2.0 이름 예외)은 `skills/local-environment/SKILL.md`에 표로 기록했다.
 
 ## 5. 라이선스
-- 허용형만 쓴다: MIT, BSD, Apache 2.0, PSF, PostgreSQL License. `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스는 금지다. 불분명하면 쓰지 말고 질문한다.
+- 허용형만 쓴다: MIT, BSD, Apache 2.0, PSF, PostgreSQL License. `ag-grid-enterprise`, AGPL, GPL, EUPL, Sustainable Use License, Redis 7.4 이후 라이선스는 금지다. 불분명하면 쓰지 말고 질문한다. 이름 예외 1건: `certifi`(MPL-2.0, `httpx` 필수 전이 의존성)는 수정·재배포하지 않는 조건으로 허용한다(03b 23절).
 - 의존성을 추가하면 PyPI/npm 메타데이터로 라이선스를 확인해 변경 요약에 쓴다. 의존성은 버전을 고정한다(`backend/requirements*.txt`, `frontend/package-lock.json`). 이미지 태그에 `latest`를 쓰지 않는다.
 - LGPL인 `psycopg2`/`psycopg`는 backend에 쓰지 않는다(backend는 pg8000, BSD-3). Superset 이미지(`superset/Dockerfile`)에만 `psycopg2-binary`를 둔다.
 

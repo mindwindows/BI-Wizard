@@ -202,7 +202,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 ##### 시험 한계
 - jsdom에 ClipboardEvent/DataTransfer가 없어 copy 이벤트는 일반 Event에 clipboardData.setData를 붙여 시험했다. 실제 브라우저 클립보드 기록은 Playwright/수동 확인 필요.
 
-- 알려진 현상: 계산 열 숫자 전체에 천 단위 쉼표를 적용하므로 `YEAR([기준월])` 결과가 `2,026`처럼 보인다(사용자 결정 대기, 03b 22-1).
+- 알려진 현상: 계산 열 숫자 전체에 천 단위 쉼표를 적용하므로 `YEAR([기준월])` 결과가 `2,026`처럼 보인다(고치지 않고 알려진 현상으로 둔다, 03b 23-1).
 
 
 ### 화면에 나오는 오류 문구

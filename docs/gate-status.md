@@ -29,7 +29,7 @@
 1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.
 2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
 3. **FU-1 이월 항목(해당 단위에서 구현하고 검증):**
-   - **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.
+   - **(1e에서 H0로 대체: `08-superset-embedding.md` §9 참조, 실측 2 해석은 사용자 확인 대기)** **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.
    - **발급 API 사용자별 429 속도 제한(FU-1e):** 한도 값은 구현 때 제안한다(08 §4, 03b 4-4 Z9).
    - **backend 시작 자가 점검(FU-1a):** 슈퍼유저·`CREATEROLE`·`CREATEDB` 접속 거부와 정적 `MetaData` 연결, `/health` 필드, 스텁 시작 거부(03b 3-6 BY3, `docs/decisions/04-modules.md`).
    - **정적 표 권한 매트릭스 재확인:** 첫 실제 표 revision `0003` 이후 실제 표로 EW-1 매트릭스(03c X-15 기준)를 다시 확인한다.
