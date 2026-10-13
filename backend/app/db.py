@@ -21,6 +21,11 @@ OWNER_DB_USER = "bi_owner"
 
 DbRole = Literal["app", "owner"]
 
+# 연결 풀 크기(코드 상수, 환경변수 아님. 사용자 결정 2026-10-13: 5+0 -> 10+5). 최대 15연결이며
+# 전체 연결 수 계산은 `docs/deploy-coordination.md` 45번 표를 따른다.
+POOL_SIZE = 10
+POOL_MAX_OVERFLOW = 5
+
 
 def _credentials(settings: Settings, role: DbRole) -> tuple[str, SecretStr | None, str]:
     if role == "app":
@@ -55,8 +60,8 @@ def create_db_engine(settings: Settings) -> Engine:
         build_database_url(settings, "app"),
         pool_pre_ping=True,
         hide_parameters=True,  # 오류 메시지·로그에 SQL 파라미터 값(login_id 등)을 넣지 않는다.
-        pool_size=5,
-        max_overflow=0,
+        pool_size=POOL_SIZE,
+        max_overflow=POOL_MAX_OVERFLOW,
         # 수식 글자 상수 완화책 ①(07 §4-3): 세션의 `standard_conforming_strings`를 on으로
         # 고정한다. 서버 설정이 바뀌어도 이 연결의 글자 리터럴 해석이 바뀌지 않는다(시작 자가
         # 점검도 확인한다).

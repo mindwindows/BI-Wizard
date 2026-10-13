@@ -148,6 +148,13 @@ describe("S7 대시보드 목록·보기 (E3, E6)", () => {
     for (const word of ["y_axis_format", "number_format", "column_config", ",.2f", ",.6~f", "보조 축", "소수 6자리", "약 16자리"]) expect(text).toContain(word);
   });
 
+  it("작성자 안내문: 형식 코드 5개가 각각 <code> 한 조각이다", async () => {
+    open("/dashboards", { "GET /dashboards": () => page(DASHBOARDS) });
+    const guide = await screen.findByTestId("number-format-guide");
+    const codes = [...guide.querySelectorAll("code")].map((c) => c.textContent);
+    for (const word of [",.2f", ",.6~f", "y_axis_format", "number_format", "column_config"]) expect(codes).toContain(word);
+  });
+
   it("supersetRoot가 비어 있으면 임베드·링크 없이 안내만 보인다", async () => {
     window.__APP_CONFIG__ = { basePath: BASE, supersetRoot: "" };
     open("/dashboards?d=1", { "GET /dashboards": () => page(DASHBOARDS) });

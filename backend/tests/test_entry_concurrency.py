@@ -707,7 +707,7 @@ def test_continuous_row_writes_overtake_a_waiting_definition_change(pg, hold_ins
 
 
 def test_slow_paste_bodies_do_not_exhaust_the_connection_pool(pg, make_settings):
-    """권한 검사 뒤 본문을 읽는 동안 DB 연결을 쥐지 않는다(풀 `pool_size=5, max_overflow=0`).
+    """권한 검사 뒤 본문을 읽는 동안 DB 연결을 쥐지 않는다(풀 `POOL_SIZE`+`POOL_MAX_OVERFLOW`, 현재 10+5).
 
     청크를 천천히 보내는 붙여넣기 요청을 풀 크기보다 많이(8개) 걸어 둔 채로 `/api/me`와
     `/api/health/db`가 제때 응답해야 한다. 권한 검사가 연 트랜잭션을 돌려주지 않으면 5개 요청이

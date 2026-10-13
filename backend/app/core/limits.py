@@ -1,8 +1,8 @@
 """무거운 읽기의 동시 실행 제한(07 §5).
 
 미리보기(D3)·오류 칸 조회(D7·D8)·계산 열이 있는 행 조회(C1)가 공통으로 쓴다. 전역 동시 상한과
-미리보기의 사용자당 동시 1건을 센다. 연결 풀이 5개(`max_overflow` 0)라 일반 요청용 연결 3개를
-남기려고 전역 상한은 2건이다. 기다리지 않고 바로 429 `PREVIEW_BUSY`로 거절한다. 프로세스 메모리
+미리보기의 사용자당 동시 1건을 센다. 연결 풀은 10개 + 초과 5개(`app/db.py`의 `POOL_SIZE`·`POOL_MAX_OVERFLOW`)다. 전역 상한 2건은
+일반 요청용 연결을 충분히 남기는 보수값이며 상향 여부는 후속이다. 기다리지 않고 바로 429 `PREVIEW_BUSY`로 거절한다. 프로세스 메모리
 값이며 worker 1개 전제다(06 §5).
 """
 
@@ -14,7 +14,7 @@ from contextlib import contextmanager
 
 from app.core.errors import preview_busy
 
-GLOBAL_HEAVY_READ_LIMIT = 2  # 07 §5 [제안]: 풀 5개 중 일반 요청용 3개를 남긴다
+GLOBAL_HEAVY_READ_LIMIT = 2  # 07 §5 [제안]: 풀 10+5 중 일반 요청용 연결을 충분히 남기는 보수값, 상향 여부는 후속
 
 
 class HeavyReadLimiter:

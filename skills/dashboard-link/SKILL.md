@@ -179,7 +179,7 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 4. **시작 대기 10분 포기 뒤의 `pending`:** Superset이 10분 안에 준비되지 않으면 시작 대조를 포기하고 주기 재시도(약 1분)만 돈다. 주기 재시도는 연결 문제로 `failed`가 된 데이터셋만 다시 넣으므로, 그 시점까지 요청이 없었던 `pending`(또는 등록 행 없음) 데이터셋은 관리자가 E2를 누르거나 backend를 다시 시작할 때까지 `pending`으로 남는다.
 5. **디바운스 중 종료:** 대기열은 메모리라 3초 지연 중에 backend가 내려가면 그 항목이 사라진다. 상태는 DB에 `pending`으로 남아 있어 다음 시작 대조가 처리한다.
 6. **`registered` 순간 표시(R2):** `_write_result`가 세대를 확인한 뒤 커밋하기 전의 틈에 새 요청이 `pending`을 커밋하면 DB가 잠시 `registered`일 수 있다. 큐에 새 항목이 남아 약 3초 안에 수렴하고, 중간에 종료되면 시작 대조가 잡는다.
-7. **열 추가 동시 폭주 시 503:** 5개 흐름이 동시에 열을 추가하면 연결 풀(`pool_size=5`, `max_overflow=0`) 고갈로 일부 요청이 503(`SERVICE_UNAVAILABLE`)이 될 수 있다(1e 이미지에서도 재현, 회귀 아님). 풀 크기 변경은 사용자 승인이 필요해 하지 않았다.
+7. **열 추가 동시 폭주 시 503:** 5개 흐름이 동시에 열을 추가하면 연결 풀(당시 `pool_size=5`, `max_overflow=0`) 고갈로 일부 요청이 503(`SERVICE_UNAVAILABLE`)이 되었다(회귀 아님). 사용자 결정(2026-10-13)으로 풀을 10+5(`app/db.py`의 `POOL_SIZE`·`POOL_MAX_OVERFLOW`, 환경변수 아님)로 올렸다. 같은 부하 재측정은 후속 QA다.
 
 ### Embedded SDK 설치 기록
 - `frontend/package.json`: `"@superset-ui/embedded-sdk": "0.4.0"` (정확한 고정, `^`·`~` 없음). `package-lock.json` 커밋 대상.

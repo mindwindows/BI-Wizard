@@ -18,7 +18,7 @@ export function AuthorGuide() {
         <li>일부 화면(필터 설정의 열 선택 등)에서는 내부 번호 이름이 보입니다.</li>
         <li>지표 이름은 만든 시점의 열 표시 이름으로 굳어, 나중에 열 이름을 바꿔도 기존 차트의 이름은 그대로입니다(차트는 깨지지 않습니다).</li>
         <li data-testid="number-format-guide">
-          <strong>숫자를 소수 몇 자리로 보이게 하려면:</strong> 차트마다 지정하는 곳이 다릅니다. 선·막대·혼합 차트는 차트 설정의 <strong>y_axis_format</strong>(혼합 차트는 보조 축도 따로), 큰 숫자 차트도 <strong>y_axis_format</strong>, 원형 차트는 <strong>number_format</strong>, 표 차트는 열 설정(<strong>column_config</strong>)에서 열마다 형식을 정합니다. 형식은 <code>,.2f</code>(쉼표 + 소수 2자리)처럼 쓰고, 소수는 최대 6자리까지(<code>,.6~f</code>는 끝의 0을 뺀 최대 6자리) 지정할 수 있습니다. 지정하지 않은 Superset 기본 표시는 포털 그리드 규칙(소수 6자리, 쉼표)과 다릅니다. 데이터베이스에 저장된 값의 전체 자릿수는 약 16자리에서 끊깁니다.
+          <strong>숫자를 소수 몇 자리로 보이게 하려면:</strong> 차트마다 지정하는 곳이 다릅니다. 선·막대·혼합 차트는 차트 설정의 <code>y_axis_format</code>(혼합 차트는 보조 축도 따로), 큰 숫자 차트도 <code>y_axis_format</code>, 원형 차트는 <code>number_format</code>, 표 차트는 열 설정(<code>column_config</code>)에서 열마다 형식을 정합니다. 형식은 <code>,.2f</code>(쉼표 + 소수 2자리)처럼 쓰고, 소수는 최대 6자리까지(<code>,.6~f</code>는 끝의 0을 뺀 최대 6자리) 지정할 수 있습니다. 지정하지 않은 Superset 기본 표시는 포털 그리드 규칙(소수 6자리, 쉼표)과 다릅니다. 데이터베이스에 저장된 값의 전체 자릿수는 약 16자리에서 끊깁니다.
         </li>
         <li>Superset은 별도 로그인이 필요합니다. 차트를 다 만들었으면 관리자에게 대시보드 연결을 요청하세요.</li>
       </ul>

@@ -66,3 +66,10 @@ describe("S7 임베드 높이", () => {
     expect(rule(".dashboard-list")).not.toContain("100vh");
   });
 });
+
+describe("S7 작성자 안내문 코드 표기", () => {
+  it("코드 조각은 줄 중간에서 갈라지지 않고 문장은 어절 단위로 줄을 바꾼다", () => {
+    expect(rule(".author-guide code")).toContain("white-space: nowrap");
+    expect(rule(".author-guide ul")).toContain("word-break: keep-all");
+  });
+});

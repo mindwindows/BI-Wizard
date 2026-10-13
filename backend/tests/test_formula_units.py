@@ -27,8 +27,9 @@ APP = Path(__file__).resolve().parent.parent / "app"
 # --- 무거운 읽기 제한 (07 §5) ----
 
 
-def test_global_limit_is_two_so_three_pool_connections_stay_free():
-    assert GLOBAL_HEAVY_READ_LIMIT == 2  # 풀 5개(max_overflow 0) 중 일반 요청용 3개를 남긴다
+def test_global_limit_is_two_and_stays_conservative_for_the_larger_pool():
+    # 풀 10+5 중 일반 요청용 연결을 충분히 남기는 보수값(상향 여부는 후속). 값 자체는 바꾸지 않았다.
+    assert GLOBAL_HEAVY_READ_LIMIT == 2
 
 
 def test_limiter_counts_released_slots_even_when_the_work_raises():

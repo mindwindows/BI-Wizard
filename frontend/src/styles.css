@@ -940,6 +940,13 @@ button.link {
   margin: 8px 0 0;
   padding-left: 20px;
   line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 형식 코드(,.2f · y_axis_format 등)는 조각 단위로 줄이 갈라지지 않게 한다. 문장은 어절 단위로 줄을 바꾼다. */
+.author-guide code {
+  white-space: nowrap;
 }
 
 /*
