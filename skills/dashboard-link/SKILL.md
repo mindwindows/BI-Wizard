@@ -73,7 +73,23 @@ backend는 Superset을 기다리지 않고 바로 시작한다. 작업 스레드
 
 ## 5. 실행 방법
 ### 사람(화면)
-화면 절차(S2 동기 상태 열, S7 대시보드 보기, S8 연결 관리, S9 Superset 동기 구역, 오류 문구)는 프런트 단위 문서(`_workspace/fu1e-frontend-skill-notes.md`)를 이 절에 합친다. 관리자가 알아야 할 순서는 다음과 같다.
+#### S7 대시보드 (`/dashboards`, 모든 로그인 사용자)
+1. 상단 메뉴 "대시보드"를 연다. 왼쪽에 연결된(활성) 대시보드 이름 목록이 나온다.
+2. 이름을 누르면 오른쪽에 그 대시보드가 열린다. 선택은 주소 `?d=<포털 번호>`로 기억된다(Superset 번호·입장권은 주소에 없다). 대시보드마다 별도로 마운트한다.
+3. 차트를 만들려면 "차트 만들기 (새 창)"로 Superset을 연다(`supersetRoot`, 새 탭, `rel="noopener noreferrer"`). 별도 로그인이 필요하다.
+4. "차트를 만들려면 (작성자 안내)": 지원 차트 6가지(선, 막대, 표, 큰 숫자(추세 포함), 원형, 혼합(막대+선)), 데이터셋 이름 형식 `[팀] 이름`, 시간 필터 필요, 팀 필터는 team 열, 내부 번호 이름이 보이는 화면이 있음, 지표 이름이 만든 시점 이름으로 굳음.
+5. `supersetRoot`가 비어 있으면 임베드와 링크 없이 "대시보드 서버 주소가 설정되지 않아…" 안내만 나온다.
+
+#### S8 대시보드 연결 관리 (`/admin/dashboards`, 관리자)
+1. Superset에서 대시보드를 열고 임베드를 켠다. 허용 도메인에 이 포털 주소(화면에 `window.location.origin`이 표시됨)를 넣는다.
+2. 임베드를 켜면 나오는 번호(36자)를 복사해 이름과 함께 "연결 등록". 대문자로 붙여넣어도 앞뒤 공백을 지우고 소문자로 바꿔 보낸다. 형식이 틀리면 입력 칸 아래에 바로 안내하고 등록 버튼이 꺼진다.
+3. 목록(해제된 항목 포함)에서 "이름 변경", "연결 해제"(= 입장권 발급 중단, `is_active=false`), "다시 연결". 해제해도 Superset의 임베드는 관리자가 따로 꺼야 한다.
+4. 운영 주의 한 줄: "Superset에 다른 DB 연결을 추가하지 마세요."(H0 종결 조건, 03b 23-1 B).
+
+#### S9 관리자 현황 (`/admin/status`, 관리자) - Superset 동기 구역
+1. 뷰 재생성 구역 옆에 "Superset 동기"가 있다. 전체 건수와 등록됨·등록 대기·등록 실패 건수, 상태 필터, 50개씩 쪽 이동, 목록(데이터셋 링크, 상태 배지, 마지막 등록 시각, 실패 사유).
+2. "다시 동기"(한 개) 또는 "대기·실패 전부 다시 동기"(E2, 202 접수). 접수 뒤 목록을 다시 읽고, 대기 항목이 있으면 5초마다 최대 24회(2분)까지 자동으로 다시 읽은 뒤 멈추고 "지금 다시 읽기"를 안내한다.
+3. S2 데이터셋 목록의 "동기 상태" 열: 등록됨 / 등록 대기 / 등록 실패 / 확인 중 / 확인 못함. 실패 사유는 관리자에게만 툴팁으로 보인다(서버가 관리자에게만 `last_error`를 준다).
 
 #### 대시보드 연결 (관리자)
 1. Superset(`${SUPERSET_APP_ROOT}/`)에서 작성자가 차트와 대시보드를 만든다. 지원 차트는 선, 막대, 표, 큰 숫자(추세 포함), 원형, 혼합(막대+선) 6가지이고 날짜 필터가 적용되려면 차트에 시간 필터가 있어야 한다.
@@ -125,6 +141,45 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 | E4 409 `ALREADY_EXISTS` | 같은 번호가 이미 등록(해제된 항목일 수 있음) | `GET /api/dashboards?include_inactive=true`에서 찾아 E5로 다시 활성화 |
 - 오류 응답과 `last_error`에는 SQL·Superset 응답 본문·URL·토큰·비밀번호가 없다(사유 코드와 고정 한국어 요약뿐). 상세는 backend 로그에도 예외 클래스 이름과 사유 코드만 남는다.
 
+### 화면에 나오는 오류 문구
+| 상황 | 코드 | 화면 문구 |
+| --- | --- | --- |
+| Superset 연결 불가 | 503 `SUPERSET_UNAVAILABLE` | 대시보드 서비스에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요. |
+| Superset 거부 | 502 `SUPERSET_REJECTED` | 대시보드 서비스가 요청을 받아들이지 않았습니다. 관리자에게 문의해 주세요. |
+| 입장권 제한 | 429 `GUEST_TOKEN_RATE_LIMITED` | 요청이 너무 많습니다. 약 N초 뒤에 다시 시도해 주세요.(`Retry-After` 헤더, 없으면 `details.retry_after`) |
+| 로그인 만료 | 401 `UNAUTHENTICATED` | 로그인 정보가 만료되었습니다. 화면을 새로 고쳐 다시 접속해 주세요. |
+| 연결 해제/없음 | 404 `NOT_FOUND` | 이 대시보드는 연결이 해제되었거나 없습니다. 목록을 새로 고쳐 주세요. |
+| 그 밖 | - | 대시보드 접속 허가를 받지 못했습니다. 잠시 뒤 다시 시도해 주세요. |
+| 중복 번호 | 409 `ALREADY_EXISTS` field=embedded_uuid | 이미 연결된 임베드 번호입니다. 목록에서 해제된 항목이 있으면 '다시 연결'을 쓰세요. |
+| 번호 형식 | (화면 검사) / 422 | 임베드 번호는 하이픈이 있는 36자(예: …)여야 합니다. |
+| 권한 없음 | 403 `FORBIDDEN` | 이 작업을 할 권한이 없습니다. |
+- 오류 화면에는 문의 번호(`request_id`)만 덧붙인다. 서버 `message`·응답 본문·입장권은 입장권 오류 화면에 쓰지 않는다.
+
+### 알려진 현상(화면)
+1. **허용 도메인 불일치는 SDK가 감지하지 못한다.** 임베드 페이지가 403이어도 iframe `load`는 오므로 SDK는 성공으로 끝난다. 화면은 iframe이 열린 뒤 15초 안에 `#app`이 비어 있으면(같은 출처라 읽을 수 있을 때만) "임베드 허용 도메인 설정을 확인하세요" 안내를 보인다. 휴리스틱이므로 느린 로딩에서는 늦게 뜨거나 안 뜰 수 있고 다른 출처 배치에서는 판단하지 않는다.
+2. **5분 넘는 열람은 SDK가 입장권을 만료 5초 전(약 295초)에 다시 받아 유지한다.** 갱신이 실패하면 SDK가 10초마다 무한 재시도하고, 화면은 "접속 허가를 갱신하지 못했습니다… 자동으로 다시 시도합니다" 배너를 보인다. 만료 뒤에는 Superset 쪽 영문 "Data error"가 보일 수 있다. 클라이언트 시계가 5분 이상 앞서면 SDK가 5초마다 부를 수 있어(소스 읽기, 미실행) 사용자당 60초 30회 한도에 걸릴 수 있다.
+3. **첫 입장권 요청이 실패하면 SDK는 재시도하지 않고 iframe을 지운 채 거부한다.** 화면은 오류와 "다시 시도" 버튼(새로 마운트)을 보인다.
+4. **SDK는 `embedDashboard`의 Promise가 풀리기 전에 정리하면 `unmount` 핸들이 없어 타이머가 남는다.** 컴포넌트는 Promise가 풀린 뒤 늦게라도 `unmount()`를 부른다(실물 SDK 시험으로 고정). 인스턴스마다 새 마운트 칸을 써서 엄격 모드의 이전 인스턴스 정리가 새 iframe을 지우지 않게 했다.
+5. 엄격 모드(개발)에서 입장권 요청이 두 번 나가지 않도록 `embedDashboard` 시작을 마이크로태스크로 한 번 미룬다.
+6. 입장권은 `fetchGuestToken`의 반환값으로만 SDK에 전달된다. React 상태·ref·전역·저장소·URL·콘솔·오류 메시지에 두지 않는다. iframe 안의 Superset 앱이 입장권을 `X-GuestToken` 요청 헤더로 쓰는 것은 SDK/Superset 동작이다(프로브: URL·저장소에 입장권 0건).
+7. 포털과 Superset이 같은 origin이라 Superset 앱의 `localStorage`(`redux` 등)를 포털과 공유한다(프로브 5-4). 포털은 `localStorage`를 쓰지 않는다.
+8. S9는 E1을 전체(200개씩 이어 읽기)로 받아 상태 필터·건수·쪽 이동을 화면에서 계산한다. 데이터셋이 수천 개를 넘으면(25쪽 상한) 일부만 보인다.
+
+### Embedded SDK 설치 기록
+- `frontend/package.json`: `"@superset-ui/embedded-sdk": "0.4.0"` (정확한 고정, `^`·`~` 없음). `package-lock.json` 커밋 대상.
+- `npm ls` / lock 실제 전이 버전과 `license` 필드:
+
+| 패키지 | 버전 | 라이선스(lock) | 비고 |
+| --- | --- | --- | --- |
+| @superset-ui/embedded-sdk | 0.4.0 | Apache-2.0 | 직접 |
+| @superset-ui/switchboard | 0.20.3 | Apache-2.0 | 전이(SDK가 `^0.20.3` 요구, lock이 0.20.3 고정) |
+| jwt-decode | 4.0.0 | MIT | 전이(SDK가 `^4.0.0` 요구, lock이 4.0.0 고정) |
+
+- 추가된 패키지는 위 3개뿐(`added 3 packages`). MPL·LGPL 없음. peer 요구 없음.
+- 확인: `grep -ci enterprise package-lock.json` = 0, `npm ls ag-grid-enterprise ag-charts-enterprise --all` = (empty), `sh scripts/ci-validate-env.sh` 통과.
+- `npm install` 때 나오는 `EBADENGINE` 경고는 기존 `jsdom@30`·`@asamuzakjp/*`가 Node 22.22.2 이상을 요구하는데 이 세션이 22.22.0이라서 나온다(이번 변경과 무관, 경고만).
+- SDK 소스 확인(`node_modules/@superset-ui/embedded-sdk/lib/index.js`): `localStorage`·`sessionStorage`·`document.cookie`·`fetch`는 0건, `console`은 `debug:true`일 때의 `console.debug` 한 곳뿐(우리는 `debug`를 켜지 않는다). jsdom에는 `iframe.sandbox`가 없어 SDK 실물 시험은 시험 파일 안에서만 보충한다.
+
 ## 8. 검증 방법
 - 자동(DB 없이, `docker build --target test backend`와 같다): `pytest -m "not slow"`. Superset은 가짜 서버(`backend/tests/fake_superset.py`, 프로브 문서의 실제 응답 모양)를 `httpx.MockTransport`로 연결한다. 파일별 내용:
   - `test_superset_client.py`: 로그인 재사용, 401일 때만 갱신·재시도, CSRF 400 재시도와 훅 거부 400 비재시도, 연결 오류 → 사유 코드, 로그에 비밀번호·토큰·URL 없음, 전체 열 `PUT`(일부 열 호출 없음)
@@ -135,6 +190,19 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
   - `test_permission_matrix.py`: 모든 보호 경로(E1~E6 포함) × 7가지 역할
 - 자동(실제 PostgreSQL): `skills/permission-management/SKILL.md` 8절 절차로 tmpfs 시험 DB를 띄우고 `REQUIRE_PG=1 pytest -m "not slow"`(`pg` 변형 skip 0). `test_static_acl.py`가 `0006` 두 표의 `bi_app` 표·열 권한(DELETE·TRUNCATE·불변 열 거부, 업서트 동작), `bi_readonly` 접근 거부, 제약을 확인한다. 마이그레이션: `python -m migrations.roundtrip`(0006 한 단계 포함)와 `alembic check`.
 - 수동(Superset이 떠 있는 환경): 데이터셋을 만들고 S9/E1에서 `pending` → `registered`, Superset 화면에서 `[팀] 이름` 데이터셋과 열 표시 이름 확인, `docker compose stop superset` 뒤 데이터셋을 만들면 `failed`(`UNAVAILABLE_CONNECT`)인데 입력 API는 정상이고 `docker compose start superset` 뒤 자동으로 `registered`가 되며 Superset에 중복이 없는지, 임베드를 켠 대시보드를 S8에 등록해 S7에서 보이는지.
+
+- 프런트 자동 시험:
+  | 파일 | 내용 |
+  | --- | --- |
+  | `features/dashboard/embed.test.tsx` | 임베딩 생애주기(모의 SDK): 호출 인자, 늦은 `unmount`, 엄격 모드, 대시보드 전환, 첫 호출 실패 -> 다시 시도, 429, 갱신 실패 배너, 비어 있는 iframe 안내, 입장권이 저장소·쿠키·URL·콘솔·DOM·이력에 없음 |
+  | `features/dashboard/embed.sdk.test.tsx` | **실물 SDK 0.4.0 + 가짜 타이머**: 약 295초 갱신이 890초까지 유지, 언마운트 뒤 타이머 0, load 전에 정리해도 늦은 `unmount`로 타이머 0, 엄격 모드, 첫 실패 후 재시도 없음, 갱신 실패 10초 재시도와 복구 |
+  | `features/dashboard/guestToken.test.ts` | E6 호출(본문 없음, `no-store`), 오류 객체에 토큰·응답 본문 없음, 분류와 문구 |
+  | `features/dashboard/dashboards.test.tsx` | S7(목록·선택·빈/로딩/오류·429·차트 만들기 링크·안내문), S8(관리자 막기·등록·uuid 검증과 소문자 정규화·409·422·해제·재사용·이름 변경) |
+  | `features/status/sync.test.tsx` | S9 동기 구역(건수·필터·쪽·E2·폴링 시작/종료/상한/정리), S2 동기 상태 열 |
+  | `static-checks.test.ts` | 소스 정적 검사(비밀 이름, `import.meta.env`, 저장소 사용), 패키지 고정 표기, **dist 산출물 검사(빌드 뒤에만 실행, 없으면 건너뜀)** |
+  | `config.test.ts` | `supersetDomain`/`supersetLink`/`hasSuperset` 하위 경로 조립 |
+  - QA 실행 순서: `npm run build` -> `npx vitest run src/static-checks.test.ts`(건너뛴 시험 0인지 확인) -> 전체 `npm test`.
+  - 정적 방어 두 겹: ESLint(`src/features/dashboard/**`에 `no-console`·`no-restricted-globals`·`no-restricted-properties`)와 위 정적 시험.
 
 ## 9. 연관 Skill
 - `dataset-definition`: 데이터셋·열 정의 변경(B2·B4~B6)이 커밋 뒤 `DatasetSyncPort`로 동기화를 요청한다. S2 목록에 동기 상태 열을 붙인다
