@@ -332,3 +332,28 @@ def test_superset_empty_password_is_unset_not_an_error(make_settings, variable):
     secret = getattr(settings, variable.lower())
     assert secret is not None
     assert secret.get_secret_value() == ""
+
+
+def test_runtime_engine_hides_sql_parameters(make_settings):
+    """DB 오류 메시지에 파라미터 값(login_id 등)이 들어가지 않게 엔진이 hide_parameters를 켠다."""
+    from app.db import create_db_engine
+
+    engine = create_db_engine(make_settings(POSTGRES_APP_PASSWORD="app-pw"))
+    try:
+        assert engine.hide_parameters is True
+    finally:
+        engine.dispose()
+
+
+def test_runtime_engine_pool_sizes_are_pinned_code_constants(make_settings):
+    """풀 10 + 초과 5(최대 15연결)는 코드 상수다. 바꾸면 deploy-coordination 45번 표도 고친다."""
+    from app import db
+    from app.db import create_db_engine
+
+    assert (db.POOL_SIZE, db.POOL_MAX_OVERFLOW) == (10, 5)
+    engine = create_db_engine(make_settings(POSTGRES_APP_PASSWORD="app-pw"))
+    try:
+        assert engine.pool.size() == 10
+        assert engine.pool._max_overflow == 5
+    finally:
+        engine.dispose()

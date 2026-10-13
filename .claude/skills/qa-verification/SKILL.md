@@ -110,6 +110,16 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - 변경된 기능의 `skills/<기능>/SKILL.md`에 적힌 실행 명령, API 경로, 실패 확인 방법이 실제 코드와 맞는지 확인한다.
 - 맞지 않으면 "Skill 미갱신"으로 보고한다.
 
+## 최종 검증(main 반영 직전) 규칙 (사용자 결정 2026-10-13)
+- 최종 검증은 **마지막 커밋(해시를 보고에 적는다)** 기준으로 QA가 독립으로 돌린다: 실제 PG 전체 pytest(`REQUIRE_PG=1`, slow 포함, pg 변형 skip 0), 차분 전수, 프런트 전체(vitest·build·빌드 뒤 static-checks), 실제 Superset 스모크(STRIP true·false, guest 목록 한정 스크립트 `scripts/manual/superset-guest-list-check.py` 포함), 비밀값 검사(번들·로그·`ps`·`docker inspect`·브라우저 저장소).
+- **재검증 범위(사용자 결정 2026-10-13):**
+  - **제품 영향 경로**(`backend/`, `frontend/`, `superset/`, nginx 설정, `compose.yml`, `Dockerfile`, 마이그레이션, `backend/bootstrap/`, 설정 파일)가 QA 뒤에 바뀌면 **전체 재검증**을 다시 돌린다.
+  - 그 밖(`scripts/manual/`, `docs/`, 시험 보조 스크립트)만 바뀌면 **범위 재검증**: (1) 검증한 커밋..HEAD의 `git diff --stat`로 제품 영향 경로 변경이 0건임을 증명하고, (2) 바뀐 스크립트를 실제 환경으로 실행하며, (3) ruff와 CI 검증 스크립트를 돌린다. 변경 성격상 필요한 항목(예: 비밀값 조건이 바뀌면 그 검사)은 추가한다.
+- 비밀값 조건(사용자 결정 2026-10-13): 이미지(`docker image inspect`·`docker history`), 컨테이너 Cmd·Args, 로그, `ps`, 프런트 번들, 브라우저 저장소에는 0건이다. **컨테이너 Env는 `.env`와 같은 보호 등급(호스트 Docker 권한자만 접근)으로 허용**한다.
+- 실패가 1건이라도 있으면 PR을 만들지 않고 멈춰 보고한다.
+
+- **커밋 전 자체 점검(사용자 결정 2026-10-13):** 누가 고치든(리드 포함) 커밋 전에 바뀐 `.py` 파일은 `ruff check`와 `ruff format --check`(backend `pyproject.toml` 설정)를, 바뀐 프런트 파일은 lint와 typecheck를 직접 돌린다. 문서 규칙이며 훅·설정 변경은 없다(`scripts/manual/` 같은 CI 밖 스크립트도 포함).
+
 ## 보고 형식
 | 항목 | 결과 | 근거 | 담당 |
 | --- | --- | --- | --- |

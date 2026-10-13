@@ -1,43 +1,48 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-11 작성, 2026-10-12 FU-1 착수 기준으로 갱신)
+## 다음 세션 인계 (2026-10-13 FU-1 완료·main 반영 PR 기준으로 갱신)
 
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
 - 동기화했다면 에이전트·스킬 정의(`.claude/agents`, `.claude/skills`)가 세션 시작 시점의 옛 버전일 수 있다. **새 세션으로 다시 시작하도록 사용자에게 알린다**(이전 세션에서 로컬이 옛 커밋이라 정의 파일이 haiku였던 사례가 있었다).
+- 새 세션이 `harness/setup`을 옛 커밋으로 여는 경우가 반복됐으므로, **새 세션은 `main`으로 시작해 `harness/setup`으로 전환하는 방식을 기본으로 한다**(`git fetch` 뒤 HEAD가 `origin/main` 최신인지, `git merge-base --is-ancestor origin/harness/setup origin/main`과 `git diff origin/harness/setup origin/main`이 비어 있는지 확인하고 `git checkout -B harness/setup origin/harness/setup`).
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
-### 현재 상태
-- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다). 현재 `harness/setup`의 EW-3~EW-8 변경은 아직 `main`에 없다.
-- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절, `04~08` 합계 787줄). **Gate ④**는 대기이며 진입 전 환경 작업(EW-1·3·4·5·6·7·8)이 모두 완료·검증됐다. **FU-1 착수는 새 세션에서, 사용자 승인 뒤에 한다.**
-- **환경 상태:** backend는 `bi_app`, migrate는 `bi_owner`로만 접속(슈퍼유저 접속 없음), db-bootstrap이 매 기동 두 역할의 `NOSUPERUSER NOCREATEDB NOCREATEROLE`을 재차단한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. `superset-init`이 `db-bootstrap`·`migrate` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 실행하고(종료 뒤 `unhealthy` 표시 없음), 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본)·`bi_author_schema`(1)·`bi_guest`(4), `Public` 0개, 계정 `bi_service`·`bi_guest_issuer`, 입장권 검증 훅(거부 5가지)과 `GUEST_TOKEN_JWT_EXP_SECONDS` 300 가드가 있다. `.env.example` 30개(Secret 10개). 인증 스텁은 `AUTH_STUB_ENABLED` 시작 거부 논리만 있고 업무 기능 코드는 없다.
-- **에이전트 모델:** 7개 모두 sonnet, 모델 재판단은 필요 없다(03b 14-1 4번). 호출 시 모델을 바꾸지 않는다.
-- **알려진 현상:** `superset` 컨테이너는 stop 때 약 10초 뒤 exit 137로 종료된다(변경하지 않음, `deploy-coordination.md` 40번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다.
+### 현재 상태 (FU-1 완료)
+- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. FU-1(1a~1e, 1e-f 포함) 전체를 `main`에 반영하는 **새 PR**을 만들었다(병합은 사용자가 한다, PR 번호는 PR 목록 참조). 병합 뒤에는 새 작업마다 `main` 최신에서 `harness/setup`을 다시 만든다(`git fetch origin main && git checkout -B harness/setup origin/main`, 로컬에 미반영 커밋이 없을 때만).
+- **Gate ①~③ 승인**(③은 FU-1 범위). **Gate ④: FU-1(1a 권한 관리, 1b 데이터셋·열 정의, 1c 입력 그리드, 1d 수식 열, 1e Superset 등록·임베딩) 구현·검증 완료.** 결정 기록은 `docs/decisions/03b` 15~28절.
+- **검증 요약:** 전체 검증(마지막 커밋 `96a5974`, QA 독립): 실제 PG 전체 pytest 3310 passed·pg 변형 skip 0, 차분 7,353 수식 불일치 0, 프런트 616 passed, STRIP true·false Superset 스모크, 비밀값 검사, 메모리 약 0.5~0.6GB(8GB 예산 안), 연결 풀 상향 효과(5개 흐름 동시 열 추가 503 0건). 이후 범위 재검증(스크립트·문서만 변경, 제품 영향 경로 변경 0건): PR 본문에 최종 커밋과 증명이 있다.
+- **환경:** backend `bi_app`, migrate `bi_owner`(슈퍼유저 접속 없음), revision 0001~0006, `superset-init`이 역할·권한 적용, 연결 풀 `bi_app` 10+5(코드 상수), 컨테이너 Env는 `.env` 등급으로 허용(`deploy-coordination.md` 46번).
+- **에이전트 모델:** 7개 모두 sonnet, 호출 시 모델을 바꾸지 않는다.
 
-### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. **AP-15 의존성의 버전·라이선스를 확인해 사용자 승인을 요청한다(FU-1 착수의 첫 일, 승인 전에는 설치·도입하지 않는다):** backend `lark`, 프런트 라우터, AG Grid Community, Superset Embedded SDK(`@superset-ui/embedded-sdk`). 각각 버전, 라이선스(운영 런타임은 허용형 MIT·BSD·Apache·PSF만, GPL·AGPL·EUPL·비오픈소스·`ag-grid-enterprise` 금지), 사용 위치, 대안을 표로 올리고 멈춘다. `httpx`는 승인됐고(03b 3-3) 운영 의존성 승격은 FU-1e에서 한다. 근거 표는 `docs/decisions/04-modules.md` §9-1(AP-15)·`07` §10·`08` §7.
-2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
-3. **FU-1 이월 항목(해당 단위에서 구현하고 검증):**
-   - **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.
-   - **발급 API 사용자별 429 속도 제한(FU-1e):** 한도 값은 구현 때 제안한다(08 §4, 03b 4-4 Z9).
-   - **backend 시작 자가 점검(FU-1a):** 슈퍼유저·`CREATEROLE`·`CREATEDB` 접속 거부와 정적 `MetaData` 연결, `/health` 필드, 스텁 시작 거부(03b 3-6 BY3, `docs/decisions/04-modules.md`).
-   - **정적 표 권한 매트릭스 재확인:** 첫 실제 표 revision `0003` 이후 실제 표로 EW-1 매트릭스(03c X-15 기준)를 다시 확인한다.
-   - 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인).
-4. **FU-1 합격 기준의 위치:** 개요는 `docs/decisions/04-modules.md` §8, 상세는 `docs/decisions/08-superset-embedding.md` §6(P1~P5: 서비스 계정 권한, guest 부정 시험, 훅·입장권, 6가지 차트 임베딩, Superset 불가 시 동작)과 `docs/decisions/07-formula-engine.md` §6(미리보기와 뷰 결과 불일치 0건)이다. 공통 완료 기준은 `feature-unit` 스킬이다.
-5. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위(FU-7)에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
-6. **main 반영:** 작업 단위가 끝나 `main` 반영이 필요해지면 새 PR을 요청받아 만든다(PR #2·#3은 merge 완료).
+### 새 세션 시작 방법
+1. `git fetch origin` 뒤 `main` 병합 여부를 확인한다. PR이 병합됐으면 `main` 최신에서 `harness/setup`을 새로 만든다. 병합 전이면 `harness/setup`을 그대로 쓴다.
+2. `CLAUDE.md` → `docs/project-brief.md` → 이 파일 → `docs/decisions/03b`(15~28절) → `04~08` → `AGENTS.md`, `skills/local-environment/SKILL.md`를 읽는다.
+3. 에이전트·스킬 정의(`.claude/`)는 세션 시작 시점 버전이 적용되므로 최신 커밋에서 새 세션을 연다.
+4. 새 환경변수·새 의존성·기준과 다른 설정·권한 확대·에이전트 모델 변경은 적용 전 사용자 승인을 받는다. 최종 검증·재검증 규칙은 `.claude/skills/qa-verification`(범위 재검증 포함), 커밋 전 자체 점검(`ruff`·lint·typecheck)은 `.claude/skills/bi-wizard-dev`.
+
+### 남은 결정·후속 (사용자)
+- **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md`). 정해질 때까지 스텁 신원, 운영 어댑터는 후속 단위에서 교체, 방식별 새 환경변수는 따로 승인.
+- **Superset 로고 이중 접두:** 상류 6.1.0 결함, 새 설정 없이 알려진 문제로 둔다(`deploy-coordination.md` 13번). 우회(`THEME_*.brandLogoUrl`)는 새 설정이라 승인 필요.
+- **후속 보류:** 502 안내 문구가 임베드 해제 원인을 구분하지 못함, 임베드 안 영어 문구·월 이름(Superset 언어·D3 로캘 설정, 승인 필요), 비밀값 파일 전달 강화(`*_FILE`, 새 변수 승인 필요), 저장 지표 `d3format`↔`decimals`, `listDashboards` 200개 초과 잘림, S9 순차 읽기, guest 목록 API 스모크의 CI 편입, 20만 행 부하 메모리, BAT 실행 검증·HTTPS·다중 워커·한글 IME·Superset 한국어는 미시험.
+- **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`deploy-coordination.md` 6번).
+- **운영 협의:** `docs/deploy-coordination.md`(1~46번) — 특히 운영 DB 슈퍼유저(29번), PG `max_connections`(45번), 컨테이너 Env 등급(46번).
+
+### 후속 단위 순서 (제안, 사용자 지시 후 시작)
+`docs/decisions/04-modules.md` 끝의 후속 기능 단위 목록(FU-2 이후)과 §7을 따른다. 엑셀 가져오기(FU-7)는 EW-2(업로드 상한 `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)를 먼저 요청한다. 한 번에 한 단위만 진행하고 단위마다 구현→테스트→제품 Skill→QA→reviewer→사용자 승인 순서를 지킨다.
 
 ### 미결 항목
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
 - **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`docs/deploy-coordination.md` 6번 확인 후). BAT는 `docs/windows-bat-verification.md` 기준으로 사용자 PC 검증을 요청한다(EW-1 이후 Secret 8개·`AUTH_STUB_ENABLED` 추가 반영됨).
 - **운영 DB 슈퍼유저 문제:** db-bootstrap은 슈퍼유저 접속이 필요하다(역할·스키마·메타 DB 생성). 관리형 운영 DB에서 줄 수 없으면 DBA가 한 번 수행하는 대안이 필요하다(`deploy-coordination.md` 29번). 운영 DB `log_statement`가 `ddl`/`all`이면 비밀번호가 서버 로그에 남을 수 있어 확인한다. 35번(첫 관리자 생성 명령을 운영 서버에서 실행 가능한지), 36번(`AUTH_STUB_ENABLED` 운영 설정)도 운영자 협의 항목이다.
-- **미검증 항목:** `FOR NO KEY UPDATE`·`FOR SHARE` 잠금과 굶음 시나리오(1b·1c 첫 시험), `ON CONFLICT DO NOTHING RETURNING`과 pg8000 `rowcount`, 실제 엑셀 클립보드 형식, 일부 차트 유형의 `bi_guest` 표시(P5: 6가지를 FU-1e에서 직접 시험), `superset-init` 구현 방법(A-22·A-26), Superset 경유 `statement_timeout`, 비밀번호 변경 후 Superset 연결 유지, 정적 표 권한 매트릭스(첫 실제 표 revision `0003` 이후 실제 표로 재확인).
+- **미검증 항목:** `FOR NO KEY UPDATE`·`FOR SHARE` 잠금과 굶음 시나리오(1b에서 시험함: 정의 변경이 `DEFINITION_BUSY`로 한도 안에 끝남, 굶음 관찰값은 1c에서 행 쓰기와 함께 재확인), `ON CONFLICT DO NOTHING RETURNING`과 pg8000 `rowcount`, 실제 엑셀 클립보드 형식, 일부 차트 유형의 `bi_guest` 표시(P5: 6가지를 FU-1e에서 직접 시험), `superset-init` 구현 방법(A-22·A-26), Superset 경유 `statement_timeout`, 비밀번호 변경 후 Superset 연결 유지, 정적 표 권한 매트릭스(첫 실제 표 revision `0003` 이후 실제 표로 재확인).
 - **04~08 3차 검토 미실시:** 2차 검토 반영분은 architect 자체 정합성 확인만 했다. `skills/admin-cleanup/SKILL.md`는 설계 문서 기준 초안이며 FU-1b·1d 구현 뒤 실제 DB로 검증해야 한다.
 - 합성 샘플(`docs/samples/`) 기준 수치다. 실제 팀 데이터로 검증한 것이 아니다.
 
 ### 주의 사항
 - **에이전트 모델:** 정의 파일(`.claude/agents/*.md`)대로 쓴다. 현재 7개 모두 sonnet이며 호출 시 `model`을 바꾸지 않는다. 이전 세션에서는 하네스가 정의를 캐시해 env-engineer가 haiku로 실행돼 중단하고 정의와 같은 `sonnet`을 명시해 다시 호출했다. 새 세션에서는 정의가 그대로 적용돼야 하며 호출 정보에 실제 모델이 나온다. 다르면 사용자에게 알린다.
 - **사전 승인 규칙(2026-10-11 다듬음):** 사전 승인 필수 = 새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경. 적용 후 보고 허용 = 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경이며, 보고서에 "적용 후 보고 항목" 목록을 따로 표시한다. 상세는 `CLAUDE.md`, `.claude/skills/bi-wizard-dev/SKILL.md`.
+- **최종 검증·재검증 규칙(2026-10-13):** 마지막 커밋 기준 QA 독립 전체 검증. 제품 영향 경로(`backend/`, `frontend/`, `superset/`, nginx, compose, Dockerfile, 마이그레이션, bootstrap, 설정 파일)가 QA 뒤 바뀌면 전체 재검증, `scripts/manual/`·`docs/`·시험 보조 스크립트만 바뀌면 범위 재검증(diff로 제품 영향 경로 0건 증명, 바뀐 스크립트 실제 실행, ruff·CI 검증). 실패 1건이라도 있으면 PR 없이 멈춤. 컨테이너 Env는 `.env` 등급으로 허용(비밀값은 이미지·Cmd·Args·로그·`ps`·번들·브라우저 저장소 0건). 상세 `.claude/skills/qa-verification`, `docs/decisions/03b` 28절.
 - **파괴적 명령 금지:** `.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`, `docker volume prune`, 일괄 삭제. 시험 정리는 이름을 명시한 `docker rm`/`docker volume rm`만 쓰고, 볼륨 `bi-wizard_postgres_data`와 이미지는 건드리지 않는다. QA는 사용자의 `.env`를 만들거나 바꾸지 않고 `_workspace/qa/`의 임시 env 파일과 전용 compose 프로젝트명을 쓴다. 비밀값은 문서·로그에 쓰지 않는다.
 - **Docker:** 클라우드 세션에서 데몬이 꺼져 있으면 `dockerd`를 백그라운드로 직접 띄운다(`service docker start`는 ulimit 오류가 난 적 있음). BAT는 작성만 하고 실행 검증은 사용자에게 요청한다.
 - **작업 폴더:** `_workspace/`는 git 제외이고 컨테이너와 함께 사라진다. 필요한 실험 기록은 `docs/research/`로 옮겼다(README 참조). 옛 문서가 가리키는 `_workspace/gate3/facts*.md`, `round*-options.md`는 보관하지 않았다. 새 시험은 `_workspace/`에서 하고 남길 것만 docs로 옮긴다.
@@ -307,7 +312,7 @@ Gate ① 원본 대조(`docs/decisions/02-tech-reference.md`)에서 나온 세 �
 - **D2 (동적 객체 분리 방식) 결정:** 데이터 모델과 함께 옵션(S 별도 schema, N 이름 규칙, R 등록 테이블 기반, D 별도 DB)을 비교해 사용자가 결정한다. 읽기 전용 계정(D7)의 동적 객체 `SELECT` 권한 부여 방식, 수식 → 뷰 변환 규칙 변경 시 기존 뷰 재생성 방식도 함께 정한다. 결정 전까지 자동 생성 초안의 `DROP`은 사용자 확인 없이 적용하지 않는다.
 - **`bi_readonly` 권한 설계(QA 발견):** `default_transaction_read_only=on`은 세션에서 `SET`으로 풀 수 있는 안전장치일 뿐 방어선이 아니다. 실제 쓰기를 막는 것은 권한이다. Gate ③에서 `SELECT`를 부여할 때 `CREATE`나 쓰기 권한을 주지 않도록 설계에 명시한다.
 - **왕복 테스트의 실질 범위(EW-1에서 해소: `0002`와 `python -m migrations.roundtrip`이 권한 상태 복원까지 검증):** baseline이 빈 revision이라 현재 왕복 테스트는 `alembic_version` 기록만 검증한다. 첫 실제 객체 revision에서 다시 수행하고 `downgrade()`를 실질 구현한다.
-- **STRIP=true와 SPA 딥링크:** 접두 밖 루트는 정적 자산만 서빙한다. 플랫폼이 접두를 떼고 `/datasets/1` 같은 SPA 라우트를 넘기면 404가 된다. Gate ④에서 라우터를 넣을 때 STRIP=true에서만 루트 SPA fallback을 켤지 정한다.
+- **STRIP=true와 SPA 딥링크:** 해결됨(2026-10-12, `docs/decisions/03b` 17-1 결정 6). 하위 경로 설정에서 접두 밖 루트도 SPA fallback(`/index.html`)으로 응답한다(`/api`·`/assets`·`config.js`는 그대로). 접두 밖 임의 경로가 200 HTML이 되는 부작용은 수용했고 앞단 프록시와의 맞춤은 `deploy-coordination.md` 42번.
 - **Embedded guest 역할(구현·검증됨, EW-4·EW-6):** `bi_guest` 4권한(`superset/bi_roles.py`), 6가지 차트 임베딩 정상 표시, `Public` 0개, `Gamma`·`PUBLIC_ROLE_LIKE` 미사용(`bi-review`가 점검). 상세는 "EW-4 결과"와 03b 11절.
 - **가져오기 구현 메모리:** 5MB 샘플 실측에서 openpyxl 일반 모드 265MB, read-only 45MB였다. 가져오기는 read-only 모드나 청크 처리를 쓰고 업로드 상한(5MB 이하 기준)과 동시 처리 수를 함께 정한다.
 - **Alembic `target_metadata` 연결(EW-1에서 해소: `backend/app/db_metadata.py`로 연결됨):** 이전에는 `target_metadata=None`이라 `alembic revision --autogenerate`와 `alembic check`가 동작하지 않았다(D2가 정해지기 전에 `DROP`이 담긴 초안이 생기는 것을 막는 의도적 선택). EW-1에서 정적 모델 `MetaData`와 `include_object` 필터를 연결했다.

@@ -409,3 +409,163 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - **알려진 현상(변경 없음):** `superset` stop은 약 10.4초 걸리고 exit 137, `OOMKilled=false`(14-1 2번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다(지시 범위 밖, 속성 변조 후에도 `t`로 남는다). `bi_readonly`·`superset_meta`도 사람이 속성을 바꾸면 재차단되지 않는다(지시 범위 밖). `superset_meta`는 PUBLIC 기본 `CONNECT`로 앱 DB에 접속할 수 있다(기존 동작, 위반 아님).
 - **미시험:** `APP_PROXY_STRIP_PREFIX=true`(변경이 compose healthcheck·DB 계정에 한정되어 영향 없을 것으로 추정, EW-6에서 true/false 모두 확인된 상태), BAT 실행, Jenkins 실제 실행, 정적 표 권한(첫 실제 표 이후).
 
+
+## 15. AP-15 의존성 승인과 FU-1 계획 승인 (2026-10-12, 사용자)
+### 15-1. AP-15 승인(고정 표기로 설치, lock 파일 커밋)
+| 의존성 | 승인 버전 | 라이선스 | 설치 시점 |
+| --- | --- | --- | --- |
+| backend `lark` | 1.3.1 | MIT | 단위 1d |
+| 프런트 `react-router-dom` | 7.18.4 (`react-router` 8.4.0은 채택하지 않음) | MIT | 단위 0 |
+| 프런트 `ag-grid-community`, `ag-grid-react` | 36.2.0, 36.2.0 | MIT | 단위 1c |
+| 프런트 `@superset-ui/embedded-sdk` | 0.4.0 (Apache-2.0, 전이: `@superset-ui/switchboard` Apache-2.0, `jwt-decode` MIT) | Apache-2.0 | 단위 1e |
+- 각 의존성은 필요한 단위에서 설치한다. 버전은 `^`·`~` 없는 고정 표기이고 lock 파일을 같이 커밋한다. 승인 전 조회 기준일 2026-10-12(릴리스 2주 이상 경과 확인).
+- `ag-grid-enterprise`·`ag-charts-enterprise` 혼입을 막는 정적 검사를 `scripts/ci-validate-env.sh`에 추가하고 네거티브 시험을 `scripts/test-ci-validate-env.sh`에 넣는다(`bi-review`의 Enterprise 항목과 별개의 CI 방어선).
+- 미확인: Embedded SDK 0.4.0과 Superset 6.1.0의 호환은 단위 1e에서 실측한다.
+### 15-2. FU-1 계획 승인
+- 단위별 범위·담당·합격 기준·검증은 2026-10-12 제시안대로 승인. 순서는 구현 → 테스트 → 제품 Skill → QA → reviewer. 단위 0의 QA·reviewer를 마친 뒤 1a로 넘어가고, **1a를 마친 뒤 한 번 보고하고 멈춘다.**
+- 1a의 backend 시작 자가 점검은 슈퍼유저·`CREATEROLE`·`CREATEDB`와 함께 `REPLICATION`·`BYPASSRLS` 속성도 거부한다(EW-8 알려진 한계 대응).
+- 1a 뒤 정적 표 권한 매트릭스를 실제 표 기준(EW-1, 03c X-15)으로 재확인한다.
+
+## 16. FU-1 단위 0·1a 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 16-1. 결과
+- **단위 0:** QA 실패 0(pytest 165, 프런트 43, 정적 검사, compose 스모크, STRIP true/false 경로 표). reviewer 차단 0·중요 4건: enterprise 정적 검사 우회 보강(이름 패턴, lock `name`/`resolved`, fail-open 방지), 인증 조회 실패 로그 축소, 라우트 구조 시험 강화, HTTP 예외 변환 표 — 반영. 중요 2(05 §3에 없는 오류 코드 `BAD_REQUEST`·`METHOD_NOT_ALLOWED`)는 사용자 승인 대기(16-3).
+- **단위 1a:** revision `0003`, `access` 모듈 A1~A9, 스텁 어댑터와 DV1~DV3, 최초 관리자 명령(`python -m app.cli create-admin`), 시작 자가 점검(슈퍼유저·CREATEROLE·CREATEDB·REPLICATION·BYPASSRLS 거부), `/health` 새 필드, S1·S6 화면, `skills/permission-management`. QA 실패 0(pg 변형 포함 pytest 629, 왕복·`alembic check`, 실제 compose 스택, 5개 속성 거부 실측, 권한 매트릭스 `0003` 기준 재확인 통과). reviewer 차단 0.
+### 16-2. 적용 후 보고 항목(보안 강화·검사 강화, 새 변수·의존성 없음)
+- `create_db_engine`에 `hide_parameters=True`(`backend/app/db.py`, 되돌리기: 한 줄 삭제).
+- 인증 조회 실패 로그에서 트레이스백·예외 메시지 제거(`auth/current_user.py`, 되돌리기: `logger.error`→`logger.exception`).
+- `X-Request-ID` 입력 검증(안전 문자 64자)과 공개 라우터 시작 거부 가드(`core/request_id.py`, `auth/guard.py`).
+- enterprise·버전 고정 정적 검사 강화와 네거티브 시험(`scripts/`).
+- `migrations/roundtrip.py`의 열 단위 ACL 스냅샷 단계 추가(권한 확대 아님).
+### 16-3. 사용자 결정 대기
+1. 05 §3에 `BAD_REQUEST`(400·409·429 임시 매핑)·`METHOD_NOT_ALLOWED`(405) 추가 여부(계약 변경). 05 §1의 "400 형식 오류"와 구현의 422(깨진 JSON 포함) 통일 여부.
+2. DB 오류 때 `current_user`가 401로 닫는 동작(reviewer·QA 모두 지적): 503으로 구분할지(fail-closed 유지), 05에 근거 기록할지.
+3. A1 `memberships`에 팀 `is_active`를 넣을지, 비활성 팀/사용자에 대한 A8 소속 추가 금지 여부(현재 200).
+4. 사용자 표시 이름 100자·로그인 ID 200자 임시 상한의 계약 반영, 로그인 ID 대소문자 구분(8번 인증 결정 때 재검토), 한글 정렬 방식.
+5. `public_create=true`일 때 시작 거부로 올릴지(현재 경고).
+6. 05 §1 상태 코드 표기 정리, `deploy-coordination.md`에 "운영 env에서 `APP_ENV`는 local·test가 아니고 `AUTH_STUB_ENABLED=false`" 확인 항목 추가, CI에서 `pg` 변형 skip을 실패로 바꾸는 옵션(`REQUIRE_PG`).
+### 16-4. 미시험
+브라우저 화면(S1·S6)은 상태 코드·vitest까지만, Superset 연동, BAT 실행, HTTP 수동 동시 호출. nginx 접두를 떼는 프록시 뒤 SPA 딥링크 404(접두 밖 `/datasets/42`, STRIP true/false 동일)는 nginx fallback 변경 제안(NEEDS-APPROVAL)과 운영자 확인 항목으로 보류.
+
+## 17. 1a 결정 사항과 1b·1c 진행 (2026-10-12, 사용자)
+### 17-1. 16-3 결정
+1. **오류 코드·형식:** 05 §3에 `METHOD_NOT_ALLOWED`(405)를 추가한다. 형식 오류(깨진 JSON 포함)는 422 `VALIDATION_ERROR`로 통일하고 05 §1의 "400 형식 오류"를 고친다. `BAD_REQUEST` 같은 묶음 임시 코드는 쓰지 않는다. 409·429는 05의 구체 코드를 쓴다.
+2. **DB 장애:** 503 `SERVICE_UNAVAILABLE`로 응답해 로그아웃(401)과 구분한다. 접근은 계속 닫힌다(fail-closed 유지).
+3. **비활성 팀·사용자의 소속:** A8의 소속 추가·변경은 409로 거부한다(코드 이름 `TARGET_INACTIVE`는 구현 제안이며 05 §3에 반영). A1 응답의 `memberships`에 `team_is_active`를 넣는다.
+4. **상한:** 사용자 표시 이름 100자, 로그인 ID 200자를 05 계약에 넣는다. 한글 정렬과 로그인 ID 대소문자 구분은 이후에 정한다.
+5. **`public_create`:** true이면 backend 시작을 거부한다. 3라운드 "경고만" 결정(1a 구현)을 바꾼 것이다.
+6. **프런트 nginx:** `NGX_ROOT_TRY`를 루트 SPA fallback으로 바꾼다(새 변수 없음). `STRIP true/false` 딥링크를 다시 확인한다. `deploy-coordination.md` 42번에 "접두를 떼는 프록시의 SPA fallback" 확인 항목을 추가했다.
+7. **운영 설정:** `deploy-coordination.md` 41번에 "운영은 `APP_ENV`가 local·test가 아니고 `AUTH_STUB_ENABLED=false`"를 추가했다. CI 전용 옵션 `REQUIRE_PG`를 승인한다(`.env`·`.env.example`에는 넣지 않고 테스트 실행 환경에서만 쓴다).
+### 17-2. 이어서 진행
+- 1b(데이터셋·열 정의)와 1c(입력 그리드, AG Grid Community 36.2.0 설치)를 이어서 진행하고 **1c를 마친 뒤 보고하고 멈춘다.** 각 단위는 구현 → 테스트 → 제품 Skill → QA → reviewer.
+- 1a·1b·1c 주요 화면을 Playwright로 1920×1080 스크린샷을 찍어 `docs/screens/fu1/`에 PNG로 커밋한다(파일 이름에 화면과 상태, 비밀값 비노출 확인).
+
+## 18. FU-1 단위 1b·1c 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 18-1. 결과
+- **1a 결정 7건(17-1) 반영:** 422 통일·405·503 `SERVICE_UNAVAILABLE`·409 `TARGET_INACTIVE`(`details.field`=`team`/`user`)·`team_is_active`·`public_create` 시작 거부·nginx 루트 SPA fallback·`REQUIRE_PG`·`deploy-coordination.md` 41·42번. QA 실측: STRIP false/true 딥링크 모두 200 HTML(접두 안팎), `/api/nope` JSON 404, `/assets/` 누락 404.
+- **1b:** revision `0004`(`datasets`·`dataset_columns`), `ddl` 모듈(동적 DDL 허용 목록 게이트), `dataset` 모듈 B1~B6, S2·S3·S4 Inspector, `skills/dataset-definition`. QA 실패 0(실제 PG pytest 1194 passed, 권한 매트릭스 `0004` 기준 통과, `admin-cleanup` 1b 절차 실제 DB 검증). reviewer 차단 0·중요 3(rules float 거부, gate-status 낡은 문구, 굶음 시험 표현) 반영.
+- **1c:** `entry` 모듈 C1~C4(칸 단위 compare-and-swap, 붙여넣기 전부 취소, 5,000행·1MiB), AG Grid Community 36.2.0 입력 그리드, 붙여넣기 파서(`clipboard-cases.json` 42건), `skills/data-entry`. QA 실패 0(실제 PG 1548 passed·skip 0, Playwright 가시 검증, 413 JSON/HTML 실측). reviewer 차단 0·중요 3(붙여넣기 기준 날짜 열 같은 값, 본문 읽기 중 연결 점유, 굶음 시험 sleep 의존) 및 QA F-1~F-4 반영, 수정 후 실제 PG 1554 passed·skip 0, 프런트 361 passed.
+### 18-2. 적용 후 보고 항목(보안 강화·검사 강화, 새 변수·의존성 없음)
+- 동적 DDL 게이트 강화(`ddl/dynamic.py`), 코드 정적 검사 시험, DB 장애·예외 로그에서 클래스 이름과 request_id만 남김, 권한 검사 직후 연결 반납(`entry/router.py`), 알 수 없는 입력 키 비반사(`entry/service.py` `_echo`), 정의 변경 DDL 오류를 500에서 422/503으로 변환(`dataset/service.py`), rules JSON float 거부.
+### 18-3. 알려진 한계·결정 참고
+- 이름 변경(B4)은 `UNIQUE(team_id, name)` 때문에 `FOR UPDATE` 수준 잠금이라 FK 자식 INSERT가 커밋까지 기다린다(06 §5 서술 보완 필요, 영향은 짧은 대기). 뒤따르는 `FOR SHARE`가 대기 중 정의 변경을 앞지르는 굶음이 PG 16에서 관찰되며 정의 변경은 `DEFINITION_BUSY`로 끝난다.
+- C4 변경 없는 칸은 가드가 아님(05 반영). 비활성 팀의 데이터셋 생성은 현재 허용(06 §4-1 후속 K10) — 막을지 사용자 결정 대기.
+- 접두 밖 주소를 브라우저에 직접 입력하면 SPA는 빈 화면(사용자 주소는 항상 접두 안이라 영향 없음).
+- 5,000행 붙여넣기: tmpfs pytest 3~4초, 볼륨 PG+nginx 경유 4.7~6.5초. nginx 경유 1MiB 초과는 HTML 413(프런트 처리).
+- 미시험: 실제 Excel 클립보드, 메인 플랫폼 프록시, 계산 열 표시(1d), Superset(1e), BAT.
+
+## 19. 1b·1c 결정과 1d 진행 (2026-10-12, 사용자)
+### 19-1. 18절 결정 사항
+1. **비활성 팀의 데이터셋 생성:** 비활성 팀의 정의 담당자는 데이터셋을 만들 수 없다(409 `TARGET_INACTIVE`, `details.field=team`). 05 B2에 반영.
+2. **정렬:** 사용자·팀·데이터셋 목록은 이름순으로 정렬한다. 한글 이름이 가나다순으로 나오는지 시험으로 확인한다. 05에 반영.
+3. **이름 변경과 FK 자식 INSERT:** 이름 변경 중 FK 자식 INSERT가 잠시 기다리는 동작은 그대로 둔다. 06 §5 서술을 실제 동작에 맞게 고쳤다.
+4. **잘림 표시:** 붙여넣기·검증 오류 응답이 상한에서 잘렸을 때 응답에 `details.truncated`(와 전체 건수 `details.total`)를 넣는다. 05 §1에 반영, 화면은 "일부만 표시됨"을 안내한다.
+5. **화면 문제 7건 수정:** 스크린샷에서 발견한 7건(접근 거부 화면 신원 전환기 표시, S6 정렬, S6 격자 영역 높이·열 폭, S3 폼·붙여넣기 버튼 폭, Inspector 빈 공백, 범위 숫자 쉼표 서식, 가로 스크롤바 표시)을 모두 고친다. 가로 스크롤바는 실제 브라우저에서 보이지 않으면 보이게 한다.
+### 19-2. 이어서 진행
+- 위 1~5와 1c 수정분(reviewer 중요 3건, QA 권고 F-1~F-4)을 qa-engineer가 독립 재검증하고, 화면 수정분은 Playwright로 다시 찍어 `docs/screens/fu1/`의 해당 스크린샷을 교체한다.
+- 그다음 **1d(수식 열)** 를 진행하고 1d를 마친 뒤 보고하고 멈춘다. `lark` 1.3.1은 승인된 버전으로 고정 설치한다. 합격 기준: 07 §6 "미리보기와 뷰 결과 불일치 0건"(차분 시험 전수), X-26 주입 사례 10종과 역슬래시 사례 회귀 고정, K6 함수 시험 사례 전부, K7 빈 칸 전파, 런타임 DDL `bi_app` 실행. 수식 편집기·오류 칸 표시·수식 보기 화면도 스크린샷으로 찍어 `docs/screens/fu1/`에 추가한다.
+
+## 20. FU-1 단위 1d 결과 (2026-10-12, backend-dev·frontend-dev 구현, qa-engineer·reviewer 검증)
+### 20-1. 결과
+- **구현:** `lark` 1.3.1(승인 AP-15, 고정 설치), 수식 엔진 `backend/app/formula/`(파서·C0·함수 사전 32개 항목·변환기·리터럴 렌더러), revision `0005`(`formulas`·`formula_deps`), 정의 변경 훅이 만드는 `dv_`/`de_` 뷰, 정의 해시와 시작 시 재생성, API D1~D10, `RowViewPort`, 수식 편집기·수식 보기·오류 칸 표시·S5 점검·S9 뷰 재생성 구역, `skills/formula-column`.
+- **합격 기준(QA 독립 재실행, HEAD `42c3619`):** 차분 전수 매트릭스 수식 7,353개(통과 7,057, C0 거부 296 `CONSTANT_ERROR`)·데이터셋 79개·비교 칸 1,353,335개에서 **미리보기와 뷰 불일치 0건, DB 예외 0건**. X-26 주입 10종+역슬래시 L0~L3 회귀 고정(HTTP 재현에서도 `bi_data.evil` 0, 정적 표 행 수 불변, 역할 기본값 `standard_conforming_strings=off`에서도 동일). K6 함수 cases 전부 뷰 경유 통과(251개로 보고했으나 M3 수정에서 `ROUNDUP` 긴 소수 사례 9개가 추가되어 현재 260개: value 173·reject 73·error 14). K7 빈 칸 전파·글자 비교 대소문자 무시·오류 칸 NULL과 점검 노출 통과. 런타임 DDL `bi_app` 실행(소유자 `bi_app`, `bi_readonly`는 SELECT만). 실제 PG 전체 pytest 2820 passed(skip 98은 SQLite 전용 시험, `pg` 변형 skip 0), 프런트 466(465 passed·1 skipped는 docs 없는 Docker 이미지 한정).
+- **X-26 '남은 22건' 원인 4가지 모두 닫힘:** `10**30` BIGINT 바인드(`Decimal` CAST), 날짜-글자 비교(C0 거부), `%`(문법에 없음), `0/0`·`None+1`(C0 거부/NULL 상수 없음). 이번 매트릭스에서 새 불일치는 나오지 않았다.
+- **reviewer:** 1차 차단 0·중요 5(M1 렌더 문자열 실행 경로, M2 대조 순서, M3 `ROUNDUP` 정밀도, M4 07에 없는 한도, M5 거부 건수 단정). M1·M2·M3·M5는 수정 후 재확인에서 모두 해소, M4는 07 §10-1에 "승인 대기"로 기록(20-2 1번).
+- **QA 재검증:** 수정 후 8/9 항목 통과, 부분 실패 1건(긴 잠금 아래 D3·D7·D8의 문장 시간 초과 57014가 422)은 소규모 수정으로 처리(D7·D8·D6은 503, D3는 07 §5 설계대로 422 유지).
+### 20-2. 사용자 결정 대기
+1. **07 §10-1 한도 승인:** AST 깊이 40(항 41개 이상 덧셈 거부 → `SUM(…)` 안내), 변환 SQL 노드 5만, 단항 부호 `neg`, `DATE` E3 범위 확대, `ROUNDUP` 곱셈 형태. 승인 전까지 코드는 이 값으로 동작한다.
+2. **계산 열 값 표시 자릿수:** `/`·곱셈 결과가 NUMERIC이라 12~20자리 소수로 보인다(그리드 칸이 잘림). 값 반올림·절삭은 하지 않았다. 표시 정책(예: 열 규칙 `decimals` 또는 계산 열 기본 6자리, 전체 값은 툴팁)을 정해야 한다.
+3. **DB 서버 로그의 뷰 생성 실패 문장:** `bi_app`의 `CREATE OR REPLACE VIEW` 가 lock timeout 등으로 실패하면 PostgreSQL 서버 로그(`log_min_error_statement=error` 기본)에 `STATEMENT: CREATE OR REPLACE VIEW …`가 수식 글자 상수와 함께 남는다(앱 로그는 깨끗). 대응 후보: `bi_app` 역할의 `log_min_error_statement` 조정(db-bootstrap 고정 문장, 로그 노출을 막는 보안 강화) 또는 운영 DB 로그 설정 협의(`deploy-coordination.md`). 설정 변경이라 승인이 필요하다.
+4. **계산 열의 이름·위치·태그 변경:** 이번 화면에는 넣지 않았다(B6으로 가능). 후속으로 정할지.
+### 20-3. 알려진 한계·미시험
+- 게이트가 직접 막지 못하는 SQLAlchemy 부품(`custom_op`, `Extract.field`, `BindParameter.callable_`, 숫자 바인드의 `Decimal` 지수)은 formula가 만드는 식에는 나오지 않아 지금은 위험이 낮다(후속 단위에서 거부 추가 권장). 시작 시 `reconcile_all`은 동기로 끝난 뒤 서비스가 시작된다(데이터셋 50개 해시 일치 약 1.1~1.8초, 전체 재생성 약 3.2~4.3초, 행 없는 tmpfs DB 기준).
+- 한글 IME 조합 입력, `PREVIEW_BUSY` 화면 실서버 재현(QA 동시 요청 재현은 통과), 하위 경로 STRIP true 반복, Superset(1e), BAT는 미시험.
+
+## 21. 1d 결정 4건과 1e 진행 (2026-10-12, 사용자)
+### 21-1. 20-2 결정
+1. **07 §10-1 한도 승인(확정):** 수식 깊이 40, 변환 SQL 노드 5만, 단항 `neg`, `DATE` E3 범위 0001~9999, `ROUNDUP` 곱셈 형태. 07 §10-1을 확정으로 적었고 한도에 걸릴 때의 쉬운 말 문구를 `skills/dataset-definition/SKILL.md`에 적는다.
+2. **계산 열 표시 자릿수:** 화면 표시만 바꾼다(저장값·뷰·API 응답 값은 그대로). 기본 표시는 소수 최대 6자리, 끝자리 0 제거, 천 단위 쉼표. 전체 값은 툴팁과 Inspector에 그대로 보이고 복사하면 전체 값이 복사된다. 열 규칙 `decimals`는 이번에 추가하지 않고 후속 단위로 미룬다. 1e에서 Superset 차트가 이 값을 어떻게 보이는지 확인해 **보고만** 하고 설정은 바꾸지 않는다(선택지만 제시).
+3. **DB 서버 로그의 뷰 생성 문장:** `bi_app` 역할 수준 로그 설정은 바꾸지 않는다. `deploy-coordination.md` 43번에 운영 협의 항목을 추가했다. 또한 `backend/bootstrap/`의 비밀번호 설정 문장(`:'var'` 4곳)이 실패할 때나 `log_statement=ddl/all`일 때 서버 로그에 비밀번호가 남는지 실측하고, 남을 수 있으면 bootstrap 세션 안에서만 `log_statement`·`log_min_error_statement`·`log_min_duration_statement`를 끄는 고정 `SET` 문장을 비밀번호 문장 앞에 넣는다(역할·DB 수준 설정 금지). 비밀 노출 축소이므로 **적용 후 보고 항목**이며, 일부러 실패시킨 뒤 서버 로그를 grep해 비밀번호 0건을 확인한다.
+4. **계산 열 이름·위치·태그 변경 UI:** 후속 단위로 미룬다. `project-brief` 4.3에 결정 2의 `decimals`와 함께 기록했다.
+### 21-2. 1e 시작 전(0단계)
+- SQLAlchemy 부품 4종(`custom_op`, `Extract.field`, `BindParameter.callable_`, 숫자 바인드의 `Decimal` 지수)을 거부하도록 `ddl` 게이트에 추가한다(적용 후 보고 항목).
+- 그 커밋에서 QA가 전체 시험(실제 PG)과 차분 시험 전수를 다시 돌린다. **실패나 불일치가 1건이라도 있으면 1e로 넘어가지 않고 멈춰 보고한다.**
+- `docs/screens/fu1/README`에 `PREVIEW_BUSY` 두 장은 모의 화면, `FORMULA_CIRCULAR`는 검사 단계 화면으로 대신했다는 표시가 이미 있다(표의 `fu1d-editor-preview-busy-*` 두 행과 `fu1d-editor-circular-after-check` 행, 문서 끝 '1d에서 찍지 못한 것').
+### 21-3. 1e 승인(조건부)
+- **승인:** revision `0006`, `httpx` 운영 의존성 승격, `@superset-ui/embedded-sdk` 0.4.0 설치.
+- **조건:** 버전 정확히 고정(범위 금지)·lock 커밋·라이선스 기록. 게스트 토큰은 localStorage·sessionStorage·URL·로그 어디에도 남기지 않는다. 빌드한 프런트 번들에 Superset 관리자·서비스 계정 비밀번호·`SECRET_KEY`·토큰 발급 자격이 0건임을 grep으로 확인하고, 로그·`ps`·`docker inspect`의 비밀값 0건도 다시 확인한다.
+- **합격 기준:** P1~P5, 포털에서 차트 6종(선·막대·표·큰 숫자·파이·혼합) 표시, 훅의 uuid 등록 대조, 사용자별 429, STRIP true/false 모두 반복, Superset 포함 전체 메모리 실측(8GB 예산 대비), 스크린샷 1920×1080 `fu1e-{화면}-{상태}.png`.
+- 새 환경변수, 새 의존성, 기준과 다른 설정, 권한 확대가 더 필요해지면 그 자리에서 멈추고 승인을 요청한다. **1e를 마치면 main 반영 PR은 만들지 않고 보고만 한다**(PR은 사용자 확인 뒤 지시).
+
+## 22. 1e 설계 점검 결과와 승인 대기 (2026-10-12)
+- 0단계는 QA 통과(실제 PG 전체 2861 passed·skip 100(SQLite 전용 98+이미지에 `skills/` 없음 2, `pg` 변형 skip 0), 차분 전수 수식 7,353·거부 296·불일치 0·DB 예외 0, bootstrap 로그 비밀번호 0건, 계산 열 표시 자릿수 화면 확인). 1e 설계 점검은 새 환경변수 0개로 가능하나 아래 승인이 필요해 **구현 전에 멈췄다**(`docs/research/fu1e-design.md`).
+- **승인 요청:** A `certifi`(MPL-2.0) 운영 포함 / B 훅 uuid 대조 방식 / C 429 한도 값 / E 08 문구 변경(시작 점검 범위, Superset 준비 대기). D는 조건부(프로브가 실패할 때만). 사용자 답을 받으면 이 절에 기록한다.
+
+## 23. 1e 설계 점검 결과 결정과 구현 시작 (2026-10-12, 사용자)
+### 23-1. 22절 승인 요청 결정
+- **A. `certifi`(MPL-2.0):** 수정 없이 쓰는 조건으로 예외 승인. `bi-review` 예외 목록에는 `certifi` **하나만 이름으로** 적는다(MPL 전체 허용이 아님). `deploy-coordination.md` 23번을 "운영 런타임 포함, 예외 승인"으로 갱신. `httpx` 전이 의존성 전체의 버전·라이선스를 기록한다. 참고 확인으로 Superset 이미지와 현재 backend 이미지에 `certifi`(pip 내부 묶음 포함)가 이미 있는지 실측해 결과만 적는다.
+- **B. H0으로 종결하되 실측 2건이 모두 참일 때만:** ① Superset에 등록된 DB 연결이 `bi_readonly` 하나뿐이고 `bi_author`가 DB 연결을 추가할 수 없음, ② 관리자와 서비스 계정 외에 대시보드 임베드 설정 권한을 가진 역할이 없음. 둘 다 참이면 남는 위험을 08에 기록하고 "훅의 uuid 등록 대조" 합격 기준을 위 두 실측으로 바꾼다. `deploy-coordination.md` 44번에 "Superset에 다른 DB 연결을 추가하지 말 것"을 운영 항목으로 넣었다. **하나라도 거짓이면 H1로 바꾸지 말고 멈춰 보고한다.**
+- **C. 입장권 429 한도:** 사용자별 60초 30회 승인. backend 워커가 여러 개면 한도가 워커별로 걸린다는 점을 08과 Skill에 적는다.
+- **E.** ①(시작 점검 범위를 `registered`까지 확대)과 ③(E1 추가 쿼리·페이지 응답, E6 `expires_in` 상수 300)은 승인. **②(Superset `/health` 준비 대기)는 조건부 승인:** 대기는 백그라운드 동기화 작업 안에서만 하고 backend 시작과 Superset과 무관한 API는 기다리지 않아야 한다(P4). QA가 Superset을 멈춘 상태에서 backend 정상 기동, 데이터셋·입력 API 정상 응답, Superset을 켜면 동기화 복구를 확인한다.
+- **D:** 제안대로(① `GET /dataset/related/database` 시도 → ② 상수 `1` + 등록 후 DB 이름 대조). 5번째 권한(`can_read Database`)이 필요해지면 그때 멈추고 요청한다.
+- **F:** 보류(8번 인증 확정 뒤 재검토).
+- **`YEAR` 쉼표:** 지금은 고치지 않는다. 알려진 현상으로 두고 `project-brief` 4.3 후속 항목(`decimals`)에 "숫자 표시 형식(쉼표 여부)"으로 함께 적었다.
+### 23-2. 구현 첫 작업
+- **SDK 0.4.0:** `npm view`로 직접 확인(latest, Apache-2.0, 의존성 `@superset-ui/switchboard ^0.20.3`·`jwt-decode ^4.0.0`), 설치 뒤 lock의 실제 전이 버전과 라이선스를 기록하고, 언마운트 때 갱신 타이머가 정리되는지 소스로 확인한다.
+- **설계 문서의 확인 프로브 6개(P-1~P-6)를 먼저 실행**하고 "추정" 표시를 실측값으로 바꾼다. **프로브 결과가 설계와 크게 다르면 구현을 멈추고 보고한다.**
+- 앞선 1e 조건(버전 정확히 고정, 토큰 저장·노출 금지, 번들·로그·`ps`·`docker inspect` 비밀값 0건, 스크린샷 규격)은 그대로이고, 새 환경변수·새 의존성·기준 외 설정·권한 확대가 더 필요하면 그 자리에서 멈춘다. 1e를 마치면 PR은 만들지 않고 보고만 한다.
+
+## 24. 단위 1e 결과와 사용자 확인 대기 (2026-10-13)
+- **결과:** 1e-d 독립 QA 실패 0건(실제 PG 전체 3249 passed·skip 104·pg 변형 skip 0, 차분 7,353 수식 불일치 0·DB 예외 0, P1~P5, 차트 6종 `bi_guest` 4권한만으로 표시, STRIP true/false 반복 통과, 번들·로그·`ps`·`docker inspect`·브라우저 저장소 비밀·토큰 0건). reviewer 차단 0건, 중요 1건(H0 ② 해석, 아래 1번). 메모리는 4개 서비스 합계 최대 약 484 MiB로 `mem_limit` 합계 4.75GiB·예산 8GiB 안이다(365행 합성 데이터 기준, 20만 행 부하는 미측정).
+- **반영한 지적:** 문서(AGENTS certifi 예외, 쉼표 문구, 08 §9·04 §8·gate-status 포인터), 코드(E6 인증을 본문 검사보다 먼저 판정 — 권한을 줄이는 방향의 적용 후 보고 항목, 429 단언 정확화, 시험 파일 참조 정정).
+- **사용자 확인 대기:** (1) H0 실측 ②를 "임베드 설정 권한(`can_set_embedded`)" 기준으로 읽어 종결할지(문자 그대로는 `can_write Dashboard` 역할이 있어 거짓). 거짓으로 보면 H1로 임의 전환하지 않고 멈춘다. (2) Superset `refresh` 호출과 포털 뷰 DDL의 PG 교착(4회, 모두 Superset 쪽 희생·자동 복구) 완화 방식(동기화 디바운스 등, 설계 변경이라 승인 필요). (3) 계산 열 숫자의 Superset 표시(표 16자리·집계 4자리·쉼표 없음) 선택지. (4) guest의 대시보드·차트 목록 API 200(토큰 대시보드 1개로 한정)과 08 §3 문구 정합, `listDashboards` 200개 초과 시 잘림.
+- **화면 결함 보고(미수정):** `docs/screens/fu1/README.md` 1e 절 참조(S9 좁은 칸 줄바꿈, 허용 도메인 불일치 시 영어 403 본문 노출 등).
+
+## 25. 1e 결과 결정과 마무리(1e-f) 지시 (2026-10-13, 사용자)
+1. **H0 ②: 참으로 확정.** 조건의 목적은 미등록 대시보드의 새 임베드 설정을 막는 것이고 `can_set_embedded`는 Admin만 가진다. `can_write Dashboard`는 내용 편집 권한이며 조건 ①로 Superset이 읽는 데이터는 원래 모두에게 공개된 것뿐이다. 08 §9·04 §8·gate-status를 "확정"으로 바꾼다. 작성자가 자기 대시보드 임베드를 `can_delete_embedded`로 해제할 수 있는지와 해제 시 포털 표시는 실측해 결과만 기록한다.
+2. **교착:** 데이터셋별 동기화 디바운스(코드 상수, 새 환경변수 없음) 승인. 포털 DDL이 교착 희생자가 되는 경로를 시험으로 강제 재현해 503 `DEFINITION_BUSY`·롤백·재시도 정상을 확인한다.
+3. **Superset 숫자 표시:** 설정은 바꾸지 않는다. S7 작성자 안내와 Skill에 "차트별 숫자 형식 지정 방법"을 적는다. 저장 지표 `d3format` 연결은 project-brief 4.3의 `decimals` 후속 항목에 적었다.
+4. **계약·문구:** 08 §3을 실제 동작(guest 목록 API 200, 토큰 대시보드 1개·차트 0개로 한정)에 맞추고 이 한정을 단정하는 회귀 시험을 추가한다. `listDashboards` `limit=200` 잘림은 알려진 한계로 기록한다.
+5. **임베드 안 영어 문구·월 이름:** 후속 보류. project-brief 후속 목록에 "Superset 언어·D3 로캘 설정(승인 필요, 6.1.0 한국어 번역 범위 확인)"으로 적었다.
+6. **1e-f 수정 범위:** 화면 결함(S9 배지·버튼, S8 오류 문구, 신원 선택 상자, 임베드 높이, 허용 도메인 불일치 시 원문 JSON 숨김+한국어 안내·문의 번호), 로고 깨짐·`pwa-manifest.js` 404·표 차트 경고 아이콘 원인 확인(설정 변경이 필요하면 고치지 않고 선택지만 보고), reviewer 참고 반영(반열림 시험 1건, `forget_idle` 주기 호출, 로그인 실패 백오프, 비 HTTPError 로그 예외 클래스만[적용 후 보고], `looksBlank` 되돌림, 가짜 Superset 대문자 uuid), 입장권 `exp−iat`=300 런타임 확인. 나머지(S9 순차 읽기 등)는 알려진 한계로 기록. 검증은 QA가 실제 PG 전체 pytest·차분 전수·프런트 전체·실제 Superset 스모크(STRIP true·false)를 다시 돌리고, 바뀐 화면은 스크린샷을 교체하며 비밀값 대조 0건을 확인한다. 새 환경변수·새 의존성·기준과 다른 설정·권한 확대가 필요하면 멈춘다. 끝나면 PR 없이 보고.
+
+## 26. 1e-f 결과 (2026-10-13)
+- **반영:** 25절 결정 1~6 전부. 디바운스 3초(고정 창, 데이터셋별, 새 환경변수 없음), 교착 시험(실제 PG 진짜 교착으로 503 `DEFINITION_BUSY`·롤백·재시도 확인, 변이 확인), 화면 결함 수정, reviewer 참고 반영(반열림 1건, 속도 제한기 자동 정리, 로그인 30초 백오프, 비 HTTPError 예외 클래스만 로그, `looksBlank` 되돌림, 가짜 Superset 대문자 uuid), 08 §3·§9, 숫자 형식 안내, 알려진 한계 기록.
+- **QA(1e-f, HEAD 342c0c0 기준) 실패 0건 + 관찰 1건:** 실제 PG 전체 3300 passed·skip 106·pg 변형 skip 0, 차분 7,353 수식 불일치 0, 프런트 610(후속 후 614), STRIP true·false 스모크 통과, guest 목록 API 8/8, 토큰 `exp−iat`=300, 비밀·토큰 0건, 메모리 합계 464 MiB(동시 5명). 디바운스 효과: 열 19개 연속 추가 시 Superset `PUT` 6→1, `refresh` 6~7→0, 교착 1~2→0(단일 흐름). **관찰:** 5개 흐름이 동시에 열을 추가하면 연결 풀(`pool_size=5, max_overflow=0`) 고갈로 일부 요청이 503(1e 이미지에서도 재현, 회귀 아님). 풀 크기 변경은 승인이 필요해 하지 않았다.
+- **원인 확인(설정 변경 없음):** Superset 로고 깨짐은 상류 6.1.0이 하위 경로에서 접두를 두 번 붙이는 동작(루트 배포는 정상), `service-worker.js` 404도 상류, `pwa-manifest.js` 404는 curl 확인 요청의 기록(브라우저 요청 아님), 표 차트 경고 아이콘은 시드 차트의 `row_limit=12` 도달 알림. 로고 우회는 `THEME_*.brandLogoUrl` 새 설정이라 승인 필요(`docs/deploy-coordination.md` 13번).
+- **스크린샷 교체(1e-f):** `docs/screens/fu1/fu1e-*.png` 31장을 같은 이름으로 교체하고 `fu1e-s7-dashboard-error-502-embed-disabled.png` 1장을 추가했다(1920×1080, 비밀값 대조 0건). reviewer·QA 후속(반열림 시험 호출의 로컬 오류 비소비, 시험 단언 정정, S9 문단 줄바꿈)도 반영했다.
+- **사용자 확인 대기(1e-f):** (1) 연결 풀 크기(`pool_size=5`) 상향 여부(5개 흐름 동시 열 추가 시 503), (2) Superset 로고 이중 접두 우회 설정(`THEME_*.brandLogoUrl`) 승인 여부, (3) `vite.config.ts`의 시험 전용 `css.include` 한 줄 소급 승인 또는 `node:fs` 읽기로 대체, (4) 502 안내 문구가 임베드 해제 원인을 구분하지 못함(구분하려면 오류 코드 추가 필요).
+
+## 27. 1e-f 결과 결정과 main 반영 단계 지시 (2026-10-13, 사용자)
+1. **연결 풀 상향 승인:** `pool_size=10, max_overflow=5`, 코드 상수(환경변수 없음). PG `max_connections` 대비 전체 연결 수 표를 `docs/deploy-coordination.md`에 기록하고, QA가 5개 흐름 동시 열 추가를 다시 돌려 503 수를 상향 전과 비교하며 입력·조회 응답과 메모리 최고치를 기록한다.
+2. **로고 이중 접두:** 새 설정 없이 알려진 문제로 둔다(상류 6.1.0 결함, 루트 배포에서는 정상). `docs/deploy-coordination.md` 13번과 gate-status에 기록.
+3. **`frontend/vite.config.ts`의 시험 전용 `css.include` 한 줄: 소급 승인.** `src/styles.css`만 포함하며 런타임·빌드에 영향이 없다.
+4. **502 안내 문구 구분(임베드 해제 원인 표시):** 후속으로 보류, 알려진 한계로 기록.
+5. **확인·보완:** `LOGIN_RETRY_BACKOFF_SECONDS`는 환경변수가 아님을 확인(코드 상수 30.0), 로그인 백오프 30초 동안 재시도가 즉시 실패한다는 운영 안내를 관리자 Skill에 기록. guest 목록 한정 단정 스모크를 `scripts/manual/superset-guest-list-check.py`(수동 실행 시험)로 저장소에 둔다. 작성자 안내문의 `,.2f` 줄바꿈 수정. 1024px 가로 스크롤·신원 선택 상자 여백은 알려진 관찰(대상 해상도 1920×1080). 로컬 이미지 `qa1f-*`·`shot1f-*`는 디스크가 필요하면 이름 지정으로 삭제 가능(일괄 prune 금지).
+6. **최종 검증 규칙:** 마지막 커밋 기준 QA 독립 전체 검증, QA 뒤 코드가 한 줄이라도 바뀌면 전체 재검증(`qa-verification` Skill에 기록). 실패 1건이라도 있으면 PR 없이 멈춰 보고. 통과 시 `harness/setup` → `main` 새 PR 작성(병합 금지, 만들기 전 main이 harness/setup에 포함되는지 확인, 본문에 FU-1 요약·최종 검증 수치·검증 커밋 해시·적용 후 보고 항목·알려진 한계와 미시험 항목·후속 단위 목록 포함), gate-status "다음 세션 인계" 갱신.
+
+## 28. 최종 QA 실패 처리와 검증 규칙 정밀화 (2026-10-13, 사용자)
+- **최종 QA(`96a5974`) 결과:** 저장소 스크립트 `scripts/manual/superset-guest-list-check.py`가 입장권의 `iat`·`exp`가 float(차이 `300.0`)라 정수 검사에서 `값=None`으로 실패(제품 결함 아님, 입장권은 `exp−iat`=300.0 확인). 규칙에 따라 PR 없이 멈춰 보고했다. 나머지 항목(실제 PG 3310 passed·차분 불일치 0·프런트 616·STRIP true/false 스모크·비밀 검사·메모리·풀 효과)은 통과.
+- **결정 1(재검증 범위):** 제품 영향 경로(`backend/`, `frontend/`, `superset/`, nginx, compose, Dockerfile, 마이그레이션, bootstrap, 설정 파일)가 바뀌면 전체 재검증, 그 밖(`scripts/manual/`, `docs/`, 시험 보조 스크립트)만 바뀌면 범위 재검증(diff로 제품 영향 경로 0건 증명, 바뀐 스크립트 실제 실행, ruff·CI 검증 스크립트). `qa-verification` Skill과 gate-status에 반영.
+- **결정 2(컨테이너 Env의 비밀값):** 이미지(`docker image inspect`·`docker history`), 컨테이너 Cmd·Args, 로그, `ps`, 프런트 번들, 브라우저 저장소에는 0건을 유지한다. **컨테이너 Env는 `.env`와 같은 보호 등급(호스트 Docker 권한자만 접근)으로 허용**한다. **정정:** 이전 보고(1e-d·1e-f)의 "`docker inspect` 0건"은 **Cmd·Entrypoint·Args 기준**이었고 Env에는 compose가 변수로 넘기는 비밀번호가 설계상 들어 있다. Docker secrets(파일 전달) 전환은 project-brief 후속 목록("비밀값 파일 전달 강화, 새 `*_FILE` 변수 승인 필요")이다.
+- **수정:** 스크립트의 `iat`·`exp` 검사를 정수·실수 모두 받도록 고치고 독스트링에 STRIP true 전제(허용 도메인에 프록시 origin 필요)를 적었다. `deploy-coordination.md` 45번에 QA 실측과 "부하 뒤 유휴에도 `bi_app`이 풀 크기(10)만큼 연결 유지", "Superset 쪽 이론 상한 미검증"을 추가했다.
+- **범위 재검증 항목:** 96a5974..HEAD diff 제품 영향 경로 0건 증명, 고친 스크립트 실제 Superset(STRIP false·true) 7/7, ruff·CI 검증 스크립트, 이미지(`docker image inspect`·`docker history`) 비밀값 0건, 빅넘버 헤더 40과 71.1k 차이를 같은 시점·같은 데이터로 확인(실제로 다르면 PR 없이 멈춤).

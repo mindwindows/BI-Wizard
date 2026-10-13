@@ -8,7 +8,11 @@ docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-boot
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate \
     python -m migrations.roundtrip
 ```
-순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` -> downgrade base ->
+순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` ->
+downgrade 0005(등록 표만 사라짐) -> upgrade head(B와 같아야 함) ->
+downgrade 0004(수식·등록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
+downgrade 0003(0003 표·권한은 남고 0004~0006 표·권한이 사라짐) ->
+upgrade head(B와 같아야 함) -> downgrade base ->
 스냅샷 A'(A와 같아야 함) -> upgrade head -> 스냅샷 B'(B와 같아야 함).
 접속은 `bi_owner`(비밀번호 `POSTGRES_OWNER_PASSWORD`)이다.
 
@@ -63,6 +67,7 @@ _PG_ROLES = _catalog(
 _PG_AUTH_MEMBERS = _catalog(
     "pg_auth_members", "roleid", "member", "admin_option", "inherit_option", "set_option"
 )
+_PG_ATTRIBUTE = _catalog("pg_attribute", "attrelid", "attname", "attnum", "attisdropped", "attacl")
 _PG_DEFAULT_ACL = _catalog(
     "pg_default_acl", "defaclrole", "defaclnamespace", "defaclobjtype", "defaclacl"
 )
@@ -119,6 +124,23 @@ def take_snapshot(engine: Engine) -> Snapshot:
             .join(_PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_CLASS.c.relnamespace)
             .where(_PG_NAMESPACE.c.nspname.in_(_SCHEMAS))
         )
+        # 열 단위 권한(GRANT UPDATE (열) …)은 relacl에 없고 attacl에만 있다(0003부터 사용).
+        column_acl = conn.execute(
+            select(
+                _PG_NAMESPACE.c.nspname,
+                _PG_CLASS.c.relname,
+                _PG_ATTRIBUTE.c.attname,
+                cast(_PG_ATTRIBUTE.c.attacl, text_type),
+            )
+            .join(_PG_CLASS, _PG_CLASS.c.oid == _PG_ATTRIBUTE.c.attrelid)
+            .join(_PG_NAMESPACE, _PG_NAMESPACE.c.oid == _PG_CLASS.c.relnamespace)
+            .where(
+                _PG_NAMESPACE.c.nspname.in_(_SCHEMAS),
+                _PG_ATTRIBUTE.c.attnum > 0,
+                _PG_ATTRIBUTE.c.attisdropped.is_(False),
+                _PG_ATTRIBUTE.c.attacl.is_not(None),
+            )
+        )
         default_acl = conn.execute(
             select(
                 owner_of(_PG_DEFAULT_ACL.c.defaclrole),
@@ -136,6 +158,7 @@ def take_snapshot(engine: Engine) -> Snapshot:
             "memberships": sorted([str(x) for x in r] for r in memberships),
             "schemas": sorted([r[0], r[1], _acl(r[2])] for r in schemas),
             "relations": sorted([r[0], r[1], r[2], r[3], _acl(r[4])] for r in relations),
+            "column_acl": sorted([r[0], r[1], r[2], _acl(r[3])] for r in column_acl),
             "default_acl": sorted([r[0], r[1], r[2], _acl(r[3])] for r in default_acl),
         }
         inspector = sa.inspect(conn)
@@ -259,6 +282,121 @@ def expect_privileges(snapshot: Snapshot, *, granted: bool) -> list[str]:
     return problems
 
 
+# 정적 표가 `bi_app`에 주는 권한(06 §2). 표 단위 ACL 문자: a INSERT, r SELECT, d DELETE, w UPDATE.
+# UPDATE는 열 단위라 표 ACL에는 없고 열 ACL(`w`)에만 있다.
+# 0003(권한 관리 표), 0004(데이터셋·열 정의 표), 0005(수식 표), 0006(Superset 등록 표)로 나눠
+# revision 단위 왕복을 확인한다.
+ACCESS_TABLE_ACL = {
+    "users": "bi_app=ar/bi_owner",
+    "teams": "bi_app=ar/bi_owner",
+    "team_members": "bi_app=ard/bi_owner",
+}
+ACCESS_COLUMN_ACL = {
+    ("users", "display_name"),
+    ("users", "is_admin"),
+    ("users", "is_active"),
+    ("teams", "name"),
+    ("teams", "is_active"),
+    ("team_members", "role"),
+}
+DATASET_TABLE_ACL = {
+    "datasets": "bi_app=ar/bi_owner",
+    "dataset_columns": "bi_app=ar/bi_owner",
+}
+DATASET_COLUMN_ACL = {
+    ("datasets", "name"),
+    ("datasets", "date_unit"),
+    ("datasets", "base_date_column_id"),
+    ("datasets", "status"),
+    ("datasets", "def_version"),
+    ("datasets", "def_hash"),
+    ("dataset_columns", "display_name"),
+    ("dataset_columns", "type"),
+    ("dataset_columns", "required"),
+    ("dataset_columns", "rules"),
+    ("dataset_columns", "tag"),
+    ("dataset_columns", "position"),
+}
+FORMULA_TABLE_ACL = {
+    "formulas": "bi_app=ar/bi_owner",
+    "formula_deps": "bi_app=ard/bi_owner",
+}
+FORMULA_COLUMN_ACL = {
+    ("formulas", "expression"),
+    ("formulas", "ast"),
+    ("formulas", "ast_hash"),
+}
+SUPERSET_TABLE_ACL = {
+    "superset_datasets": "bi_app=ar/bi_owner",
+    "superset_dashboards": "bi_app=ar/bi_owner",
+}
+SUPERSET_COLUMN_ACL = {
+    ("superset_datasets", "superset_dataset_id"),
+    ("superset_datasets", "display_name"),
+    ("superset_datasets", "sync_status"),
+    ("superset_datasets", "synced_at"),
+    ("superset_datasets", "last_error"),
+    ("superset_dashboards", "name"),
+    ("superset_dashboards", "is_active"),
+}
+STATIC_TABLE_ACL = {
+    **ACCESS_TABLE_ACL,
+    **DATASET_TABLE_ACL,
+    **FORMULA_TABLE_ACL,
+    **SUPERSET_TABLE_ACL,
+}
+STATIC_COLUMN_ACL = (
+    ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL
+)
+
+
+def expect_static_privileges(
+    snapshot: Snapshot,
+    *,
+    granted: bool,
+    table_acl: dict[str, str] | None = None,
+    column_acl: set[tuple[str, str]] | None = None,
+) -> list[str]:
+    """정적 표와 `bi_app` 권한(표·열 단위)이 head에는 정확히 있고 base에는 없는지 확인한다.
+
+    기본은 모든 정적 표(0003 + 0004 + 0005 + 0006)다. `table_acl`/`column_acl`로 revision 하나의
+    표만
+    볼 수 있다.
+    `bi_readonly`와 PUBLIC에는 아무 권한도 없어야 한다.
+    """
+    expected_tables = STATIC_TABLE_ACL if table_acl is None else table_acl
+    expected_columns = STATIC_COLUMN_ACL if column_acl is None else column_acl
+    problems: list[str] = []
+    relations = {
+        r[1]: r for r in snapshot["relations"] if r[0] == "public" and r[1] in expected_tables
+    }
+    if not granted:
+        if relations:
+            problems.append(f"정적 표가 남아 있음: {sorted(relations)}")
+        if any(r[0] == "public" and r[1] in expected_tables for r in snapshot["column_acl"]):
+            problems.append("정적 표의 열 권한이 남아 있음")
+        return problems
+    for name, expected in expected_tables.items():
+        row = relations.get(name)
+        if row is None:
+            problems.append(f"정적 표 {name} 없음")
+            continue
+        acl = row[4] or []
+        # 소유자 항목은 PostgreSQL 버전마다 문자가 다르다(17부터 m 추가). bi_app 항목만 정확히 본다.
+        others = [entry for entry in acl if not entry.startswith("bi_owner=")]
+        if others != [expected]:
+            problems.append(f"{name} 표 ACL이 기대와 다름: {acl}")
+    actual_columns = {
+        (r[1], r[2]): r[3] for r in snapshot["column_acl"] if r[0] == "public" and r[1] in relations
+    }
+    if set(actual_columns) != expected_columns:
+        problems.append(f"열 단위 UPDATE 권한 열이 기대와 다름: {sorted(actual_columns)}")
+    for key, acl in actual_columns.items():
+        if acl != ["bi_app=w/bi_owner"]:
+            problems.append(f"{key} 열 ACL이 기대와 다름: {acl}")
+    return problems
+
+
 def _current_revision(engine: Engine) -> str | None:
     with engine.connect() as conn:
         return MigrationContext.configure(conn).get_current_revision()
@@ -293,15 +431,87 @@ def main() -> int:
     base0 = take_snapshot(engine)
     step("출발 상태(db-bootstrap)", expect_bootstrap_state(base0))
     step("출발 상태 권한 없음", expect_privileges(base0, granted=False))
+    step("출발 상태 정적 표 없음", expect_static_privileges(base0, granted=False))
 
     command.upgrade(config, "head")
     head1 = take_snapshot(engine)
     step("upgrade 후 권한", expect_privileges(head1, granted=True))
+    step("upgrade 후 정적 표 권한", expect_static_privileges(head1, granted=True))
     try:
         command.check(config)
         step("alembic check", [])
     except Exception as error:
         step("alembic check", [f"{type(error).__name__}: {error}"])
+
+    # 0006(Superset 등록 표) 한 단계만: 내리면 0005 상태(등록 표만 사라짐), 올리면 head와 같다.
+    command.downgrade(config, "0005")
+    step6 = take_snapshot(engine)
+    step(
+        "0006 downgrade 후 0005 정적 표 권한 유지",
+        expect_static_privileges(
+            step6,
+            granted=True,
+            table_acl={**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL, **FORMULA_TABLE_ACL},
+            column_acl=ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL,
+        ),
+    )
+    step(
+        "0006 downgrade 후 등록 표 없음",
+        expect_static_privileges(
+            step6, granted=False, table_acl=SUPERSET_TABLE_ACL, column_acl=SUPERSET_COLUMN_ACL
+        ),
+    )
+    step("0006 downgrade 후 bi_data 권한 유지", expect_privileges(step6, granted=True))
+    command.upgrade(config, "head")
+    step("0006 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
+
+    # 0005(수식 표) 한 단계만: 0004까지 내리면 0004 상태(수식·등록 표가 사라짐), 올리면 head와 같다.
+    command.downgrade(config, "0004")
+    step5 = take_snapshot(engine)
+    step(
+        "0005 downgrade 후 0004 정적 표 권한 유지",
+        expect_static_privileges(
+            step5,
+            granted=True,
+            table_acl={**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL},
+            column_acl=ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL,
+        ),
+    )
+    step(
+        "0005 downgrade 후 수식·등록 표 없음",
+        expect_static_privileges(
+            step5,
+            granted=False,
+            table_acl={**FORMULA_TABLE_ACL, **SUPERSET_TABLE_ACL},
+            column_acl=FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL,
+        ),
+    )
+    step("0005 downgrade 후 bi_data 권한 유지", expect_privileges(step5, granted=True))
+    command.upgrade(config, "head")
+    step("0005 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
+
+    # 0004(데이터셋·열 정의 표) 한 단계: 0003까지 내리면 0003 상태(권한 관리 표만), 올리면
+    # head와 같다.
+    command.downgrade(config, "0003")
+    mid = take_snapshot(engine)
+    step(
+        "0004 downgrade 후 0003 정적 표 권한 유지",
+        expect_static_privileges(
+            mid, granted=True, table_acl=ACCESS_TABLE_ACL, column_acl=ACCESS_COLUMN_ACL
+        ),
+    )
+    step(
+        "0004 downgrade 후 데이터셋 표 없음",
+        expect_static_privileges(
+            mid,
+            granted=False,
+            table_acl={**DATASET_TABLE_ACL, **FORMULA_TABLE_ACL, **SUPERSET_TABLE_ACL},
+            column_acl=DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL,
+        ),
+    )
+    step("0004 downgrade 후 bi_data 권한 유지", expect_privileges(mid, granted=True))
+    command.upgrade(config, "head")
+    step("0004 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
 
     command.downgrade(config, "base")
     base2 = take_snapshot(engine)

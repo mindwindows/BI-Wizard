@@ -119,6 +119,7 @@ description: BI-Wizard 개발을 Gate 순서(RESEARCH & DECIDE → ENVIRONMENT B
 - 승인받지 못한 상태에서 사전 승인 항목을 적용했다면(긴급 포함) 즉시 사용자에게 보고하고 되돌릴지 묻는다.
 
 ## Git 규칙
+- **커밋 전 자체 점검(사용자 결정 2026-10-13):** 누가 고치든(리드 포함) 커밋 전에 바뀐 `.py` 파일은 `ruff check`와 `ruff format --check`(backend `pyproject.toml` 설정)를, 바뀐 프런트 파일은 lint와 typecheck를 직접 돌린다. 문서 규칙이며 훅·설정 변경은 없다(`scripts/manual/` 같은 CI 밖 스크립트도 포함).
 - `main`에 직접 커밋하거나 푸시하지 않는다.
 - 작업은 기능 브랜치에서 한다. 사용자가 지정한 브랜치가 있으면 그 브랜치를 쓴다.
 - 승인된 Gate 결과마다 커밋한다. 커밋 메시지는 한국어로 쓰고 Gate 이름을 넣는다.

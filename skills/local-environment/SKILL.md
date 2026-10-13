@@ -85,7 +85,7 @@ docker compose down                       # 볼륨 삭제 옵션(-v)은 쓰지 �
   docker compose up -d            # 바뀐 환경변수의 frontend, backend가 다시 만들어진다
   docker compose logs backend     # "받는 API 접두=" 로그와 접근 로그의 경로로 확인
   ```
-- 정적 파일 규칙: 하위 경로가 있으면 `${APP_BASE_PATH}/` **아래에서만** SPA fallback(없는 경로도 `index.html`)을 한다. 접두 밖 루트 경로는 정적 자산(`/`, `/index.html`, `/config.js`, `/assets/…`)만 서빙하고 나머지는 404다(앞단이 접두를 떼고 넘겨도 정적 자산은 서빙된다). 접두 없이 잘못 나간 요청이 200 HTML에 가려지지 않게 하려는 것이다. `APP_BASE_PATH`가 빈 값(루트 배포)이면 루트에서 SPA fallback을 한다.
+- 정적 파일 규칙: `${APP_BASE_PATH}/` 아래와 접두 밖 루트 모두 SPA fallback(없는 경로도 `index.html` 200)을 한다. 앞단이 접두를 떼고 넘기는 딥링크(`/datasets/42`)를 살리려는 결정이다(2026-10-12, `docs/decisions/03b` 17-1). 부작용으로 접두 밖 임의 경로(`/nope`)도 200 HTML이다. `/api/…`는 backend(없는 경로는 JSON 404), `/assets/…` 누락은 404, `/nginx-health`·`/config.js`는 그대로다.
 - `X-Forwarded-Proto/Host`: 이 nginx는 로컬 재현용이라 클라이언트가 보낸 값을 그대로 Superset에 전달한다. 앞단 프록시 없이 쓸 때 덮어쓰는 방법은 `frontend/nginx/templates/default.conf.template` 주석을 본다(새 변수 없음).
 - 프런트 코드는 `${basePath}/api/…`(호스트 없는 상대경로)로 호출한다. `basePath`는 컨테이너 시작 때 만들어지는 `config.js`(`window.__APP_CONFIG__`)에서 온다. 정적 파일은 접두가 있어도(유지 전달) 없어도(떼고 전달) 서빙된다.
 - 실제 하위 경로 값과 프록시의 접두 처리 방식은 웹서버 배포 때 관리자와 정한다(`docs/deploy-coordination.md`). 값을 바꿀 때는 `.env`만 고친다.
@@ -159,7 +159,25 @@ Superset 이미지 버전을 올릴 때(6.1.0 고정 변경은 사용자 승인)
 ### 인증 스텁 스위치 (`AUTH_STUB_ENABLED`)
 - 기본 `false`. 스텁은 개발·시험에서만 켠다. `true`로 두려면 `.env`에 `APP_ENV=local`(또는 `test`)이 **명시**되어 있어야 한다. `.env.example`을 복사했다면 이미 `APP_ENV=local`이 들어 있다.
 - `true`인데 `APP_ENV`가 없거나 비었거나 `local`/`test`가 아니면(예: `production`, `staging`, `Local`) backend는 서비스하지 않는다(compose에서는 `restart: unless-stopped` 때문에 종료와 재시작을 반복하고 포트는 열리지 않는다. `docker compose logs backend`에 "AUTH_STUB_ENABLED=true는 …" 오류). 판정은 `backend/app/config.py`, 시험은 `backend/tests/test_config.py`다.
-- 운영 배포 설정에서는 `false`로 둔다. 스텁 로그인 화면·API는 FU-1a에서 만든다(지금은 스위치만 있다).
+- 운영 배포 설정에서는 `false`로 둔다. 켜졌을 때만 스텁 어댑터와 `/api/dev/*`(DV1~DV3)가 등록되고, 꺼져 있으면 경로가 없으며(404) 신원 어댑터도 없어 모든 업무 API가 401이다. 사용법과 시험용 사용자 시드는 `skills/permission-management/SKILL.md`다.
+
+### backend 운영 의존성과 라이선스 기록 (`httpx`, FU-1e)
+backend 이미지(`runtime`)의 `requirements.txt`는 `requirements.in`(직접 의존성)에서 만든 전체 고정 목록이다. FU-1e에서 **`httpx==0.28.1`**(Superset REST 호출, 승인 `docs/decisions/03b` 3-3·23-1)이 운영 의존성으로 올라왔다(이전에는 시험 전용). 같은 시점에 운영 목록에 새로 들어온 전이 패키지는 `httpcore`와 `certifi`이고 나머지 넷은 이미 있던 것이다. 아래는 `python:3.12.15-slim-bookworm` 컨테이너의 빈 가상환경에서 `pip install httpx==0.28.1`로 확인한 값이며 `requirements-dev.txt`의 고정 버전과 같다. 선택 extras(`brotli`·`cli`·`http2`·`socks`·`zstd`, `trio`)는 설치하지 않고 쓰지 않는다.
+
+| 패키지 | 버전 | 라이선스 | 구분 | 운영 `requirements.txt` | 판정 |
+| --- | --- | --- | --- | --- | --- |
+| `httpx` | 0.28.1 | BSD-3-Clause | 직접 | 새로 추가 | 허용형 |
+| `httpcore` | 1.0.9 | BSD-3-Clause | `httpx` 필수 | 새로 추가 | 허용형 |
+| `certifi` | 2026.7.22 | **MPL-2.0** | `httpx`·`httpcore` 필수 | 새로 추가 | **이름 예외 1건**(03b 23-1 A) |
+| `anyio` | 4.15.1 | MIT | `httpx` 필수 | 이미 있음(같은 버전) | 허용형 |
+| `h11` | 0.16.0 | MIT | `httpcore` 필수 | 이미 있음(같은 버전) | 허용형 |
+| `idna` | 3.20 | BSD-3-Clause | `httpx`·`anyio` 필수 | 이미 있음(같은 버전) | 허용형 |
+| `typing_extensions` | 4.16.0 | PSF-2.0 | `anyio` 필수(Python 3.15 미만) | 이미 있음(같은 버전) | 허용형 |
+
+- **`certifi` 예외 조건:** 수정·재배포(포크·패치·번들 가공)하지 않고 pip가 설치한 그대로 쓴다. 이름으로 승인한 예외이며 MPL 전체 허용이 아니다(`bi-review` 라이선스 항목, `docs/deploy-coordination.md` 23번). 새 MPL·LGPL 패키지는 여전히 새 승인이 필요하다.
+- 참고 실측: Superset 이미지 안에도 `certifi` 2025.6.15(MPL-2.0)가 이미 있다(업스트림 이미지 내부 구성요소). backend 이미지에는 독립 패키지가 없었고 pip 내부 묶음(2024.08.30)만 있었다.
+- backend는 내부 주소 `http://superset:8088`(HTTP)만 부르므로 `certifi` 인증서 묶음을 실제로 쓰지 않는다. `httpx.Client`는 `trust_env=False`(프록시 환경변수를 타지 않음)로 만든다.
+- 새 전이 의존성이 생기거나 버전이 바뀌면 이 표를 먼저 갱신한다(`requirements.in` → 컨테이너에서 `pip freeze` → 이 표). 운영 이미지에서 확인: `docker run --rm --entrypoint python bi-wizard-backend:local -c "import httpx; print(httpx.__version__)"`.
 
 ### 마이그레이션 왕복 테스트와 `alembic check` (tmpfs 테스트 DB)
 빈 DB에서 `upgrade head → downgrade base → upgrade head`가 성공하고 권한 상태가 복원되는지 확인한다. 테스트 DB `postgres-test`는 compose profile `test`에만 있고 데이터가 tmpfs(256MB 제한)라 호스트에 포트를 열지 않는다. DB 접속은 `bi_owner`다.
@@ -168,7 +186,7 @@ docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
 docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test migrate python -m migrations.roundtrip
 ```
-`migrations/roundtrip.py`가 한 번에 한다: 스냅샷 A(db-bootstrap 직후, base) → `upgrade head` → 스냅샷 B(권한 확인) → `alembic check` → `downgrade base` → 스냅샷 A′(A와 비교) → `upgrade head` → 스냅샷 B′(B와 비교). 스냅샷은 역할 속성·멤버십, schema/표 소유자와 ACL, 기본 권한(`pg_default_acl`), `public` 표·열·인덱스다. 정규화: schema ACL의 NULL과 소유자 명시의 차이, 비어 있는 `alembic_version`. 출력 `[roundtrip] … 통과`가 모두 나오고 종료 코드 0이면 통과다. DB의 현재 revision이 base가 아니면 아무것도 하지 않고 종료 코드 2로 끝난다(쓰고 있는 DB에서 `downgrade`를 돌리지 않는다).
+`migrations/roundtrip.py`가 한 번에 한다: 스냅샷 A(db-bootstrap 직후, base) → `upgrade head` → 스냅샷 B(권한 확인) → `alembic check` → **`downgrade 0005`(0006 한 단계: Superset 등록 표 `superset_datasets`·`superset_dashboards`와 권한만 사라지는지) → `upgrade head`(B와 같은지) → `downgrade 0004`(0005 한 단계: 수식 표 `formulas`·`formula_deps`와 권한이 사라지는지) → `upgrade head`(B와 같은지) → `downgrade 0003`(0004 한 단계: 권한 관리 표·권한은 남고 데이터셋 표·권한만 사라지는지) → `upgrade head`(B와 같은지)** → `downgrade base` → 스냅샷 A′(A와 비교) → `upgrade head` → 스냅샷 B′(B와 비교). 스냅샷은 역할 속성·멤버십, schema/표 소유자와 ACL, **열 단위 ACL**(`pg_attribute.attacl`, `0003`의 `UPDATE (열)` 권한), 기본 권한(`pg_default_acl`), `public` 표·열·인덱스다. 단계 `정적 표 권한`은 `0003`·`0004`(`datasets`·`dataset_columns`)·`0005`(`formulas`·`formula_deps`)·`0006`(`superset_datasets`·`superset_dashboards`)의 `bi_app` 표·열 권한이 head에서 정확히 있고(`bi_readonly`·PUBLIC 없음) base에서는 없는지 확인한다. 정규화: schema ACL의 NULL과 소유자 명시의 차이, 비어 있는 `alembic_version`. 출력 `[roundtrip] … 통과`가 모두 나오고 종료 코드 0이면 통과다. DB의 현재 revision이 base가 아니면 아무것도 하지 않고 종료 코드 2로 끝난다(쓰고 있는 DB에서 `downgrade`를 돌리지 않는다).
 
 개별 명령(필요할 때):
 ```
@@ -181,20 +199,20 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
 ```
 docker compose --profile test stop postgres-test
 docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이너만 제거(tmpfs 데이터도 사라짐)
-docker compose --profile test down                    # 프로젝트 전체 종료(운영 데이터 볼륨은 유지)
 ```
-- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: 첫 실제 revision(`0002`)의 `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다.
+- 규칙: 모든 revision에 `downgrade()`를 구현하고 마이그레이션 안의 SQL은 보간 없는 고정 문자열만 쓴다. D5 의미: `downgrade()`는 `bi_data` schema 자체를 지우지 않는다(db-bootstrap 소유). 왕복 테스트는 "빈 DB로 돌아간다"가 아니라 정적 표와 권한 상태가 복원되는지를 본다. `0003`(`users`·`teams`·`team_members`)과 `0004`(`datasets`·`dataset_columns`, 순환 FK를 먼저 끊음)·`0005`·`0006`(`superset_dashboards`·`superset_datasets`)의 `downgrade()`는 표를 외래키 역순으로 `DROP`하므로 `tests/test_migrations.py`의 `DROP_APPROVED`에 기록이 있다. `0004`를 내려도 `bi_data`의 `ds_*` 표는 남는다(동적 객체는 마이그레이션 대상이 아니다).
 - 자동 생성 초안(`alembic revision --autogenerate`)에 `DROP`이 있으면 적용하지 말고 사용자 확인을 받는다(D2: `public` 정적 표 대상). 동적 객체(`bi_data`의 `ds_*`, `dv_*`, `de_*`)는 `target_metadata`(`backend/app/db_metadata.py`, 정적 표만)와 `include_name`/`include_object` 필터로 비교에서 제외되어 삭제 후보에 섞이지 않는다. 권한(GRANT)은 `alembic check`가 잡지 못하므로 위 스냅샷 비교로 확인한다.
 - 새 revision은 `backend/migrations/versions/`에 둔다. head는 항상 하나여야 한다(DB 없이 pytest가 검사: `alembic heads`가 둘이면 병합 revision이 필요). 마이그레이션 실행은 `migrate` 서비스뿐이며 앱 코드는 시작 때 마이그레이션을 하지 않는다.
 
 ## 6. 관련 UI / API / command / DB
 - UI: 포털 `${APP_BASE_PATH}/`(Gate ②에서는 API/DB 상태 표시뿐), Superset `${SUPERSET_APP_ROOT}/`
-- API (브라우저 쪽 경로 기준, 업무 API는 아직 없음):
-  - `GET ${APP_BASE_PATH}/api/health` — FastAPI 상태 (`{"status":"ok"}`)
+- API (브라우저 쪽 경로 기준, 권한 관리 API는 `skills/permission-management/SKILL.md`):
+  - `GET ${APP_BASE_PATH}/api/health` — FastAPI 상태. 본문 `{status, app, views, views_failed_count, public_create, db_timezone}`: 앞 두 개는 프로세스 상태, 나머지 네 개는 **시작 자가 점검이 채운 메모리 값**이라 DB에 접속하지 않는다(`views`는 시작 대조와 이후 정의 변경이 확인한 활성 데이터셋 수, `views_failed_count`는 그중 수식 뷰(`dv_`·`de_`)를 만들지 못한 수로 0이 정상이며 FU-1d의 시작 시 해시 대조가 채운다(`skills/formula-column`, 실패는 관리자 화면 S9·`GET /api/checks/views`에 사유가 나온다), `public_create`는 `bi_app`이 `public`에 CREATE 권한이 있는지로 정상은 항상 `false`다 — `true`이면 backend가 **시작을 거부**한다(경고가 아니다, 03b 17-1 결정 5). `db_timezone`은 DB 시간대). 공개 응답이라 개수·불리언·시간대만 담고, 뷰 실패가 있어도 200이다
   - `GET ${APP_BASE_PATH}/api/health/db` — PostgreSQL `SELECT 1` (정상 200, 실패 503)
   - `GET ${SUPERSET_APP_ROOT}/health` — Superset (`OK`)
+  - 공통: 모든 `/api` 응답에 `X-Request-ID` 헤더가 붙는다. 이 두 health 경로만 인증 없이 열려 있고, 그 밖의 `/api` 경로는 `current_user`를 거쳐 신원 어댑터가 없으면 401 `UNAUTHENTICATED`이고, 사용자 조회 중 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다(로그아웃과 구분하며 접근은 닫혀 있다)(신원 방식은 미결정 8번이라 어댑터는 `AUTH_STUB_ENABLED=true`일 때만 스텁이 연결된다). 요청 처리 중 DB 연결 실패·끊김·풀 고갈과 **긴 잠금 아래 pg8000 소켓 시간 초과(`connect_args timeout` 5초; SQLAlchemy가 감싸지 않는 `TimeoutError`·`ConnectionError`·pg8000 `InterfaceError` 포함)도 503 `SERVICE_UNAVAILABLE`**이며 로그에는 예외 클래스 이름과 `request_id`만 남는다. 오류는 `{"error": {"code", "message", "details", "request_id"}}` 형식이고 `request_id`는 헤더와 같다. 장애 때 이 id로 `docker compose logs backend`를 찾는다.
 - command: `scripts\*.bat`, `docker compose …`, `alembic …`(migrate 서비스 안)
-- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`, 빈 schema `bi_data`), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
+- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`과 정적 표 `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`·`superset_datasets`·`superset_dashboards`, schema `bi_data`에 동적 객체), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
 
 ## 7. 실패 시 확인 방법
 | 증상 | 원인 | 확인과 해결 |
@@ -203,7 +221,10 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 | 포트 사용 중 | `FRONTEND_PORT`, `POSTGRES_PORT`, `BACKEND_PORT` 충돌 | `.env`의 포트를 바꾸고 `restart-local.bat` |
 | `db-bootstrap` 실패 | 비밀번호 변수 4개 중 하나가 비어 있음, `POSTGRES_USER`가 역할 이름과 같음, 또는 `POSTGRES_PASSWORD`가 볼륨 생성 때 값과 다름 | `docker compose logs db-bootstrap`. `POSTGRES_PASSWORD`는 DB 볼륨이 처음 만들어질 때만 적용된다. 값을 되돌리거나 psql에서 `\password`로 바꾼다 |
 | `migrate` 실패 | `POSTGRES_OWNER_PASSWORD` 불일치·누락, `db-bootstrap`이 먼저 성공하지 않음(`bi_owner`·`bi_data` 없음) | `docker compose logs migrate`. `.env`의 비밀번호를 고치고 `docker compose up -d`(db-bootstrap이 비밀번호를 다시 맞춘다) |
-| `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, 또는 `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님 | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
+| `backend`가 시작하지 않음 | `migrate` 실패, `POSTGRES_APP_PASSWORD` 누락, `AUTH_STUB_ENABLED=true`인데 `APP_ENV`가 `local`/`test`가 아님, 또는 **시작 자가 점검 거부**(`bi_app`에 SUPERUSER·CREATEROLE·CREATEDB·REPLICATION·BYPASSRLS 속성이 있음, `bi_app`에 `public` schema CREATE 권한이 있음, `bi_data`에 표·뷰·인덱스·제약·Identity 시퀀스 밖의 객체가 있음, `standard_conforming_strings`가 off, 정적 표·열이 DB에 없음). 뷰 대조(`views_failed_count`)는 시작을 막지 않는다. DB가 아직 안 올라왔으면 2초 간격 10회 재시도한 뒤 실패. 이름순 정렬 collation(`ko-KR-x-icu`)이 DB에 없으면 거부하지 않고 로그에 경고만 남기며 이름순이 DB 기본 순서로 돌아간다(한글 가나다순 아님, `skills/dataset-definition` "이름순 정렬") | `docker compose logs migrate backend`. 원인을 고치고 `docker compose up -d` |
+| 일부 읽기(행 조회·점검)만 가끔 503 `SERVICE_UNAVAILABLE` | 정의 변경(`CREATE OR REPLACE VIEW` 등)의 긴 잠금이나 느린 읽기 때문에 읽기가 소켓 시간 초과(5초)를 넘은 경우일 수 있다. 잠시 뒤 다시 시도하면 되고, 반복되면 로그의 `TimeoutError`와 같은 시각의 정의 변경·긴 쿼리를 확인한다(`skills/formula-column` 7절) | `docker compose logs backend`(`request_id`), `pg_stat_activity` |
+| 모든 `/api` 요청이 503 `SERVICE_UNAVAILABLE` | DB 장애뿐 아니라 **사용자 조회 설정 오류(권한 거부·표 없음)도 같은 503으로 보인다**(로그아웃 401과 구분하는 fail-closed). 예: `migrate`가 `0003` 전, 접속 계정이 `bi_app`이 아님 | `${APP_BASE_PATH}/api/health/db`, `docker compose logs migrate backend`. `migrate`가 head까지 적용됐는지, backend 접속 계정이 `bi_app`인지 확인 |
+| `downgrade` 뒤 다시 `upgrade`하고 데이터셋을 만들면 `ds_1 already exists` | `downgrade`는 `bi_data.ds_*`(동적 객체)를 지우지 않는데 `datasets`의 번호(Identity)는 1부터 다시 시작한다 | **`downgrade` 뒤에는 `bi_data.ds_*`를 `skills/admin-cleanup`으로 정리한 뒤 다시 `upgrade`한다** |
 | `superset-init` 실패 | 메타 DB 접속 실패, 키 누락, 계정 변수 누락·이름 중복, 표식 없는 기존 계정과의 이름 충돌("표식 없는 기존 계정 정리"), `GUEST_TOKEN_JWT_EXP_SECONDS`가 300이 아님, `없는 권한: …`(역할 목록의 권한이 Superset에 없음), 권한 동기화 실패, `migrate` 실패로 시작하지 않음 | `docker compose logs superset-init`(실패 단계 이름 바로 앞 `[superset-init]` 줄을 본다). `없는 권한`이 `schema_access`이면 `POSTGRES_DB` 값과 업무 데이터 연결 이름이 `sync_permissions` 단계의 결과와 같은지 확인 |
 | `up`이 `SUPERSET_SERVICE_PASSWORD`(또는 발급 계정 변수) `is missing a value`로 멈춤 | 예전 `.env`에 EW-3 변수 4개가 없음 | `.env.example`에서 4줄을 추가하고 비밀번호 2개를 채운다(`scripts\validate-env.bat`이 이름을 알려 준다) |
 | 로그에 `점검 필요: 역할 bi_author` | Superset 업그레이드 등으로 `Gamma`의 권한이 바뀜 | 위 "Superset 업그레이드 점검" 1번 |
@@ -219,13 +240,13 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 | 컨테이너가 메모리 부족으로 종료(137) | `mem_limit` 초과 | `docker stats --no-stream`. 한도 조정은 `docs/decisions/03a-deploy-environment.md`를 따른다 |
 
 ## 8. 검증 방법
-- 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다.
+- 자동 테스트: backend `docker build --target test backend`(ruff, pytest), frontend `docker build --target test frontend`(eslint, tsc, vitest). Jenkins도 같은 명령을 쓴다. 이 빌드에는 PostgreSQL이 없어 **`pg` 변형(실제 DB 시험: 정적 표 권한 매트릭스, 시작 자가 점검, LAST_ADMIN·정의 변경 동시성, 동적 DDL, 입력 그리드 동시성·pg8000 동작 `test_entry_concurrency.py`)은 건너뛴다.** 실제 DB 시험은 tmpfs 테스트 DB(`postgres-test`)에 연결해 따로 실행한다: `skills/permission-management/SKILL.md`의 "검증 방법". CI처럼 건너뜀이 통과로 보이면 안 되는 곳에서는 시험을 실행하는 환경에 **`REQUIRE_PG=1`**을 주면 PostgreSQL 시험 환경이 없을 때 `pg` 변형이 건너뛰지 않고 실패한다(미설정이면 건너뜀. 시험 실행용 옵션이라 `.env`·`.env.example`·compose에 넣지 않는다).
 - 구성 검증: `docker compose config --quiet`
 - 수동: `scripts\health-check.bat`이 모두 `[OK]`이고 마지막에 `All checks passed.`를 출력하며 `docker compose ps`에서 상시 서비스가 `healthy`.
 - Superset 계정·역할: `docker compose logs superset-init`에 `bi_service` 4개, `bi_guest_issuer` 2개, `bi_author_schema` 1개, `bi_guest` 4개, `bi_author` 새로 만듦 또는 `Gamma와 차이 없음`, 계정 2개, 마지막 `점검 요약: 강제 복구 N건`이 나오고 종료 코드 0. `GUEST_TOKEN_JWT_EXP_SECONDS`가 300이 아니면 `superset-init`은 실패한다(`설정 GUEST_TOKEN_JWT_EXP_SECONDS가 … 입니다`). 표식 없는 기존 계정과 이름이 충돌해도 실패한다. `Public` 역할 권한은 0개이고 발급 계정으로 `rls`가 비어 있지 않은 입장권 요청은 400이다. 서비스 계정으로 `…/api/v1/security/csrf_token/`·`/api/v1/dataset/`는 200, `/api/v1/database/`와 입장권 발급(`guest_token`)은 403, 발급 계정은 입장권 발급 권한이 있다. 로그에 비밀번호가 없다.
 - 읽기 전용 계정: `bi_readonly`로 `SELECT 1`은 되고 `CREATE TABLE`·`INSERT`는 거부된다. `statement_timeout`은 30초다.
 - 계정 분리: backend 컨테이너의 환경에 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_OWNER_PASSWORD`가 없고(`docker compose config`), `/api/health/db`가 정상이며 `pg_stat_activity`의 backend 접속 계정이 `bi_app`이다. `bi_app`은 `public`에 `CREATE TABLE`, `SET ROLE bi_owner`, `alembic_version` 조회가 거부되고 `bi_data`에는 표·뷰를 만들 수 있다. 마이그레이션 왕복 테스트(`python -m migrations.roundtrip`) 통과.
-- 정적 검사(Docker 없이): `sh scripts/ci-validate-env.sh`(변수 목록·계정 분리·backend에 `GUEST_TOKEN_JWT_SECRET` 없음·`superset_config.py`의 `GUEST_ROLE_NAME`/`PUBLIC_ROLE_LIKE`·`roles.sql` 규칙), `sh scripts/test-ci-validate-env.sh`(그 검사의 네거티브 케이스).
+- 정적 검사(Docker 없이): `sh scripts/ci-validate-env.sh`(변수 목록·계정 분리·backend에 `GUEST_TOKEN_JWT_SECRET` 없음·`superset_config.py`의 `GUEST_ROLE_NAME`/`PUBLIC_ROLE_LIKE`·`roles.sql` 규칙·frontend에 `ag-grid-enterprise`/`ag-charts-enterprise` 없음과 의존성 정확한 버전 고정), `sh scripts/test-ci-validate-env.sh`(그 검사의 네거티브 케이스).
 - 두 가지 `APP_PROXY_STRIP_PREFIX` 값 모두에서 `${APP_BASE_PATH}/api/health`가 응답하고 backend 접근 로그의 경로가 각각 `${APP_BASE_PATH}/api/health`, `/api/health`다.
 - BAT 실행 검증은 사용자 Windows PC에서 한다(AI 세션은 Linux라 실행하지 않는다).
 - 메모리 실측: `docker stats --no-stream`(결과는 `docs/deploy-coordination.md` 5번에 기록).
@@ -234,4 +255,9 @@ docker compose --profile test down                    # 프로젝트 전체 종�
 - `.claude/skills/env-bootstrap`: 이 환경을 만들고 점검하는 개발용 절차(Environment Ready 체크리스트)
 - `.claude/skills/qa-verification`: 기동과 Health 검증 절차
 - `.claude/skills/product-skill-authoring`: 이 Skill의 작성 형식
-- 업무 기능 Skill(`skills/<기능>/SKILL.md`)은 Gate ③ 이후 추가되며, 모두 이 환경이 통과한 상태를 사용 조건으로 삼는다.
+- `skills/permission-management`: `/health` 새 필드·시작 자가 점검·스텁 스위치의 사용 쪽(최초 관리자 명령, `/api/dev/*`, 실제 DB 시험 방법)
+- `skills/dataset-definition`: `bi_data`의 `ds_<번호>` 원본 표(동적 DDL, 시작 자가 점검이 허용하는 객체 종류), `0004` 정적 표, 정의 변경 잠금(`DEFINITION_BUSY`)
+- `skills/formula-column`: `0005` 정적 표(`formulas`·`formula_deps`), 수식 뷰 `dv_<번호>`·`de_<번호>`, 시작 시 정의 해시 대조와 `/api/health`의 `views`·`views_failed_count`, `standard_conforming_strings` 고정(`startup_params`)
+- `skills/dashboard-link`(FU-1e): `0006` 정적 표(`superset_datasets`·`superset_dashboards`), `httpx` 운영 의존성(위 표), backend → Superset 내부 호출(`http://superset:8088` 코드 상수 + `SUPERSET_APP_ROOT`), 서비스·발급 계정 변수 사용
+- `skills/data-entry`(FU-1c): `ds_<번호>`의 행 읽기·쓰기(새 revision 없음, 시작 자가 점검과 충돌 없음), 행 쓰기 잠금(`WRITE_BUSY`), 실제 DB 동시성 시험
+- 업무 기능 Skill(`skills/<기능>/SKILL.md`)은 모두 이 환경이 통과한 상태를 사용 조건으로 삼는다.

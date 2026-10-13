@@ -2,7 +2,23 @@
 
 import copy
 
-from migrations.roundtrip import diff, expect_bootstrap_state, expect_privileges, normalize
+from migrations.roundtrip import (
+    ACCESS_COLUMN_ACL,
+    ACCESS_TABLE_ACL,
+    DATASET_COLUMN_ACL,
+    DATASET_TABLE_ACL,
+    FORMULA_COLUMN_ACL,
+    FORMULA_TABLE_ACL,
+    STATIC_COLUMN_ACL,
+    STATIC_TABLE_ACL,
+    SUPERSET_COLUMN_ACL,
+    SUPERSET_TABLE_ACL,
+    diff,
+    expect_bootstrap_state,
+    expect_privileges,
+    expect_static_privileges,
+    normalize,
+)
 
 
 def _snapshot(*, granted: bool, version_table: bool = False) -> dict:
@@ -93,3 +109,180 @@ def test_diff_detects_privilege_left_behind():
     problems = diff(normalize(base), normalize(leftover))
     assert any(p.startswith("schemas") for p in problems)
     assert any(p.startswith("default_acl") for p in problems)
+
+
+# --- 정적 표 권한(0003 + 0004 + 0005 + 0006) ----
+
+
+def _static_snapshot(
+    *, access: bool, dataset: bool, formula: bool = True, superset: bool = True
+) -> dict:
+    """정적 표와 `bi_app` 권한이 있는 가짜 스냅샷."""
+    snap = _snapshot(granted=True)
+    relations = []
+    column_acl = []
+    groups = []
+    if access:
+        groups.append((ACCESS_TABLE_ACL, ACCESS_COLUMN_ACL))
+    if dataset:
+        groups.append((DATASET_TABLE_ACL, DATASET_COLUMN_ACL))
+    if formula:
+        groups.append((FORMULA_TABLE_ACL, FORMULA_COLUMN_ACL))
+    if superset:
+        groups.append((SUPERSET_TABLE_ACL, SUPERSET_COLUMN_ACL))
+    for tables, columns in groups:
+        for name, acl in tables.items():
+            relations.append(["public", name, "r", "bi_owner", [acl, "bi_owner=arwdDxt/bi_owner"]])
+        for table, column in sorted(columns):
+            column_acl.append(["public", table, column, ["bi_app=w/bi_owner"]])
+    snap["relations"] = relations
+    snap["column_acl"] = column_acl
+    return snap
+
+
+def test_static_privileges_cover_access_dataset_formula_and_superset_tables():
+    assert set(STATIC_TABLE_ACL) == {
+        "users",
+        "teams",
+        "team_members",
+        "datasets",
+        "dataset_columns",
+        "formulas",
+        "formula_deps",
+        "superset_datasets",
+        "superset_dashboards",
+    }
+    assert STATIC_COLUMN_ACL == (
+        ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL
+    )
+    # Superset 등록 표: 불변 열(dataset_id, id, embedded_uuid, created_at)은 UPDATE 열 밖이고
+    # 두 표 모두 DELETE가 없다.
+    assert SUPERSET_TABLE_ACL == {
+        "superset_datasets": "bi_app=ar/bi_owner",
+        "superset_dashboards": "bi_app=ar/bi_owner",
+    }
+    for immutable_column in (
+        ("superset_datasets", "dataset_id"),
+        ("superset_dashboards", "id"),
+        ("superset_dashboards", "embedded_uuid"),
+        ("superset_dashboards", "created_at"),
+    ):
+        assert immutable_column not in SUPERSET_COLUMN_ACL
+    # 수식 표: column_id는 불변(UPDATE 열 밖), formulas에는 DELETE가 없고 formula_deps만
+    # DELETE가 있다.
+    assert ("formulas", "column_id") not in FORMULA_COLUMN_ACL
+    assert FORMULA_TABLE_ACL == {
+        "formulas": "bi_app=ar/bi_owner",
+        "formula_deps": "bi_app=ard/bi_owner",
+    }
+    # 불변 열은 UPDATE 권한 열 목록에 없다(06 §2).
+    immutable = {
+        ("datasets", "team_id"),
+        ("datasets", "created_by"),
+        ("datasets", "created_at"),
+        ("datasets", "id"),
+        ("dataset_columns", "dataset_id"),
+        ("dataset_columns", "kind"),
+        ("dataset_columns", "id"),
+    }
+    assert not immutable & DATASET_COLUMN_ACL
+    # 계산 열 결과 형 때문에 type은 갱신할 수 있다(원본 열 금지는 앱 규칙).
+    assert ("dataset_columns", "type") in DATASET_COLUMN_ACL
+    # DELETE는 team_members에만 있다.
+    assert [n for n, acl in STATIC_TABLE_ACL.items() if "d" in acl.split("=")[1].split("/")[0]] == [
+        "team_members",
+        "formula_deps",
+    ]
+
+
+def test_static_privileges_expected_at_head_and_absent_at_base():
+    head = _static_snapshot(access=True, dataset=True)
+    assert expect_static_privileges(head, granted=True) == []
+    base = _static_snapshot(access=False, dataset=False, formula=False, superset=False)
+    assert expect_static_privileges(base, granted=False) == []
+    assert expect_static_privileges(base, granted=True)
+    assert expect_static_privileges(head, granted=False)
+
+
+def test_static_privileges_per_revision_for_the_0004_step():
+    """0004 한 단계: 0003 상태에서는 권한 관리 표만 있고 데이터셋 표는 없다."""
+    mid = _static_snapshot(access=True, dataset=False)
+    assert (
+        expect_static_privileges(
+            mid, granted=True, table_acl=ACCESS_TABLE_ACL, column_acl=ACCESS_COLUMN_ACL
+        )
+        == []
+    )
+    assert (
+        expect_static_privileges(
+            mid, granted=False, table_acl=DATASET_TABLE_ACL, column_acl=DATASET_COLUMN_ACL
+        )
+        == []
+    )
+    head = _static_snapshot(access=True, dataset=True)
+    assert expect_static_privileges(
+        head, granted=False, table_acl=DATASET_TABLE_ACL, column_acl=DATASET_COLUMN_ACL
+    )
+
+
+def test_static_privileges_per_revision_for_the_0005_step():
+    """0005 한 단계: 0004 상태에서는 수식 표만 없다."""
+    mid = _static_snapshot(access=True, dataset=True, formula=False, superset=False)
+    assert (
+        expect_static_privileges(
+            mid,
+            granted=True,
+            table_acl={**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL},
+            column_acl=ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL,
+        )
+        == []
+    )
+    assert (
+        expect_static_privileges(
+            mid, granted=False, table_acl=FORMULA_TABLE_ACL, column_acl=FORMULA_COLUMN_ACL
+        )
+        == []
+    )
+    # 기본(모든 정적 표) 기대는 수식 표가 빠진 상태를 틀렸다고 본다.
+    assert expect_static_privileges(mid, granted=True)
+
+
+def test_static_privileges_detect_wrong_acl_and_extra_column_grant():
+    head = _static_snapshot(access=True, dataset=True)
+    wide = _static_snapshot(access=True, dataset=True)
+    wide["column_acl"].append(["public", "datasets", "team_id", ["bi_app=w/bi_owner"]])
+    assert any("열 단위" in p for p in expect_static_privileges(wide, granted=True))
+    delete = _static_snapshot(access=True, dataset=True)
+    for row in delete["relations"]:
+        if row[1] == "datasets":
+            row[4][0] = "bi_app=ard/bi_owner"  # DELETE가 붙었다
+    assert any("datasets 표 ACL" in p for p in expect_static_privileges(delete, granted=True))
+    readonly = _static_snapshot(access=True, dataset=True)
+    readonly["relations"][3][4].append("bi_readonly=r/bi_owner")
+    assert any("표 ACL" in p for p in expect_static_privileges(readonly, granted=True))
+    assert expect_static_privileges(head, granted=True) == []
+
+
+def test_static_privileges_per_revision_for_the_0006_step():
+    """0006 한 단계: 0005 상태에서는 Superset 등록 표만 없다."""
+    mid = _static_snapshot(access=True, dataset=True, formula=True, superset=False)
+    assert (
+        expect_static_privileges(
+            mid,
+            granted=True,
+            table_acl={**ACCESS_TABLE_ACL, **DATASET_TABLE_ACL, **FORMULA_TABLE_ACL},
+            column_acl=ACCESS_COLUMN_ACL | DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL,
+        )
+        == []
+    )
+    assert (
+        expect_static_privileges(
+            mid, granted=False, table_acl=SUPERSET_TABLE_ACL, column_acl=SUPERSET_COLUMN_ACL
+        )
+        == []
+    )
+    assert expect_static_privileges(mid, granted=True)
+    head = _static_snapshot(access=True, dataset=True)
+    assert expect_static_privileges(
+        head, granted=False, table_acl=SUPERSET_TABLE_ACL, column_acl=SUPERSET_COLUMN_ACL
+    )

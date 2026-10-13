@@ -3,12 +3,77 @@ body {
   font-family: system-ui, "Malgun Gothic", sans-serif;
   background: #f6f7f9;
   color: #1f2933;
+  font-size: 14px;
 }
 
-.shell {
-  max-width: 640px;
-  margin: 48px auto;
-  padding: 0 24px;
+/* 1920x1080 데스크톱 기준. 전체 폭을 쓰고 상단 Navigation은 고정 높이다. */
+.app {
+  min-width: 1280px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 44px;
+  padding: 0 16px;
+  background: #1f2933;
+  color: #fff;
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  gap: 4px;
+}
+
+.nav-admin {
+  margin-left: auto;
+}
+
+.nav a {
+  color: #cbd2d9;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.nav a:hover {
+  background: #323f4b;
+}
+
+.nav a.active {
+  background: #3e4c59;
+  color: #fff;
+}
+
+.content {
+  flex: 1;
+  padding: 16px;
+}
+
+.muted {
+  color: #616e7c;
+  /* 안내·설명 문단: 어절 중간에서 갈라지지 않게 하되 긴 URL·번호는 넘치지 않게 한다. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  margin: 8px 0;
+}
+
+.state-error {
+  padding: 8px 12px;
+  border: 1px solid #d64545;
+  background: #fdf2f2;
+  color: #8a1c1c;
 }
 
 table {
@@ -20,4 +85,1050 @@ th,
 td {
   text-align: left;
   padding: 6px 16px 6px 0;
+}
+
+/* ---- 단위 1a: 셸 상단, 접근 안내, S6 권한 관리 (콘솔형, 정보 밀도 우선) ---- */
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-right .nav-admin {
+  margin-left: 0;
+}
+
+.work-team,
+.stub-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.stub-switcher {
+  flex: none;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px dashed #f0b429;
+  border-radius: 4px;
+  color: #f7c948;
+}
+
+.stub-error,
+.state-error-inline {
+  color: #8a1c1c;
+}
+
+/* 개발용 신원 선택 상자: 가장 긴 항목("이름 (login_id) - 관리자")이 잘리지 않게 내용 폭 그대로 둔다. */
+.stub-switcher select {
+  flex: none;
+  width: max-content;
+  max-width: none;
+}
+
+.topbar-right {
+  flex: none;
+}
+
+.who {
+  white-space: nowrap;
+}
+
+.stub-error {
+  color: #ffb3b3;
+}
+
+.muted-on-dark,
+.who {
+  color: #cbd2d9;
+  font-size: 13px;
+}
+
+.state-ok {
+  padding: 8px 12px;
+  border: 1px solid #2f8f5b;
+  background: #effaf3;
+  color: #14532d;
+}
+
+:focus-visible {
+  outline: 2px solid #1d6fd6;
+  outline-offset: 1px;
+}
+
+.access-denied {
+  max-width: 640px;
+  margin: 48px auto;
+}
+
+.console-forms {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 280px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.panel h2,
+.pending h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.panel label,
+.toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.panel label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.grid-scroll {
+  overflow: auto;
+  /* 위 머리글·안내·아래 쪽 이동줄을 뺀 화면 높이. 마지막 행이 잘려 보이지 않게 스크롤하고 머리글은 고정(.matrix thead th sticky). */
+  max-height: calc(100vh - 120px);
+  min-height: 200px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.matrix {
+  margin: 0;
+  width: 100%;
+  table-layout: auto;
+}
+
+.matrix thead th:first-child,
+.matrix tbody th {
+  width: 260px;
+  min-width: 220px;
+  max-width: 320px;
+}
+
+.matrix thead th:not(:first-child),
+.matrix tbody td {
+  min-width: 140px;
+}
+
+.matrix th,
+.matrix td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #e4e7eb;
+  vertical-align: top;
+}
+
+.matrix thead th {
+  position: sticky;
+  top: 0;
+  background: #f0f2f5;
+  z-index: 1;
+}
+
+.matrix tbody th {
+  position: sticky;
+  left: 0;
+  background: #fff;
+  font-weight: 400;
+}
+
+.matrix .inactive,
+.matrix tr.inactive th,
+.matrix tr.inactive td {
+  color: #7b8794;
+  background: #f5f5f5;
+}
+
+.matrix td.changed {
+  background: #fff8db;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #d9e8fb;
+  color: #124a8f;
+  font-size: 12px;
+}
+
+.badge-off {
+  background: #e4e7eb;
+  color: #52606d;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: #1d6fd6;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 12px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.pending {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 41, 51, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.modal {
+  width: 640px;
+  max-height: 80vh;
+  overflow: auto;
+  padding: 16px 20px;
+  background: #fff;
+  border-radius: 6px;
+}
+
+.modal h2 {
+  margin-top: 0;
+}
+
+/* ---- 단위 1b: S2 목록, S3 만들기, S4 작업공간(3분할)과 Inspector ---- */
+.button-link {
+  display: inline-block;
+  padding: 4px 12px;
+  border: 1px solid #1d6fd6;
+  border-radius: 4px;
+  background: #1d6fd6;
+  color: #fff;
+  text-decoration: none;
+}
+
+.list-table {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #cbd2d9;
+}
+
+.list-table th,
+.list-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #e4e7eb;
+}
+
+.list-table thead th {
+  background: #f0f2f5;
+}
+
+.workspace-grid {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.workspace-left {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 480px;
+  padding: 8px;
+  border: 1px dashed #cbd2d9;
+  background: #fff;
+}
+
+.inspector {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.inspector.collapsed {
+  padding: 4px;
+}
+
+.inspector-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.inspector-bar input[type="range"] {
+  flex: 1;
+}
+
+.inspector-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector-form h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.field .hint {
+  font-size: 12px;
+}
+
+.info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.info dt {
+  color: #616e7c;
+}
+
+.info dd {
+  margin: 0;
+}
+
+.column-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.column-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.column-list button.selected,
+.header-preview th.selected {
+  background: #d9e8fb;
+}
+
+.header-preview {
+  margin: 0;
+}
+
+.header-preview th {
+  padding: 6px 16px;
+  border-bottom: 2px solid #9aa5b1;
+  white-space: nowrap;
+}
+
+/* ---- S4 입력 그리드(단위 1c) ---- */
+.workspace-center {
+  border-style: solid;
+}
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entry-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-range {
+  min-width: 140px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-help {
+  margin: 0;
+  font-size: 12px;
+}
+
+.state-readonly {
+  margin: 0;
+  padding: 4px 8px;
+  background: #f0f2f5;
+  border: 1px solid #cbd2d9;
+  font-size: 13px;
+}
+
+.entry-grid {
+  height: 62vh;
+  min-height: 360px;
+}
+
+.entry-grid .cell-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.entry-grid .cell-blank {
+  background: repeating-linear-gradient(135deg, #fafbfc, #fafbfc 6px, #f0f2f5 6px, #f0f2f5 8px);
+}
+
+.entry-grid .cell-blank-mark {
+  display: inline-block;
+  min-width: 1px;
+}
+
+.entry-grid .cell-formula {
+  color: #323f4b;
+  font-style: italic;
+  /* 계산 열(읽기 전용) 표지: 왼쪽 세로 선. 배경은 건드리지 않아 빈 칸 빗금·오류 붉은색이 그대로 보인다. */
+  box-shadow: inset 3px 0 0 #9fb3c8;
+}
+
+/* 값이 있는 계산 칸만 회색 배경. 빈 칸(.cell-blank)은 입력 열과 같은 빗금, 오류 칸(.cell-error)은 붉은색을 유지한다. */
+.entry-grid .cell-formula:not(.cell-blank):not(.cell-error) {
+  background: #eef2f7;
+}
+
+.entry-grid .cell-error {
+  background: #fde8e8;
+  color: #9b1c1c;
+  font-weight: 600;
+}
+
+.entry-grid .cell-invalid {
+  outline: 2px solid #c81e1e;
+  outline-offset: -2px;
+}
+
+.entry-grid .cell-conflict {
+  outline: 2px solid #b45309;
+  outline-offset: -2px;
+  background: #fff7e0;
+}
+
+.entry-grid .cell-pending {
+  opacity: 0.65;
+}
+
+.entry-grid .cell-draft,
+.entry-grid .row-draft {
+  background: #f4fbf4;
+}
+
+.entry-grid .cell-rowlabel {
+  color: #52606d;
+  font-size: 12px;
+}
+
+.entry-grid .cell-entry-label {
+  color: #1c64f2;
+  font-weight: 600;
+}
+
+.entry-grid .header-selected {
+  background: #d9e8fb;
+}
+
+.entry-grid .header-formula {
+  font-style: italic;
+}
+
+/* 계산 열 머리글 구별: 기울임 + 수식 기호(글자 내용은 바꾸지 않는다) + 아래 선 */
+.entry-grid .header-formula .ag-header-cell-text::before {
+  content: "ƒ ";
+  font-style: normal;
+  font-weight: 700;
+  color: #3e4c59;
+}
+
+.entry-grid .header-formula {
+  box-shadow: inset 0 -3px 0 #9fb3c8;
+}
+
+.entry-grid .cell-errcode {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cell-flag {
+  font-size: 11px;
+  color: #b45309;
+  font-weight: 600;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid #cbd2d9;
+  background: #f8f9fb;
+}
+
+.notice-error {
+  border-color: #e0a3a3;
+  background: #fdf2f2;
+}
+
+.notice-ok {
+  border-color: #9bd2a6;
+  background: #f1faf3;
+}
+
+.panel-conflict,
+.panel-invalid,
+.panel-confirm,
+.panel-draft,
+.panel-ok {
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.panel-conflict {
+  border-color: #e3b04b;
+  background: #fff9e8;
+}
+
+.panel-invalid {
+  border-color: #e0a3a3;
+  background: #fdf2f2;
+}
+
+.panel-ok {
+  border-color: #9bd2a6;
+  background: #f1faf3;
+}
+
+.entry .panel h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.entry .panel ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+/* ---- 1b·1c 화면 정리 ---- */
+.panel-form {
+  max-width: 720px;
+}
+
+/* 한국어 안내·오류 문구가 단어 중간에서 갈라지지 않게 어절 단위로 줄을 바꾼다. */
+.panel-form p,
+.state-error-inline {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.panel-form input,
+.panel-form select {
+  max-width: 100%;
+}
+
+/* flex 열 패널 안의 버튼은 내용 폭만 차지한다(붙여넣기 확인창·결과, 폼). */
+.panel > button {
+  align-self: flex-start;
+}
+
+.inspector-form p,
+.inspector-form .field > span {
+  margin: 0;
+}
+
+/* ---- 1d 수식 편집기·수식 보기·점검 ---- */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.list-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  padding: 1px 8px;
+  border: 1px solid #9fb3c8;
+  border-radius: 12px;
+  background: #f0f4f8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip-formula {
+  font-style: italic;
+  background: #e1e8ef;
+}
+
+.formula-input textarea {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.formula-input textarea[aria-invalid="true"] {
+  border-color: #c81e1e;
+  outline: 1px solid #c81e1e;
+}
+
+.suggest {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #9fb3c8;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.suggest-more {
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: #f0f2f5;
+  border: 1px solid #9fb3c8;
+  border-top: 0;
+}
+
+.suggest li {
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.suggest li.active,
+.suggest li:hover {
+  background: #d9e8fb;
+}
+
+.formula-errors {
+  padding: 6px 8px;
+  border: 1px solid #e0a3a3;
+  background: #fdf2f2;
+  font-size: 13px;
+}
+
+.formula-errors ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.formula-marked,
+.formula-text {
+  margin: 0 0 4px;
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid #cbd2d9;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.formula-bad {
+  background: #fcc;
+  color: #7a1010;
+  text-decoration: underline wavy #c81e1e;
+}
+
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1d6fd6;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.formula-preview {
+  border-top: 1px solid #cbd2d9;
+  padding-top: 6px;
+}
+
+.formula-preview h3,
+.formula-view h3,
+.formula-help h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.preview-table {
+  font-size: 12px;
+}
+
+.preview-table th,
+.preview-table td {
+  padding: 4px 6px;
+}
+
+.preview-table th:first-child,
+.preview-table td:first-child {
+  white-space: nowrap;
+  min-width: 82px;
+}
+
+.preview-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
+.preview-table td:nth-child(3) {
+  min-width: 120px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.column-info {
+  margin-top: 8px;
+}
+
+.column-info > summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.entry-grid-notice {
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  background: #fff7e0;
+  border: 1px solid #e0b64a;
+}
+
+.preview-table .preview-error {
+  background: #fde8e8;
+  color: #9b1c1c;
+  font-weight: 600;
+}
+
+.preview-table .preview-empty {
+  color: #7b8794;
+  background: repeating-linear-gradient(135deg, #fafbfc, #fafbfc 6px, #f0f2f5 6px, #f0f2f5 8px);
+}
+
+.preview-stale {
+  opacity: 0.55;
+}
+
+.formula-help summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.function-list dt {
+  margin-top: 6px;
+}
+
+.function-list dd {
+  margin: 0 0 0 12px;
+  font-size: 12px;
+}
+
+.formula-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.formula-info {
+  text-align: left;
+}
+
+.error-cells {
+  padding: 4px 8px;
+  background: #fafbfc;
+}
+
+/* 선택한 계산 열 칸의 전체 값: 38자리도 잘리지 않게 줄을 바꾼다 */
+.selected-cell { margin-top: 8px; }
+.selected-cell-value { overflow-wrap: anywhere; user-select: all; }
+
+/* ---- 단위 1e: S7 대시보드, S8 연결 관리, S9 Superset 동기 ---- */
+.screen-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.screen-head h1 {
+  margin: 0;
+}
+
+.author-guide {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.author-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.author-guide ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 형식 코드(,.2f · y_axis_format 등)는 조각 단위로 줄이 갈라지지 않게 한다. 문장은 어절 단위로 줄을 바꾼다. */
+.author-guide code {
+  white-space: nowrap;
+}
+
+/*
+ * S7은 화면(뷰포트) 높이에 맞춘다: 헤더·안내를 뺀 나머지를 임베드가 채우고, 안쪽 스크롤은 Superset이 처리한다.
+ * 페이지 자체의 세로 스크롤바가 이중으로 생기지 않도록 이 화면에서만 앱 높이를 100vh로 고정한다.
+ * 안내문을 펼쳐 공간이 모자라면 임베드는 최소 높이를 지키고 본문(.content)이 한 겹으로만 스크롤한다.
+ */
+.app:has(.dashboards-page) {
+  height: 100vh;
+  min-height: 0;
+}
+
+.app:has(.dashboards-page) > .content {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.dashboards-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboards-page > * {
+  flex: none;
+}
+
+.dashboards-page > .dashboards-layout {
+  flex: 1 1 auto;
+}
+
+.dashboards-layout {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  margin-top: 8px;
+  min-height: 0;
+}
+
+.dashboard-list {
+  flex: 0 0 260px;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.dashboard-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dashboard-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid #e4e7eb;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dashboard-item:hover {
+  background: #f0f2f5;
+}
+
+.dashboard-item.active {
+  background: #d9e8fb;
+  font-weight: 600;
+}
+
+.dashboard-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-view h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+/* SDK iframe은 높이 100%로 채우므로 칸의 높이를 명시한다. */
+.embed-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.embed-wrap > .state {
+  flex: none;
+}
+
+.embed-frame {
+  flex: 1 1 auto;
+  min-height: 320px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.embed-frame[hidden] {
+  display: none;
+}
+
+.embed-mount,
+.embed-mount iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.admin-help ol {
+  margin: 4px 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.inline-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* S9 동기 목록: 배지·버튼·날짜·헤더는 한 줄로 두고, 좁으면 표 영역이 가로로 스크롤한다. */
+.status-grid > * {
+  min-width: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.sync-table th,
+.sync-table td {
+  white-space: nowrap;
+}
+
+.sync-table td.sync-name,
+.sync-table td.sync-error {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  min-width: 200px;
+}
+
+.sync-table .badge,
+.sync-table button {
+  white-space: nowrap;
+}
+
+.status-sync .toolbar {
+  gap: 12px;
+}
+
+.sync-registered {
+  background: #d7f0e0;
+  color: #14532d;
+}
+
+.sync-pending {
+  background: #fff3c4;
+  color: #6f4e00;
+}
+
+.sync-failed {
+  background: #fbd5d5;
+  color: #8a1c1c;
+}
+
+/* S9: 1920 폭에서 Superset 동기 구역과 뷰 재생성 구역을 나란히 둔다. */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(760px, 1fr));
+  gap: 12px;
+  align-items: start;
 }

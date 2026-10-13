@@ -12,7 +12,10 @@
 #     guest token(EW-4, AP-1): backend와 migrate는 GUEST_TOKEN_JWT_SECRET을 받지 않고(직접 서명 금지) backend/app 코드에도 이
 #     이름이 없다. superset/superset_config.py는 GUEST_ROLE_NAME을 bi_guest로 두고 PUBLIC_ROLE_LIKE와
 #     GUEST_TOKEN_JWT_EXP_SECONDS(입장권 유효 시간, 기본 300초 유지, EW-5)를 설정하지 않는다.
-#  6) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
+#  6) AG Grid Enterprise 혼입 방지(03b 15절): frontend/package.json과 package-lock.json에 ag-...enterprise 계열과
+#     @ag-grid-enterprise/*가 없고(key, name, resolved, 별칭 값 모두) frontend/src 코드에도 문자열로 나오지 않으며, frontend 의존성은
+#     정확한 버전으로 고정한다(^ ~ * latest 범위 금지, 의존성 섹션을 찾지 못하면 실패).
+#  7) docker compose config/build 용 더미 값 env 파일을 만든다(기본 .env.ci, 비밀이 아닌 가짜 값, Git 제외).
 # 사용: sh scripts/ci-validate-env.sh [출력파일]
 # 이 검사의 네거티브 케이스 시험: sh scripts/test-ci-validate-env.sh
 # 변수를 추가/삭제하면 아래 REQUIRED(와 Secret이면 SECRETS)도 같은 변경에서 고친다.
@@ -238,6 +241,56 @@ if service_code frontend | grep -Eq '^[[:space:]]+(-[[:space:]]*)?[A-Z_]*(POSTGR
   fail "frontend 서비스에 DB/Secret/스텁 변수(또는 env_file)를 넘기면 안 됩니다(Superset 계정 변수 포함)."
 fi
 
+# AG Grid Enterprise 혼입 방지(03b 15절): 커뮤니티 에디션만 쓴다. 파일이나 frontend/src 가 아직 없으면 해당 검사는 건너뛴다.
+# 이름 패턴: ag-...enterprise 계열 전체(ag-grid-enterprise, ag-charts-enterprise, ag-grid-charts-enterprise 등)와
+# @ag-grid-enterprise/*. package.json/package-lock.json 은 키뿐 아니라 "name", "resolved" URL, npm 별칭 값
+# ("x": "npm:ag-grid-enterprise@1") 등 어느 위치든 줄에 패턴이 나오면 실패시킨다(JSON에는 주석이 없다).
+FE_PKG=frontend/package.json
+FE_LOCK=frontend/package-lock.json
+FE_SRC=frontend/src
+ENT_NAME='(ag-[A-Za-z0-9._-]*enterprise|@ag-grid-enterprise/)'
+for file in "$FE_PKG" "$FE_LOCK"; do
+  [ -f "$file" ] || continue
+  if grep -Eq "$ENT_NAME" "$file"; then
+    fail "$file 에 AG Grid Enterprise 패키지(ag-...enterprise 계열, @ag-grid-enterprise/*)가 있습니다(커뮤니티 에디션만 허용)."
+  fi
+done
+if [ -d "$FE_SRC" ]; then
+  # 줄 단위로 검사한다. 순수 주석 줄(// * /* 로 시작하고 같은 줄에 코드가 없는 줄)은 제외한다(문서의 금지 문구 오탐 방지).
+  # 줄 앞의 `/* ... */` 는 떼고 남은 코드를 검사한다. 따옴표 문자열 "ag-...enterprise" 가 코드에 나오면
+  # import/require/동적 import/from 뒤 줄바꿈 import 모두 걸린다(문자열 자체를 본다).
+  fe_list="${TMPDIR:-/tmp}/ci-validate-fe-src.$$"
+  find "$FE_SRC" -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
+    -o -name '*.mjs' -o -name '*.cjs' -o -name '*.mts' -o -name '*.cts' \) > "$fe_list"
+  while IFS= read -r srcfile; do
+    if sed -E 's#^[[:space:]]*/\*.*\*/##' "$srcfile" | grep -Ev '^[[:space:]]*(//|\*|/\*)' |
+      grep -Eq "[\"'\`](ag-[A-Za-z0-9._-]*enterprise|@ag-grid-enterprise/)"; then
+      fail "$srcfile 이(가) AG Grid Enterprise 패키지를 import 합니다(커뮤니티 에디션만 허용)."
+    fi
+  done < "$fe_list"
+  rm -f "$fe_list"
+fi
+# frontend 의존성은 정확한 버전 고정이다(블록 스타일 JSON 전제: 섹션은 2칸 들여쓰기, 항목은 한 줄에 하나).
+# 의존성 섹션을 하나도 찾지 못하면 실패한다(탭 들여쓰기·한 줄 JSON 등 검사할 수 없는 형식이 통과하는 fail-open 방지).
+if [ -f "$FE_PKG" ]; then
+  pkg_scan="$(awk '
+    /^  "(dependencies|devDependencies|optionalDependencies|peerDependencies|overrides)"[[:space:]]*:[[:space:]]*\{/ {
+      print "@@SECTION"
+      if ($0 !~ /\{[[:space:]]*\}/) on = 1
+      next
+    }
+    on && /^  \}/ { on = 0 }
+    on { print }
+  ' "$FE_PKG")"
+  if ! printf '%s\n' "$pkg_scan" | grep -q '^@@SECTION$'; then
+    fail "$FE_PKG 에서 의존성 섹션(dependencies 등)을 찾지 못했습니다(2칸 들여쓰기 블록 스타일 JSON만 검사할 수 있습니다)."
+  fi
+  unpinned="$(printf '%s\n' "$pkg_scan" | grep -E ':[[:space:]]*"' | grep -Ev ':[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?"' || true)"
+  if [ -n "$unpinned" ]; then
+    fail "$FE_PKG 에 정확한 버전이 아닌 의존성이 있습니다(^ ~ * latest 범위 금지): $(printf '%s' "$unpinned" | tr -s '[:space:]' ' ')"
+  fi
+fi
+
 # compose.yml 에 latest 태그가 없다.
 if grep -Eq 'image:.*:latest' "$COMPOSE"; then fail "compose.yml 에 :latest 태그가 있습니다."; fi
 
@@ -313,9 +366,35 @@ else
     "\\getenv app_pw POSTGRES_APP_PASSWORD" \
     "\\getenv owner_pw POSTGRES_OWNER_PASSWORD" \
     "\\set ON_ERROR_STOP on" \
-    "SET LOCAL log_min_error_statement = panic"; do
+    "SET log_statement = 'none';" \
+    "SET log_min_duration_statement = -1;" \
+    "SET log_min_duration_sample = -1;" \
+    "SET log_transaction_sample_rate = 0;" \
+    "SET log_min_error_statement = panic;" \
+    "RESET log_statement;" \
+    "RESET log_min_duration_statement;" \
+    "RESET log_min_duration_sample;" \
+    "RESET log_transaction_sample_rate;" \
+    "RESET log_min_error_statement;"; do
     printf '%s\n' "$body" | grep -qF -- "$needle" || fail "$ROLES 에 필수 문장이 없습니다: $needle"
   done
+  # 로그 억제 SET 5줄은 BEGIN; 앞(비밀번호 문장보다 앞), RESET 5줄은 COMMIT; 뒤에 있어야 한다.
+  begin_ln="$(printf '%s\n' "$body" | grep -n '^BEGIN;' | head -1 | cut -d: -f1)"
+  commit_ln="$(printf '%s\n' "$body" | grep -n '^COMMIT;' | head -1 | cut -d: -f1)"
+  for stmt in "SET log_statement = 'none';" "SET log_min_duration_statement = -1;" "SET log_min_duration_sample = -1;" \
+    "SET log_transaction_sample_rate = 0;" "SET log_min_error_statement = panic;"; do
+    ln="$(printf '%s\n' "$body" | grep -nF -- "$stmt" | head -1 | cut -d: -f1)"
+    if [ -z "$ln" ] || [ -z "$begin_ln" ] || [ "$ln" -ge "$begin_ln" ]; then fail "$ROLES 의 '$stmt' 는 BEGIN; 앞에 있어야 합니다."; fi
+  done
+  for stmt in "RESET log_statement;" "RESET log_min_duration_statement;" "RESET log_min_duration_sample;" \
+    "RESET log_transaction_sample_rate;" "RESET log_min_error_statement;"; do
+    ln="$(printf '%s\n' "$body" | grep -nF -- "$stmt" | head -1 | cut -d: -f1)"
+    if [ -z "$ln" ] || [ -z "$commit_ln" ] || [ "$ln" -le "$commit_ln" ]; then fail "$ROLES 의 '$stmt' 는 COMMIT; 뒤에 있어야 합니다."; fi
+  done
+  # 로그 설정은 세션 SET/RESET만 쓴다. 역할·DB 수준(ALTER ROLE/DATABASE ... SET log_*)은 금지한다.
+  if printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*ALTER[[:space:]]+(ROLE|DATABASE)[^;]*[[:space:]]SET[[:space:]]+log_'; then
+    fail "$ROLES 에 ALTER ROLE/DATABASE ... SET log_* 가 있습니다(세션 SET만 허용)."
+  fi
 fi
 
 if [ "$failed" -ne 0 ]; then

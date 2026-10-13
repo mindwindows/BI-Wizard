@@ -98,6 +98,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | FU-7 엑셀 가져오기 | 그리드·정의·참조 열 검증을 재사용, 업로드 상한(EW-2)과 적재 시간 측정이 첫 작업. 업무 가치가 크면 FU-2 직후로 당길 수 있음(비구속) |
 
 ## 8. FU-1 합격 기준 개요 (`03b` 5-2·6-1에 있는 것만, 상세는 07·08)
+- 훅의 embedded uuid 등록 대조는 H0 실측 2건으로 대체한다(`08-superset-embedding.md` §9, 실측 2 해석은 확정(사용자 판정 2026-10-13: 조건의 목적은 미등록 대시보드의 새 임베드 설정을 막는 것이고 `can_set_embedded`는 Admin만 가진다. `can_write Dashboard`는 내용 편집 권한이며, 조건 ①로 Superset이 읽는 데이터는 원래 모두에게 공개된 것뿐이다)).
 - 수식 미리보기와 뷰 결과의 **불일치 0건**(X-26에서 `CAST` 적용 후에도 남은 22건의 원인 분석 포함, 차분 시험은 07 §6).
 - X-26 주입 사례 10종 + 역슬래시 사례를 **회귀 시험으로 고정**. 완화책 3가지(세션 `standard_conforming_strings` 고정, 역슬래시·제어문자·NUL 거부, 생성 후 재읽기 비교·불일치 시 롤백)와 런타임 DDL `bi_app` 실행을 시험한다.
 - 인증 스텁 fail-closed(`bi-review` 7-5): 스위치 `AUTH_STUB_ENABLED`는 미설정이면 꺼짐(기본 false)이고, 켜졌을 때 `APP_ENV`가 **명시적으로 설정**(코드 기본값 `local`이 채운 경우는 미설정으로 봄, 예: pydantic `model_fields_set`)되어 있고 허용 목록(local·test) 안일 때만 시작을 허용하며, 미설정·밖·알 수 없는 값이면 backend가 시작을 거부함을 시험한다. 프런트 스텁 UI는 `/dev/stub-users` 응답 여부로 판별(config.js 변경 없음)하고 시험용 사용자 시드 명령도 같은 거부 규칙을 따른다.

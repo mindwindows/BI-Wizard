@@ -11,11 +11,12 @@
 | 경로 | 모든 경로는 `${APP_BASE_PATH}/api/…`이고 아래 표는 `/api` 뒤만 쓴다. 버전 접두어 없음. 프록시가 접두를 떼든 말든 같은 경로(STRIP true/false 모두). 프런트는 `config.ts`의 `apiUrl()` 한 곳에서 조립하고 경로를 하드코딩하지 않는다 | [미답], 04 §5 |
 | 경계 | 브라우저는 FastAPI만 호출한다. DB·Superset REST 직접 호출 없음(Superset은 Embedded iframe·새 창 링크만). 요청 본문의 `rls`·Superset 숫자 id는 받지 않는다 | 04 §5, 08 §4 |
 | 형식 | JSON UTF-8, 필드 snake_case, id는 정수. 날짜 `YYYY-MM-DD`(월·연 단위도 기간 첫날, 예 `2026-03-01`), 시각 ISO 8601 `+09:00`. 첫날이 아닌 날짜는 거부(`NOT_PERIOD_START`). **`number` 값은 십진 문자열 `"1234.50"`, 미입력은 `null`** [제안: `numeric` 38자리가 JS 숫자 정밀도를 넘을 수 있어 일반 JSON 숫자 기본값과 다름, 승인 03b 6-2]. 글자는 NFC로 정규화해 저장 | 03b 2-2 W3-2, 07 §3 |
-| 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
-| 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
+| 이름 규칙 | 표시 이름 길이 상한 [제안]: 팀 50·사용자 표시 이름 100·로그인 ID 200(03b 17-1 결정 4)·데이터셋 100·열 100자(Superset 열 표시 이름은 1,024자를 넘으면 원인 없는 422이므로 앱이 먼저 막는다, 03c A-27). 열 이름에 `[` `]` `"`·제어문자 금지, `team`·`팀`·`row_id`·`행 번호` 예약어(07 §1, 06 §3-3). 위반은 `VALIDATION_ERROR`(필드 코드 `TOO_LONG`·`BAD_FORMAT`·`RESERVED`) | 06 §2, 07 §1 |
+| 인증 | `/health` 외 모두 `current_user` 한 곳을 거친다. 신원 없음 401 `UNAUTHENTICATED`, 신원은 있으나 `users`에 없음 403 `USER_NOT_REGISTERED`, 비활성 403 `USER_INACTIVE`, **사용자 조회 중 DB 장애는 503 `SERVICE_UNAVAILABLE`로 로그아웃(401)과 구분하며 접근은 닫혀 있다(03b 17-1 결정 2)**. 신원 출처(헤더/토큰/로그인)는 8번 미결정이라 계약에 없다 | 03b 1-1, 5-2 K3 |
 | 권한 표기 | `공개` 인증 불필요 / `읽기` 인증된 활성 사용자 전부(타 팀 포함) / `관리자` `users.is_admin` / `정의(팀)` 그 데이터셋 팀의 `definer`(관리자라도 팀 소속이 아니면 불가 [제안, 06 §4-1]) / `입력(팀)` 그 팀의 `entry` 또는 `definer` **[미답: 정의 담당자 입력 가부, 06 §4-1]** / `스텁` 스텁이 켜진 환경에서만 존재 | 03b 1-3, 5-2 K2, 06 §4 |
-| 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`. 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
-| 상태 코드 | 400 형식 오류 / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 502·503 Superset 불가 / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
+| 오류 | `{"error": {"code", "message", "details", "request_id"}}`. `message`는 한국어 사용자 문구(SQL·내부 용어 금지). 입력 검증 오류도 같은 형식: `code=VALIDATION_ERROR`, `details.fields[{field 또는 row_index+column_id, code, message}]`(본문을 JSON으로 읽지 못한 형식 오류는 `field`가 오류 위치 번호 문자열이다). 응답 헤더 `X-Request-ID` | [미답], 07 §9 |
+| 상태 코드 | 형식 오류(깨진 JSON·잘못된 쿼리·경로 형식 포함)와 규칙 위반은 모두 422 `VALIDATION_ERROR`로 통일(03b 17-1 결정 1, 400은 쓰지 않음) / 401 / 403 / 404 / 409 충돌 / 413 크기 / 422 규칙 위반 / 429 제한(`Retry-After`, 코드로 구분) / 405 `METHOD_NOT_ALLOWED` / 502·503 Superset 불가·DB 장애 `SERVICE_UNAVAILABLE` / 500 `INTERNAL_ERROR`(상세는 로그에만). 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`)은 503 `WRITE_BUSY`(재시도 가능, §3) | [미답] |
+| 잘림 표시 | 응답이 항목 수 상한에서 잘리면 `details.truncated: true`와 전체 건수 `details.total`을 함께 준다(검증 오류 `details.fields[]`는 200건, 충돌 `details.conflicts[]`는 1,000건에서 자름). 화면은 "일부만 표시됨"을 안내한다(03b 19-1 결정 4) | 03b 19-1 |
 | 목록 | 쿼리 `limit`(기본 50, 최대 200)·`offset`, 응답 `{items, total, limit, offset}`. 그리드의 부분 로딩은 AG Grid Community 지원 확인 뒤 적용(Enterprise 방식 금지) | [미답] |
 | 동시성 | 정의를 바꾸거나 행을 쓰는 요청은 `expected_version`(읽은 `def_version`)을 싣는다. 기존 행의 칸 수정은 칸마다 `expected` 키가 **필수**다(값 `null` = 빈 칸이었음, 키 생략·`expected` 전체 `null`은 422로 가드 우회를 막는다). 이미 같은 값이면 200. 모든 쓰기 성공 응답에 새 `def_version` | 03b 3-4 Y8, 06 §5, 03c X-24 |
 | 충돌 | HTTP 409 + 코드: `CELL_CONFLICT`·`PASTE_CONFLICT`·`DEFINITION_VERSION_MISMATCH`(04 후보) + `PERIOD_CONFLICT` **[제안, 04 A-3에 반영됨]**. `details`는 §3 표 | [미답] |
@@ -33,21 +34,21 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 ### 2-1. 권한 관리 — `access` · `permission-management`
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
 | --- | --- | --- | --- | --- | --- |
-| A1 | GET `/me` | 읽기 | - | 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, role}]}` | 403 미등록·비활성 |
+| A1 | GET `/me` | 읽기 | - | 200 `{id, display_name, is_active, is_admin, memberships[{team_id, team_code, team_name, team_is_active, role}]}` (비활성 팀 소속도 나오며 화면은 `team_is_active`로 작업 팀 선택에서 거른다) | 403 미등록·비활성, 503 `SERVICE_UNAVAILABLE` |
 | A2 | GET `/teams` | 읽기 | 목록 | 200 `{id, code, name, is_active}` 목록 | - |
 | A3 | POST `/teams` | 관리자 | `{code, name}` (`code` 불변, 형식 `^[a-z0-9_]{1,32}$` [제안: 뷰에 글자로 들어가므로 제한]) | 201 team | 409 `ALREADY_EXISTS`, 422 |
 | A4 | PATCH `/teams/{team_id}` | 관리자 | `{name?, is_active?}` (이름이 바뀌면 커밋 뒤 팀 단위 동기화 요청으로 그 팀의 가상 데이터셋 이름도 갱신, 08 §2-1) | 200 team | 409, 422 |
 | A5 | GET `/users` | 관리자 | `q, team_id, is_active` + 목록 | 200 `{id, login_id, display_name, is_admin, is_active, memberships[{team_id, role}]}` 목록 (S6 팀×사용자 격자는 이 응답으로 그림) | - |
 | A6 | POST `/users` | 관리자 | `{login_id, display_name, is_admin?}` (사전 등록) | 201 user | 409 `ALREADY_EXISTS` |
 | A7 | PATCH `/users/{user_id}` | 관리자 | `{display_name?, is_admin?, is_active?}` | 200 user | 409 `LAST_ADMIN`(마지막 활성 관리자 해제·비활성) [제안] |
-| A8 | PUT `/teams/{team_id}/members/{user_id}` | 관리자 | `{role: "definer"\|"entry"}` (없으면 추가, 있으면 역할 변경) | 200 `{team_id, user_id, role}` | 404 |
+| A8 | PUT `/teams/{team_id}/members/{user_id}` | 관리자 | `{role: "definer"\|"entry"}` (없으면 추가, 있으면 역할 변경. 비활성 팀·비활성 사용자에 대한 **추가·변경은 거부**) | 200 `{team_id, user_id, role}` | 404, 409 `TARGET_INACTIVE` |
 | A9 | DELETE `/teams/{team_id}/members/{user_id}` | 관리자 | - | 204 | 404 |
 
 ### 2-2. 데이터셋·열 정의 — `dataset` · `dataset-definition`
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
 | --- | --- | --- | --- | --- | --- |
-| B1 | GET `/datasets` | 읽기 | `team_id?` + 목록 | 200 Dataset 목록. 정렬: 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름(03b 2-4). 동기 상태는 E1에서 받아 화면이 결합(04 §3: dataset은 superset을 읽지 않음) | - |
-| B2 | POST `/datasets` | 정의(`team_id` 팀) | `{team_id, name, date_unit: "day"\|"month"\|"year"}` | 201 Dataset 상세. 등록 + `ds_`·`dv_` 생성이 한 트랜잭션(06 §3-5), 커밋 뒤 Superset 백그라운드 동기화 요청(등록 행이 없으면 E1이 `pending`으로 표시) | 409 `ALREADY_EXISTS`(팀 안 이름), 422, 503 `DEFINITION_BUSY` |
+| B1 | GET `/datasets` | 읽기 | `team_id?` + 목록 | 200 Dataset 목록. 정렬: 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름(03b 2-4, 이름순은 한글 가나다순, 03b 19-1 결정 2. A2·A5도 이름순). 동기 상태는 E1에서 받아 화면이 결합(04 §3: dataset은 superset을 읽지 않음) | - |
+| B2 | POST `/datasets` | 정의(`team_id` 팀) | `{team_id, name, date_unit: "day"\|"month"\|"year"}` | 201 Dataset 상세. 등록 + `ds_`·`dv_` 생성이 한 트랜잭션(06 §3-5), 커밋 뒤 Superset 백그라운드 동기화 요청(등록 행이 없으면 E1이 `pending`으로 표시) | 409 `ALREADY_EXISTS`(팀 안 이름), 409 `TARGET_INACTIVE`(`details.field=team`, 비활성 팀의 데이터셋 생성 불가, 03b 19-1 결정 1), 422, 503 `DEFINITION_BUSY` |
 | B3 | GET `/datasets/{id}` | 읽기 | - | 200 Dataset 상세 | 404 |
 | B4 | PATCH `/datasets/{id}` | 정의(팀) | `{expected_version, name?, date_unit?, base_date_column_id?}` | 200 Dataset 상세 | 409 `DEFINITION_VERSION_MISMATCH`(`details.current_version`), 422 `DATASET_HAS_ROWS`(날짜 단위·기준 날짜 열은 행 0개일 때만, 06 §3-3), 422(기준 열은 `raw` `date` 열만), 409 `ALREADY_EXISTS`(팀 안 이름), 503 `DEFINITION_BUSY` |
 | B5 | POST `/datasets/{id}/columns` | 정의(팀) | `{expected_version, display_name, type, required?, rules?, tag?, position?}` (원본 열만. 계산 열은 D4) | 201 `{column, def_version}` | 409 `DEFINITION_VERSION_MISMATCH`·`ALREADY_EXISTS`(열 이름), 422 `VALIDATION_ERROR`(예약어·금지 문자·길이), 503 `DEFINITION_BUSY` |
@@ -60,7 +61,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | C2 | POST `/datasets/{id}/rows` | 입력(팀) | `{expected_version, cells{"<column_id>": 값}}` (원본 열만, 필수 열 전부 필요. 기준 날짜 열은 DB NOT NULL이므로 `required=true`로 취급해 `REQUIRED`로 판정) | 201 `{row, def_version}` | 409 `PERIOD_CONFLICT`·`DEFINITION_VERSION_MISMATCH`, 422 `VALIDATION_ERROR`(필드 코드 `REQUIRED`·`OUT_OF_RANGE`·`BAD_FORMAT`·`NOT_IN_OPTIONS`·`NOT_PERIOD_START`·`READ_ONLY`·`TOO_LONG`), 503 `WRITE_BUSY` |
 | C3 | PATCH `/datasets/{id}/rows/{row_id}` | 입력(팀) | `{expected_version, changes[{column_id, expected, value}]}` (`expected` 키 필수, §1 동시성. 한 요청의 칸 전부가 가드, 하나라도 충돌하면 전체 취소) | 200 `{row, def_version}` | 404 `ROW_NOT_FOUND`, 409 `CELL_CONFLICT`(`details.conflicts[{row_id, column_id, current}]`), `PERIOD_CONFLICT`(이미 있는 기간으로 이동), `DEFINITION_VERSION_MISMATCH`, 422, 503 `WRITE_BUSY` |
 | C4 | POST `/datasets/{id}/rows/paste` | 입력(팀) | `{expected_version, column_ids[], rows[{row_id, expected[], values[]}]}` (규칙은 아래 목록) | 200 `{updated, created, created_rows[{index, row_id}], def_version}` | 409 `PASTE_CONFLICT`(전부 취소, `details.conflicts[{row_index, row_id, column_id, kind: "cell"\|"period"\|"row_missing", current}]`), 409 `DEFINITION_VERSION_MISMATCH`, 413 `PAYLOAD_TOO_LARGE`, 422 `VALIDATION_ERROR`, 503 `WRITE_BUSY` |
-- C4 규칙: 값은 문자열\|null(파서는 화면 몫, 07 §9)이고 서버가 열 타입으로 해석·재검증한다. `row_id=null`은 새 행(`expected` 없음), 정수는 기존 행이며 이때 `expected[]`가 **필수**(칸마다 화면이 가진 이전 값, 빈 칸 `null`)다. 처리 순서는 기존 행 `row_id` 오름차순 갱신 → 새 행 기간 오름차순(기준 날짜 열이 없으면 입력 순) 삽입으로 고정해 교착을 막고, 충돌은 첫 건에서 멈추지 않고 모아 한 번에 돌려준다(06 §5). **기존 행의 기준 날짜 열 값은 C4로 바꿀 수 없다**(`VALIDATION_ERROR` 필드 코드 `READ_ONLY`; 기간 이동은 C3 단건만, 유일 인덱스 위반으로 트랜잭션이 중단되어 충돌 목록에 못 모이기 때문). 그래서 `conflicts.kind="period"`는 새 행 삽입의 기간 충돌만 뜻한다.
+- C4 규칙: 값은 문자열\|null(파서는 화면 몫, 07 §9)이고 서버가 열 타입으로 해석·재검증한다. `row_id=null`은 새 행(`expected` 없음), 정수는 기존 행이며 이때 `expected[]`가 **필수**(칸마다 화면이 가진 이전 값, 빈 칸 `null`)다. 처리 순서는 기존 행 `row_id` 오름차순 갱신 → 새 행 기간 오름차순(기준 날짜 열이 없으면 입력 순) 삽입으로 고정해 교착을 막고, 충돌은 첫 건에서 멈추지 않고 모아 한 번에 돌려준다(06 §5). **기존 행에서 값이 `expected`와 같은 칸은 쓰지도 가드로 쓰지도 않는다(C3는 `changes`의 모든 칸이 가드이므로 다르다. 남이 건드린 다른 칸 때문에 헛충돌이 나지 않게 하려는 해석, 06 §5)**. **기존 행의 기준 날짜 열 값은 C4로 바꿀 수 없다**(`VALIDATION_ERROR` 필드 코드 `READ_ONLY`; 기간 이동은 C3 단건만, 유일 인덱스 위반으로 트랜잭션이 중단되어 충돌 목록에 못 모이기 때문). 그래서 `conflicts.kind="period"`는 새 행 삽입의 기간 충돌만 뜻한다.
 - C4 요청 상한 **A 승인(`03b` 6-2)**: 5,000행·요청 1MiB 이하(현재 nginx 기본 `client_max_body_size` 1m 안)이며 B안(상한을 늘리고 `frontend/nginx/templates/default.conf.template`의 `client_max_body_size`를 "요청 상한 + 1MiB"로 변경)은 채택하지 않았다. 1MiB는 nginx 기본 1m과 같아 요청이 백엔드 `PAYLOAD_TOO_LARGE`(JSON)에 닿기 전에 nginx 413(JSON 아님)을 받을 수 있으므로 프런트는 JSON이 아닌 413도 같은 안내로 처리한다.
 - **임시 행(draft) [제안]**: 필수 열 때문에 한 칸씩 입력하는 새 행은 서버에 저장하지 않는다. 화면이 클라이언트 메모리에서 필수 칸을 모두 채우면 C2를 한 번 부른다(붙여넣기 새 행은 C4 한 번). 서버에 `draft` 상태·표 열이 없다. 비용: 새로고침하면 미저장 행이 사라지고 다른 사용자에게 보이지 않으며, 같은 기간 충돌은 저장 때 알려진다. 대안(서버 draft 열)은 `ds_`·뷰·요약에 제외 조건이 들어가 후속 비용이 커서 비추천.
 - 삭제·보관 엔드포인트는 FU-1에 없다.
@@ -77,17 +78,17 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | D7 | GET `/checks/formula-errors` | 읽기 | 목록 | 200 `{dataset_id, dataset_name, team_name, column_id, column_name, error_count}` 목록(오류 칸이 있는 열만, S5) [제안: 읽기, 06 §4-1 열람과 같은 취급] | 429 `PREVIEW_BUSY`(전역 동시 상한) |
 | D8 | GET `/datasets/{id}/formula-errors` | 읽기 | `column_id?` + 목록 | 200 `{row_id, period, column_id, error, message}` 목록 | 404, 429 `PREVIEW_BUSY` |
 | D9 | GET `/checks/views` | 관리자 | - | 200 `{views, views_failed_count, failed[{dataset_id, dataset_name, reason, since}]}`. `reason`은 사유 코드·요약뿐(SQL·비밀 금지). `/health` 필드와 같은 집계(S9) | - |
-| D10 | POST `/checks/views/retry` | 관리자 | `{dataset_ids?}` (생략 = 실패 전부) | 200 `{rebuilt, views_failed_count}`. 요청 안에서 끝까지 처리, 데이터셋별 짧은 트랜잭션과 정의 변경과 같은 `datasets` 행 잠금(07 §8) | 503 `DEFINITION_BUSY` |
+| D10 | POST `/checks/views/retry` | 관리자 | `{dataset_ids?}` (생략 = 실패 전부) | 200 `{rebuilt, views_failed_count}`. 요청 안에서 끝까지 처리, 데이터셋별 짧은 트랜잭션과 정의 변경과 같은 `datasets` 행 잠금(07 §8) | 503 `DEFINITION_BUSY` **[1e 구현 확정]** 뷰를 다시 만든 데이터셋은 커밋 뒤 Superset 동기화를 요청한다(부수 효과) |
 
 ### 2-5. Superset·대시보드 — `superset` · `dashboard-link`
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
 | --- | --- | --- | --- | --- | --- |
-| E1 | GET `/superset/datasets` | 읽기 | 목록 | 200 `{dataset_id, superset_name, sync_status, synced_at, last_error}` 목록. 등록 행이 없는 데이터셋은 `pending`(04 A-3). `last_error`는 관리자에게만, 다른 사용자는 `null` [제안: 06 §4-1은 동기 현황을 관리자로 두었으나 04 S2 목록이 상태 열을 가짐] | - |
-| E2 | POST `/superset/sync` | 관리자 | `{dataset_ids?}` (생략 = `pending`·`failed` 전부) | 202 `{accepted[dataset_id]}`. 결과는 E1로 확인. Superset 불가가 다른 API를 막지 않는다(08 §2-1) | 404 |
-| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 승인]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - |
-| E4 | POST `/dashboards` | 관리자 | `{name, embedded_uuid}` (관리자가 Superset에서 임베드를 켜고 받은 번호를 수동 입력) | 201 dashboard | 409 `ALREADY_EXISTS`, 422(uuid 형식) |
+| E1 | GET `/superset/datasets` | 읽기 | 목록 | 200 `{dataset_id, superset_name, sync_status, synced_at, last_error}` 목록. 등록 행이 없는 데이터셋은 `pending`(04 A-3). `last_error`는 관리자에게만, 다른 사용자는 `null` [제안: 06 §4-1은 동기 현황을 관리자로 두었으나 04 S2 목록이 상태 열을 가짐] | - **[1e 구현 확정(03b 23-1 E ③)]** 쿼리 `limit`·`offset`·`sync_status`·`team_id`·`dataset_id`(반복)·`dataset_ids`(쉼표 목록) 추가, 응답은 `{items, total, limit, offset}` |
+| E2 | POST `/superset/sync` | 관리자 | `{dataset_ids?}` (생략 = `pending`·`failed` 전부) | 202 `{accepted[dataset_id]}`. 결과는 E1로 확인. Superset 불가가 다른 API를 막지 않는다(08 §2-1) | 404 **[1e 구현 확정]** 본문 생략 또는 `dataset_ids` 생략이면 등록 행이 없거나 `pending`·`failed`인 것 전부, 번호가 하나라도 없으면 전체 404, 최대 1,000개, 접수만 하는 202. **[1e-f]** 접수된 항목은 3초 디바운스 뒤에 처리된다(같은 데이터셋의 반복 접수는 한 번의 Superset 호출로 합쳐짐, 08 §2-1) |
+| E3 | GET `/dashboards` | 읽기 | `include_inactive?`(관리자만) + 목록 | 200 `{id, name, embedded_uuid, is_active}` 목록. 임베드 SDK가 uuid를 쓰므로 응답에 포함 [제안, 승인]. 08 §4 "클라이언트가 보낸 id는 받지 않는다"와 충돌하지 않는다: uuid는 읽기로만 공개되고 입장권 요청(E6)은 포털 `id`만 받는다 | - **[1e 구현 확정]** 응답은 `Page`(`{items,total,limit,offset}`) 형태, 이름순 |
+| E4 | POST `/dashboards` | 관리자 | `{name, embedded_uuid}` (관리자가 Superset에서 임베드를 켜고 받은 번호를 수동 입력) | 201 dashboard | 409 `ALREADY_EXISTS`, 422(uuid 형식) **[1e 구현 확정]** `name` 1~100자, `embedded_uuid`는 공백 제거·소문자 뒤 하이픈 36자 정규형만 받는다(대문자 입력은 소문자로 정규화) |
 | E5 | PATCH `/dashboards/{id}` | 관리자 | `{name?, is_active?}` (uuid 불변. 해제는 `is_active=false`, Superset 임베드는 관리자가 따로 끈다) | 200 dashboard | 404 |
-| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표를 읽지 않고(`rls` 빈 목록·리소스 1개 `dashboard`·uuid 형식·`user`만 거부, 포털 등록 표 일치 검사는 FU-1e 이월, EW-4 구현) 임베드 존재는 Superset 기본 검사가 확인하므로 오타·미임베드 uuid는 Superset이 400으로 거부해 502 `SUPERSET_REJECTED`가 된다. backend는 uuid를 하이픈 있는 36자 소문자 정규형으로 보낸다(훅 형식 검사, 08 §4) | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` |
+| E6 | POST `/dashboards/{id}/guest-token` | 읽기 | 본문 없음(있으면 422). 포털 대시보드 `id`만 받고 서버가 등록 표의 uuid를 찾는다. `rls`는 서버 고정 빈 목록, `user`는 서버가 항상 채운다(08 §4). 활성 여부는 backend가 확인하고(해제 = 발급 중단), Superset 검증 훅은 포털 표를 읽지 않고(`rls` 빈 목록·리소스 1개 `dashboard`·uuid 형식·`user`만 거부, 포털 등록 표 일치 검사는 FU-1e 이월, EW-4 구현) 임베드 존재는 Superset 기본 검사가 확인하므로 오타·미임베드 uuid는 Superset이 400으로 거부해 502 `SUPERSET_REJECTED`가 된다. backend는 uuid를 하이픈 있는 36자 소문자 정규형으로 보낸다(훅 형식 검사, 08 §4) | 200 `{token, expires_in}` (5분, `Cache-Control: no-store`, 로그 금지). SDK가 만료 전 다시 부른다 | 404(없음·비활성), 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 사용자별), 502 `SUPERSET_REJECTED`, 503 `SUPERSET_UNAVAILABLE` **[1e 구현 확정(03b 23-1 E ③)]** `expires_in`은 상수 300, 응답 `Cache-Control: no-store`, 사용자별 슬라이딩 윈도 60초 30회 초과 시 429 `GUEST_TOKEN_RATE_LIMITED`(`Retry-After`, 워커별 적용). **[1e-f]** 발급 계정 로그인 거부(`AUTH_FAILED`)는 502 `SUPERSET_REJECTED` 그대로이고 인증(401·403)이 본문 검사(422)보다 먼저이며, 거부 뒤 30초는 Superset을 부르지 않고 즉시 같은 502, `httpx.HTTPError`가 아닌 예상 밖 예외도 502(전역 500 아님, 08 §2-2) |
 
 ### 2-6. 상태 확인 · 개발·시험 전용
 | ID | 메서드 경로 | 권한 | 요청 | 성공 응답 | 오류 |
@@ -104,6 +105,9 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | 코드 | HTTP | `details` | 뜻 |
 | --- | --- | --- | --- |
 | `UNAUTHENTICATED` · `USER_NOT_REGISTERED` · `USER_INACTIVE` · `FORBIDDEN` | 401·403 | - | 신원 없음 / 미등록 / 비활성 / 권한 부족 |
+| `METHOD_NOT_ALLOWED` | 405 | - | 허용되지 않는 메서드(03b 17-1 결정 1) |
+| `SERVICE_UNAVAILABLE` | 503 | - | DB 등 내부 의존 장애(재시도 가능, 로그아웃과 구분, 접근은 닫힘, 03b 17-1 결정 2). Superset 불가는 `SUPERSET_UNAVAILABLE` |
+| `TARGET_INACTIVE` | 409 | `field` = `team` 또는 `user`(둘 다 비활성이면 `team`) | 비활성 팀·사용자에 소속 추가·변경 시도(A8, 03b 17-1 결정 3. 코드 이름은 구현 제안, 값은 구현 기준으로 확정) |
 | `NOT_FOUND` · `ROW_NOT_FOUND` | 404 | - | 대상 없음 / 행 없음(C3) |
 | `VALIDATION_ERROR` | 422 | `fields[]` | 필수·범위·형 등 입력 규칙 위반 |
 | `ALREADY_EXISTS` | 409 | `field` | 유일 값 중복(팀 코드·이름, 로그인 ID, 데이터셋·열 이름, uuid) |
@@ -113,7 +117,7 @@ ID는 04 §6 소단위 기준(A=1a 권한, B=1b 정의, C=1c 입력, D=1d 수식
 | `WRITE_BUSY` | 503 | `retry_after` | 행 쓰기의 락 대기 초과·교착(`55P03`·`40P01`). 재시도 가능, 정의 변경용 `DEFINITION_BUSY`와 구분 |
 | `FORMULA_INVALID` · `FORMULA_CIRCULAR` · `FORMULA_RUNTIME_ERROR` | 422 | `errors[]` / `path[]` / - | C0 검사 실패 / 순환 참조 / 계산 불가(DB 오류는 정규화, 07 §5) |
 | `DEFINITION_BUSY` | 503 | `retry_after` | 정의 변경 락 대기 초과, 화면이 "다시 시도" 안내(07 §8) |
-| `PAYLOAD_TOO_LARGE` | 413 | `limit` | 붙여넣기 5,000행 또는 요청 상한(기본값 A 1MiB) 초과 |
+| `PAYLOAD_TOO_LARGE` | 413 | `limit`(단위는 값으로 구분: 5000=행 수, 1048576=바이트) | 붙여넣기 5,000행 또는 요청 상한(기본값 A 1MiB) 초과 |
 | `PREVIEW_BUSY` · `GUEST_TOKEN_RATE_LIMITED` | 429 | `retry_after` | 미리보기 사용자당 동시 1건·전역 상한 / 입장권 사용자별 제한(한도 값 **[미답]**, 08 §4) |
 | `SUPERSET_REJECTED` · `SUPERSET_UNAVAILABLE` | 502·503 | - | Superset이 거부 / 연결 불가 |
 | `INTERNAL_ERROR` | 500 | - | 예기치 않은 오류 |

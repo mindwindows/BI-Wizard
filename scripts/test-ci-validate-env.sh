@@ -22,6 +22,12 @@ reset_work() {
   cp -f "$ROOT/superset/superset_config.py" "$WORK/superset/superset_config.py"
   printf '# 시험용 빈 모듈\n' > "$WORK/backend/app/__init__.py"
   cp -f "$ROOT/scripts/"*.bat "$WORK/scripts/" 2>/dev/null || true
+  # frontend 파일(AG Grid Enterprise 혼입 검사용). 원본에 없으면 복사하지 않는다(검사도 건너뛴다).
+  mkdir -p "$WORK/frontend"
+  rm -rf "$WORK/frontend/src"
+  cp -f "$ROOT/frontend/package.json" "$WORK/frontend/package.json" 2>/dev/null || true
+  cp -f "$ROOT/frontend/package-lock.json" "$WORK/frontend/package-lock.json" 2>/dev/null || true
+  if [ -d "$ROOT/frontend/src" ]; then cp -R "$ROOT/frontend/src" "$WORK/frontend/src"; else mkdir -p "$WORK/frontend/src"; fi
 }
 
 # 서비스 블록 안에서만 줄을 지우거나(awk) 추가한다.
@@ -148,6 +154,15 @@ expect_fail "roles.sql bi_data 소유자" "필수 문장이 없습니다: CREATE
 expect_fail "roles.sql bi_app 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "/^ALTER ROLE bi_app NOSUPERUSER/d"
 expect_fail "roles.sql bi_owner 속성 재차단 없음" "필수 문장이 없습니다: ALTER ROLE bi_owner NOSUPERUSER" sed_roles "/^ALTER ROLE bi_owner NOSUPERUSER/d"
 expect_fail "roles.sql bi_app 재차단이 CREATEROLE 허용" "필수 문장이 없습니다: ALTER ROLE bi_app NOSUPERUSER" sed_roles "s/^ALTER ROLE bi_app NOSUPERUSER NOCREATEDB NOCREATEROLE;/ALTER ROLE bi_app NOSUPERUSER NOCREATEDB CREATEROLE;/"
+for p in log_statement log_min_duration_statement log_min_duration_sample log_transaction_sample_rate log_min_error_statement; do
+  expect_fail "roles.sql 로그 억제 SET 없음 ($p)" "필수 문장이 없습니다: SET $p" sed_roles "/^SET $p = /d"
+  expect_fail "roles.sql 로그 RESET 없음 ($p)" "필수 문장이 없습니다: RESET $p;" sed_roles "/^RESET $p;/d"
+done
+expect_fail "roles.sql 로그 억제 SET이 BEGIN 뒤로 이동" "BEGIN; 앞에 있어야" sh -c "sed -i \"/^SET log_statement = 'none';/d; s/^BEGIN;/BEGIN;\\nSET LOCAL log_statement = 'none';\\nSET log_statement = 'none';/\" '$WORK/backend/bootstrap/roles.sql'"
+expect_fail "roles.sql log_statement 값이 none 아님" "필수 문장이 없습니다: SET log_statement = 'none';" sed_roles "s/^SET log_statement = 'none';/SET log_statement = 'ddl';/"
+expect_fail "roles.sql RESET이 COMMIT 앞으로 이동" "COMMIT; 뒤에 있어야" sh -c "sed -i '/^RESET log_statement;/d; s/^COMMIT;/RESET log_statement;\\nCOMMIT;/' '$WORK/backend/bootstrap/roles.sql'"
+expect_fail "roles.sql 역할 수준 로그 설정" "ALTER ROLE/DATABASE ... SET log_" append_roles "ALTER ROLE bi_app SET log_statement = 'none';"
+expect_fail "roles.sql 데이터베이스 수준 로그 설정" "ALTER ROLE/DATABASE ... SET log_" append_roles "ALTER DATABASE superset SET log_min_error_statement = panic;"
 expect_fail "roles.sql 추가 \\getenv" "\\getenv 는 비밀번호 변수 4개뿐" append_roles '\getenv extra SOME_OTHER_VARIABLE'
 expect_fail "roles.sql \\getenv 누락" "필수 문장이 없습니다: \\getenv app_pw POSTGRES_APP_PASSWORD" sed_roles '/^\\getenv app_pw/d'
 
@@ -221,6 +236,47 @@ expect_fail "superset_config가 입장권 유효 시간을 딕셔너리로 우�
 expect_pass "superset_config 주석에만 입장권 유효 시간 언급" sh -c "printf '# GUEST_TOKEN_JWT_EXP_SECONDS 는 기본값\n' >> '$WORK/superset/superset_config.py'"
 expect_fail "compose가 .env.example에 없는 변수 사용" "에 없는 변수" add_after_service backend '      NEW_THING: ${NEW_THING}'
 expect_fail "compose에 latest 태그" ":latest 태그" sh -c "printf '    image: foo:latest\n' >> '$WORK/compose.yml'"
+
+# --- AG Grid Enterprise 혼입 / 의존성 버전 고정 ---
+fe_pkg_add() { # package.json의 "dependencies": { 바로 다음 줄에 항목을 넣는다
+  sed -i "s|^  \"dependencies\": {|  \"dependencies\": {\n    $1,|" "$WORK/frontend/package.json"
+}
+lock_add() { # package-lock.json의 "packages": { 바로 다음 줄에 키를 넣는다
+  sed -i "s|^  \"packages\": {|  \"packages\": {\n    \"node_modules/ag-charts-enterprise\": {\"version\": \"1.0.0\"},|" "$WORK/frontend/package-lock.json"
+}
+src_add() { mkdir -p "$WORK/frontend/src" && printf '%s\n' "$1" >> "$WORK/frontend/src/enterprise-test.tsx"; }
+expect_fail "package.json에 ag-grid-enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"ag-grid-enterprise": "34.0.0"'
+expect_fail "package-lock.json에 node_modules/ag-charts-enterprise 키" "AG Grid Enterprise 패키지" lock_add
+expect_fail "소스에 import ... from \"ag-grid-enterprise\"" "AG Grid Enterprise 패키지를 import" src_add 'import { ModuleRegistry } from "ag-grid-enterprise";'
+expect_fail "소스의 동적 import(ag-charts-enterprise)" "AG Grid Enterprise 패키지를 import" src_add 'const m = await import("ag-charts-enterprise");'
+expect_fail "소스의 옛 패키지 @ag-grid-enterprise/ import" "AG Grid Enterprise 패키지를 import" src_add "import '@ag-grid-enterprise/all-modules';"
+expect_fail "의존성에 ^ 범위 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "^1.2.3"'
+expect_fail "의존성에 latest 표기" "정확한 버전이 아닌 의존성" fe_pkg_add '"some-lib": "latest"'
+lock_raw() { # package-lock.json의 "packages": { 바로 다음 줄에 원문 줄을 넣는다
+  sed -i "s|^  \"packages\": {|  \"packages\": {\n    $1|" "$WORK/frontend/package-lock.json"
+}
+pkg_no_sections() { printf '{\n  "name": "x",\n  "version": "1.0.0"\n}\n' > "$WORK/frontend/package.json"; }
+pkg_tab_indent() { sed -i 's/^  /\t/' "$WORK/frontend/package.json"; }
+src_file() { mkdir -p "$WORK/frontend/src" && printf '%s\n' "$2" >> "$WORK/frontend/src/$1"; }
+src_multiline() { mkdir -p "$WORK/frontend/src" && printf 'import {\n  X,\n} from\n  "ag-grid-enterprise";\n' > "$WORK/frontend/src/multi.ts"; }
+expect_fail "package.json에 레거시 ag-grid-charts-enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"ag-grid-charts-enterprise": "34.0.0"'
+expect_fail "package.json의 npm 별칭으로 enterprise" "AG Grid Enterprise 패키지" fe_pkg_add '"alias-lib": "npm:ag-grid-enterprise@34.0.0"'
+expect_fail "package.json에 @ag-grid-enterprise/ 범위 패키지" "AG Grid Enterprise 패키지" fe_pkg_add '"@ag-grid-enterprise/all-modules": "31.0.0"'
+expect_fail "lock의 resolved URL에 enterprise(별칭 키)" "AG Grid Enterprise 패키지" lock_raw '"node_modules/innocent": {"version": "1.0.0", "resolved": "https://registry.npmjs.org/ag-grid-enterprise/-/ag-grid-enterprise-34.0.0.tgz"},'
+expect_fail "lock의 name 필드에 enterprise" "AG Grid Enterprise 패키지" lock_raw '"node_modules/innocent": {"name": "ag-charts-enterprise", "version": "1.0.0"},'
+expect_fail "lock에 레거시 ag-grid-charts-enterprise 키" "AG Grid Enterprise 패키지" lock_raw '"node_modules/ag-grid-charts-enterprise": {"version": "1.0.0"},'
+expect_fail "의존성 섹션을 하나도 찾지 못함(fail-open 방지)" "의존성 섹션" pkg_no_sections
+expect_fail "탭 들여쓰기 package.json은 검사할 수 없어 실패" "의존성 섹션" pkg_tab_indent
+expect_fail ".mjs 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.mjs 'import "ag-grid-enterprise";'
+expect_fail ".cjs 소스의 require" "AG Grid Enterprise 패키지를 import" src_file mod.cjs 'const g = require("ag-grid-enterprise");'
+expect_fail ".mts 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.mts "import { A } from 'ag-charts-enterprise';"
+expect_fail ".cts 소스의 enterprise import" "AG Grid Enterprise 패키지를 import" src_file mod.cts "import 'ag-grid-charts-enterprise';"
+expect_fail "블록 주석 뒤 같은 줄의 import" "AG Grid Enterprise 패키지를 import" src_file c.ts '/* x */ import "ag-grid-enterprise";'
+expect_fail "from 뒤 줄바꿈 import" "AG Grid Enterprise 패키지를 import" src_multiline
+expect_fail "소스의 레거시 이름 import" "AG Grid Enterprise 패키지를 import" src_file d.ts 'import "ag-grid-charts-enterprise/dist";'
+expect_pass "블록 주석 줄만의 언급" src_file e.ts '/* ag-grid-enterprise 금지 "ag-grid-enterprise" */'
+expect_pass "별표 주석 줄만의 언급" src_file f.ts ' * import "ag-grid-enterprise" 금지'
+expect_pass "소스 주석에만 ag-grid-enterprise 언급" src_add '// ag-grid-enterprise 는 금지(import "ag-grid-enterprise" 쓰지 말 것)'
 
 # --- 파괴적 명령 ---
 # (금지 명령 문구를 이 파일에 그대로 쓰지 않도록 인자를 나눠 만든다)

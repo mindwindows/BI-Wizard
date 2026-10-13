@@ -75,12 +75,11 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
     }
 
-    # 포털 정적 파일. 하위 경로가 있으면 접두 아래에서만 SPA fallback(index.html)을 한다(아래 블록).
+    # 포털 정적 파일. 하위 경로가 있으면 접두 아래 SPA fallback(index.html) 블록이 따로 있다.
     ${NGX_PORTAL_LOCATION}
 
-    # 접두 밖(루트). 하위 경로가 있으면 정적 자산(/, /index.html, /config.js, /assets/, favicon 등 실제 파일)만 서빙하고
-    # 그 외 경로는 404다(앞단이 접두를 떼고 넘기는 경우의 정적 서빙은 유지된다).
-    # 하위 경로가 없으면(루트 배포) 여기서 SPA fallback을 한다.
+    # 접두 밖(루트). 앞단이 접두를 떼고 넘기는 딥링크(/datasets/42)를 위해 여기서도 SPA fallback(index.html)을 한다
+    # (사용자 결정 2026-10-12). /api/, /assets/ 는 위의 정규식 location이 먼저 잡으므로 이 fallback을 타지 않는다.
     location / {
         ${NGX_ROOT_TRY}
         add_header Cache-Control "no-cache";

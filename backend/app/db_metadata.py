@@ -1,10 +1,13 @@
 """정적 표의 `MetaData` 한 곳과 Alembic 비교 필터.
 
 - `metadata`: `public` schema의 **정적 표**(팀, 사용자, 데이터셋 정의 등)만 등록한다.
-  지금(EW-1)은 표가 없다. 표를 추가하면 revision(`backend/migrations/versions/`)과 함께
-  여기에 모델을 추가한다. 동적 객체(`bi_data` schema의 `ds_<번호>` 표, `dv_<번호>`·`de_<번호>`
-  뷰)는 런타임 DDL 모듈이 만들며 이 `MetaData`에 넣지 않는다
-  (docs/decisions/03-migration-tool.md D2, 06-data-model.md §6).
+  권한 관리 표(`users`, `teams`, `team_members`, revision 0003), 데이터셋·열 정의 표(0004),
+  수식 표(`formulas`, `formula_deps`, 0005), Superset 등록 표(`superset_datasets`,
+  `superset_dashboards`, 0006)가 있다. 표를 추가하면
+  revision(`backend/migrations/versions/`)과 함께 여기에 모델을 추가한다. 쓰기 책임은 소유
+  모듈(04 §2-2)이 지고, 이 파일은 정의만 둔다(04 §2-1 core). 동적 객체(`bi_data` schema의
+  `ds_<번호>` 표, `dv_<번호>`·`de_<번호>` 뷰)는 런타임 DDL 모듈이 만들며 이 `MetaData`에
+  넣지 않는다(docs/decisions/03-migration-tool.md D2, 06-data-model.md §6).
 - `include_name`, `include_object`: `alembic check`/`--autogenerate`가 동적 객체를 삭제 후보로
   보지 않게 하는 안전망이다. 기본 설정(`include_schemas=False`)에서는 `bi_data`가 비교 대상이
   아니므로 이중 안전장치다(03c X-29).
@@ -15,7 +18,28 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy import MetaData
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Identity,
+    Index,
+    Integer,
+    MetaData,
+    PrimaryKeyConstraint,
+    Table,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    false,
+    func,
+    true,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 
 # 제약·인덱스 이름 규칙(autogenerate가 같은 이름을 만들게 한다).
 NAMING_CONVENTION = {
@@ -27,6 +51,164 @@ NAMING_CONVENTION = {
 }
 
 metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+# --- 권한 관리 표(06 §2, revision 0003) ----
+# 열 단위 UPDATE 권한과 불변 열(login_id, code, team_id, user_id)은 revision의 GRANT가 강제한다.
+# 정규식 CHECK는 PostgreSQL 전용 연산자(~)라 SQLite 시험용 create_all에서는 만들지 않는다
+# (`ddl_if`). 실제 DB에서는 revision 0003이 같은 제약을 만든다.
+_PG_ONLY = {"dialect": "postgresql"}
+
+# `teams.code` 형식(06 §2, 05 A3). 서비스 검증(app/access)도 같은 식을 쓴다.
+TEAM_CODE_PATTERN = "^[a-z0-9_]{1,32}$"
+TEAM_ROLES = ("definer", "entry")
+
+users = Table(
+    "users",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("login_id", Text, nullable=False),
+    Column("display_name", Text, nullable=False),
+    Column("is_admin", Boolean, nullable=False, server_default=false()),
+    Column("is_active", Boolean, nullable=False, server_default=true()),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("login_id"),
+)
+
+teams = Table(
+    "teams",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("code", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("is_active", Boolean, nullable=False, server_default=true()),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("code"),
+    UniqueConstraint("name"),
+    # 식은 TEAM_CODE_PATTERN과 같다(시험이 대조한다). SQL에 변수를 넣지 않으려고 리터럴로 쓴다.
+    CheckConstraint("code ~ '^[a-z0-9_]{1,32}$'", name="code_format").ddl_if(**_PG_ONLY),
+)
+
+team_members = Table(
+    "team_members",
+    metadata,
+    Column("team_id", Integer, ForeignKey("teams.id"), nullable=False),
+    Column("user_id", Integer, ForeignKey("users.id"), nullable=False),
+    Column("role", Text, nullable=False),
+    PrimaryKeyConstraint("team_id", "user_id"),
+    CheckConstraint("role IN ('definer', 'entry')", name="role"),
+    Index("ix_team_members_user_id", "user_id"),
+)
+
+# --- 데이터셋·열 정의 표(06 §2, revision 0004) ----
+# 열거 값은 PostgreSQL enum이 아니라 `text` + 이름 있는 CHECK다(06 §1). 값 추가는 CHECK 교체로 한다.
+DATE_UNITS = ("day", "month", "year")
+DATASET_STATUSES = ("active",)  # archived·deleted는 보관·삭제 단위가 CHECK를 바꿔 추가한다
+COLUMN_TYPES = ("text", "number", "date", "boolean", "choice")
+COLUMN_KINDS = ("raw", "formula")
+
+datasets = Table(
+    "datasets",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("team_id", Integer, ForeignKey("teams.id"), nullable=False),
+    Column("name", Text, nullable=False),
+    Column("date_unit", Text, nullable=False),
+    # NULL = 기준 날짜 열 없음. 같은 데이터셋의 열만 가리키도록 아래 복합 FK가 보장한다.
+    Column("base_date_column_id", Integer, nullable=True),
+    Column("status", Text, nullable=False, server_default="active"),
+    Column("def_version", Integer, nullable=False, server_default="1"),
+    # 1d 전에는 구조 해시, 1d부터 뷰 DDL 해시(06 §5).
+    Column("def_hash", Text, nullable=False),
+    Column("created_by", Integer, ForeignKey("users.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("team_id", "name"),
+    CheckConstraint("date_unit IN ('day', 'month', 'year')", name="date_unit"),
+    CheckConstraint("status IN ('active')", name="status"),
+    # 순환 FK(datasets <-> dataset_columns)라 표 생성 뒤에 추가한다(use_alter). SQLite 시험용
+    # create_all에서는 만들지 않는다(`ddl_if`); 실제 DB에서는 revision 0004가 만든다.
+    ForeignKeyConstraint(
+        ["id", "base_date_column_id"],
+        ["dataset_columns.dataset_id", "dataset_columns.id"],
+        name="fk_datasets_id_dataset_columns",
+        use_alter=True,
+    ).ddl_if(**_PG_ONLY),
+)
+
+dataset_columns = Table(
+    "dataset_columns",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("dataset_id", Integer, ForeignKey("datasets.id"), nullable=False),
+    Column("display_name", Text, nullable=False),
+    Column("type", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("required", Boolean, nullable=False, server_default=false()),
+    # number {min, max, decimals} / text {max_length} / date {min, max} / choice {options[]}
+    Column("rules", JSON().with_variant(JSONB(), "postgresql"), nullable=True),
+    Column("tag", Text, nullable=True),
+    Column("position", Integer, nullable=False),
+    UniqueConstraint("dataset_id", "id"),  # 복합 FK(datasets.base_date_column_id)의 대상
+    UniqueConstraint("dataset_id", "display_name"),
+    CheckConstraint("type IN ('text', 'number', 'date', 'boolean', 'choice')", name="type"),
+    CheckConstraint("kind IN ('raw', 'formula')", name="kind"),
+    # 계산 열은 필수일 수 없고 선택 목록 형이 아니다. 원본 열은 제한 없음.
+    CheckConstraint("kind = 'raw' OR (NOT required AND type <> 'choice')", name="formula_shape"),
+)
+
+# --- 수식 표(06 §2, revision 0005) ----
+# `column_id`는 `kind='formula'`인 열이어야 한다(앱이 확인). `ast`는 열 번호 참조 JSON이다.
+formulas = Table(
+    "formulas",
+    metadata,
+    Column("column_id", Integer, ForeignKey("dataset_columns.id"), primary_key=True),
+    Column("expression", Text, nullable=False),  # 보관용 원문(화면 표시에는 쓰지 않는다)
+    Column("ast", JSON().with_variant(JSONB(), "postgresql"), nullable=False),
+    Column("ast_hash", Text, nullable=False),
+)
+
+formula_deps = Table(
+    "formula_deps",
+    metadata,
+    Column("column_id", Integer, ForeignKey("dataset_columns.id"), nullable=False),
+    Column("depends_on_column_id", Integer, ForeignKey("dataset_columns.id"), nullable=False),
+    PrimaryKeyConstraint("column_id", "depends_on_column_id"),
+    CheckConstraint("column_id <> depends_on_column_id", name="not_self"),
+)
+
+# --- Superset 등록 표(06 §2, revision 0006) ----
+# 동기 상태 열거. 값 추가는 CHECK 교체로 한다(06 §1).
+SYNC_STATUSES = ("pending", "registered", "failed")
+
+superset_datasets = Table(
+    "superset_datasets",
+    metadata,
+    Column("dataset_id", Integer, ForeignKey("datasets.id"), primary_key=True),
+    Column("superset_dataset_id", Integer, nullable=True),  # 등록 전 NULL
+    Column("display_name", Text, nullable=False),
+    Column("sync_status", Text, nullable=False, server_default="pending"),
+    Column("synced_at", DateTime(timezone=True), nullable=True),
+    Column("last_error", Text, nullable=True),  # 사유 요약만(SQL·비밀·응답 본문 금지)
+    CheckConstraint("sync_status IN ('pending', 'registered', 'failed')", name="sync_status"),
+)
+
+superset_dashboards = Table(
+    "superset_dashboards",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("name", Text, nullable=False),
+    # `uuid` 형은 값을 항상 소문자 정규형(하이픈 36자)으로 저장한다. CHECK는 한 번 더 두는
+    # 방어선이다.
+    Column("embedded_uuid", Uuid, nullable=False),
+    Column("is_active", Boolean, nullable=False, server_default=true()),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("embedded_uuid"),
+    # 정규식 연산자(~)와 ::text 캐스트는 PostgreSQL 전용이라 SQLite 시험용 create_all에서는 만들지
+    # 않는다(`ddl_if`). 실제 DB에서는 revision 0006이 같은 제약을 만든다.
+    CheckConstraint(
+        "embedded_uuid::text ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        name="embedded_uuid_format",
+    ).ddl_if(**_PG_ONLY),
+)
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).
 DYNAMIC_SCHEMA = "bi_data"

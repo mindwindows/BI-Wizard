@@ -28,7 +28,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 
 | 번호 | 항목 | 내용 | 상태 | 결과 기록 |
 | --- | --- | --- | --- | --- |
-| 13 | **Superset 6.1.0 하위 경로 로고 이중 접두** | 로그인 화면이 로고를 `…/superset/bi-wizard/superset/static/…`로 요청해 404가 난다(QA 재현 확인, 기능 영향 없음). 서버가 준 경로에는 접두가 한 번만 있고 프런트가 한 번 더 붙이는 것으로 보인다. **알려진 문제로 두고 그대로 둔다**(사용자 결정, 2026-10-11). Superset 내부 코드는 수정하지 않는다. **수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다**(6.1.0 고정 결정은 그때 사용자 승인으로 변경) | 알려진 문제(결정됨) | 2026-10-11 사용자 결정: 그대로 둠. 업그레이드 시 하위 경로(`APP_PROXY_STRIP_PREFIX` true/false)와 Embedded 검증 재실시 |
+| 13 | **Superset 6.1.0 하위 경로 로고 이중 접두** | 로그인 화면이 로고를 `…/superset/bi-wizard/superset/static/…`로 요청해 404가 난다(QA 재현 확인, 기능 영향 없음). 서버가 준 경로에는 접두가 한 번만 있고 프런트가 한 번 더 붙이는 것으로 보인다. **알려진 문제로 두고 그대로 둔다**(사용자 결정, 2026-10-11). Superset 내부 코드는 수정하지 않는다. **수정이 포함된 Superset 정식 릴리스가 나오면 버전을 올리고 하위 경로 검증을 다시 한다**(6.1.0 고정 결정은 그때 사용자 승인으로 변경) | 알려진 문제(결정됨) | 2026-10-11 사용자 결정: 그대로 둠. 업그레이드 시 하위 경로(`APP_PROXY_STRIP_PREFIX` true/false)와 Embedded 검증 재실시 1e-f 원인 확인(2026-10-13): 상류 6.1.0이 서버와 프런트(`ensureStaticPrefix`)에서 접두를 두 번 붙이는 동작이고 루트 배포(`SUPERSET_APP_ROOT=/`)에서는 정상이다. 내부 화면 전체에서 같은 요청이 나간다. `static/service-worker.js` 404도 하위·루트 모두 재현되는 상류 이슈(이미지에 파일 없음, 콘솔 오류만)다. 설정으로 우회하려면(`THEME_*.brandLogoUrl` 절대 URL 또는 `data:` URI) 새 설정이라 승인이 필요해 적용하지 않았다. `pwa-manifest.js` 404는 브라우저 요청이 아니라 QA의 curl 확인 요청이 남긴 기록이다. 표 차트 경고 아이콘은 원시 표의 `row_limit` 도달 시 Superset의 정상 알림이다. |
 | 14 | **앞단 프록시의 `X-Forwarded-Proto/Host`** | Superset은 `ENABLE_PROXY_FIX`(1홉 신뢰)로 이 헤더를 믿는다. 메인 플랫폼 프록시가 클라이언트가 보낸 값을 신뢰할 수 있는 값으로 **덮어써야** 한다. 로컬 재현 nginx는 앞단이 보낸 값이 있으면 보존한다. (8번과 연결) | 협의 필요 | - |
 | 15 | **세션 쿠키 충돌 가능성** | Superset 세션 쿠키 이름은 `session`, `Path=/bi-wizard/superset`이다. 포털이 같은 이름의 쿠키를 쓰면 충돌할 수 있다(경로가 달라 지금은 구분됨) | 확인 필요 | - |
 | 16 | **정상 경로 `…/superset/superset/…` 오인** | Superset의 정상 라우트 `/superset/welcome/`이 `SUPERSET_APP_ROOT=/bi-wizard/superset` 아래에서는 `/bi-wizard/superset/superset/welcome/`이 된다. 버그가 아니다. 모니터링·접근 규칙에서 중복 접두로 오인해 차단하지 않도록 알린다 | 협의 필요 | - |
@@ -45,7 +45,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 번호 | 허용한 항목 | 라이선스 | 위치 | 허용 조건 |
 | --- | --- | --- | --- | --- |
 | 22 | `psycopg2-binary` | LGPL | `superset/Dockerfile`로 만드는 Superset 이미지 안(Superset의 PostgreSQL 연결용). backend는 사용하지 않는다(pg8000, BSD) | 수정·재배포하지 않는다(PyPI 배포본을 그대로 설치) |
-| 23 | `certifi` | MPL-2.0 | 테스트 단계 이미지 | 개발·테스트 전용, 수정·재배포하지 않는다 |
+| 23 | `certifi` | MPL-2.0 | 테스트 단계 이미지 **및 backend 운영 런타임**(1e에서 `httpx` 승격의 필수 전이 의존성, **예외 승인 2026-10-12**: 03b 23-1 A) | 수정·재배포(포크·패치·번들 가공)하지 않는다. 이름으로 승인한 예외이며 MPL 전체 허용이 아니다. `httpx` 전이 의존성 전체의 버전·라이선스는 `skills/local-environment/SKILL.md`에 기록 |
 | 24 | `lightningcss`와 플랫폼별 패키지 12개 | MPL-2.0 | 프런트 개발 의존성(Vite 빌드·개발 서버). 운영 번들에는 코드가 들어가지 않는다 | 개발 전용, 수정·재배포하지 않는다 |
 | 25 | `BlueOak-1.0.0`, `MIT-0`, `CC0-1.0`(mdn-data), `CC-BY-4.0`(caniuse-lite) 표기 패키지 | 허용형에 준하는 라이선스(비표준 표기) | 프런트 개발 의존성 | 개발 전용 데이터·도구. `CC-BY-4.0`은 데이터 고지 의무만 있다 |
 
@@ -70,6 +70,44 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 38 | **`bi_author` 차이 점검(Superset 업그레이드·재기동 때 로그 확인)** | `bi_author`는 처음 만들 때만 내장 `Gamma`의 권한을 복사하고, 이후 기동에서는 `Gamma`와의 차이를 로그로 알리기만 한다(권한을 바꾸지 않는다. `superset init`은 `Gamma`에만 새 권한을 더하고 복사본은 갱신하지 않기 때문). `docker compose logs superset-init`에 **`점검 필요: 역할 bi_author이(가) Gamma와 다릅니다`**가 나오면 **반드시** 로그의 권한 이름을 확인하고 복사본에 반영할지 그대로 둘지 결정해 이 표에 기록한다. `Gamma와 차이 없음` 한 줄이면 점검할 것이 없다. 절차는 `skills/local-environment/SKILL.md`의 "Superset 업그레이드 점검". 운영자가 로그를 정기적으로 보지 않으면 배포 후 확인 담당을 정한다 | 협의 필요(담당 정하기) | 2026-10-12 EW-5 사실 대조: 로그 문구(`점검 필요: 역할 bi_author이(가) Gamma와 다릅니다`, `Gamma와 차이 없음`)와 "처음 만들 때만 복사" 동작이 `ensure_roles.py`와 일치 |
 | 39 | **guest 역할 `bi_guest`(EW-4): 권한 4개, 자동 추가 없음, 훅, `Public` 0개** | 입장권(guest token)의 역할은 `GUEST_ROLE_NAME=bi_guest`(새 환경변수 없음, `superset/superset_config.py` 설정, 03b 4-2 Z2 승인)이고 `superset-init`이 매 기동 만든다. 권한은 `can_read CurrentUserRestApi`, `can_read Dashboard`, `can_read Chart`, `can_time_range Api` 4개뿐이며 내보내기·쓰기·Explore·SQL Lab은 없다. **새 권한은 자동으로 추가되지 않는다.** Superset 업그레이드(또는 새 차트 유형 사용) 때 임베딩 화면이 추가 권한을 요구할 수 있으므로 **업그레이드마다 스모크 시험(지원 차트 6가지)과 권한 목록 차이 보고**를 한다(절차: `skills/local-environment/SKILL.md` "Superset 업그레이드 점검"). 목록의 권한 이름이 새 버전에서 사라지면 `superset-init`이 실패한다. 불변식: `Public` 역할의 권한은 0개이고 `PUBLIC_ROLE_LIKE`는 설정하지 않는다(어기면 `superset-init` 실패, 자동 수정 없음). 입장권 발급은 `GUEST_TOKEN_VALIDATOR_HOOK`이 `rls` 비어 있지 않음·리소스 1개 아님·`dashboard` 아님·리소스 id가 uuid 형식 아님(숫자 id·slug)·`user` 없음을 400으로 거부한다. **운영자가 Superset 관리 화면에서 `bi_guest` 역할에 권한을 추가하면 다음 기동에서 목록대로 되돌아간다**(통째 교체). 입장권 유효 시간은 기본 300초(5분)이며 **`superset-init`이 실제 적용값이 300인지 확인해 다르면 실패한다**(EW-5, 사용자 결정 2026-10-12: 설정에 없으면 기본 300으로 통과, `ci-validate-env.sh`는 `superset_config.py`의 재정의를 막는다. 값을 바꾸려면 사전 승인과 가드 값 동시 변경). "포털 등록 표의 embedded uuid만 허용" 검사는 FU-1e에서 훅에 추가한다 | 구현·검증됨(EW-4, EW-6 QA 통과) | 2026-10-12 EW-4 구현. EW-5 사실 대조: 권한 4개, `Public` 0개, 통째 교체, 훅 거부 5가지, 없는 권한 시 실패가 `bi_roles.py`·`ensure_roles.py`·`superset_config.py`와 일치, 입장권 유효 시간 가드 추가 |
 | 40 | **알려진 현상: `superset` 종료 지연(exit 137, 10초)과 `superset-init` 상태 표시** | `docker compose stop`/`down` 때 `superset` 컨테이너가 SIGTERM에 반응하지 않아 stop 유예 시간(기본 10초)이 끝난 뒤 강제 종료된다(exit 137). 원인은 확인하지 않았고(gunicorn이 SIGTERM을 처리하지 않는 것으로 추정) 기능 영향은 없다. compose는 바꾸지 않는다(03b 14-1 ②, `stop_grace_period` 변경은 사전 승인 대상). 운영 배포 스크립트가 종료 시간 제한이 있다면 이 지연(약 10초)을 감안한다. `superset-init`(일회성)은 `healthcheck: disable: true`라 종료 뒤 `Exited (0)`로 표시되고 `unhealthy`가 아니다(03b 14-1 ③). 이미지 HEALTHCHECK를 상속하던 때는 종료 뒤 `unhealthy`로 표시되었다. 운영 환경의 컨테이너 감시 도구가 `unhealthy`를 경보로 쓰면 이 서비스는 해당하지 않는다 | 기록(조치 없음) | 2026-10-12 EW-8 반영, 사용자 결정 03b 14-1 |
+| 41 | **운영 설정: `APP_ENV`는 `local`·`test`가 아니고 `AUTH_STUB_ENABLED=false`** | 인증 스텁은 쿠키만으로 신원을 정하므로 운영에서 켜지면 안 된다. 36번의 시작 거부 규칙에 더해, 운영 `.env`/Secret 틀을 만들 때 `.env.example`의 `APP_ENV=local`을 그대로 복사하지 않고 운영 값(`production` 등)으로 바꾸며 `AUTH_STUB_ENABLED=false`로 둔다(03b 17-1 결정 7). | 협의 필요 | 운영 설정 준비 시 확인 |
+| 42 | **접두를 떼는 프록시 뒤의 SPA fallback** | 앞단 프록시가 `APP_BASE_PATH` 접두를 떼고(`APP_PROXY_STRIP_PREFIX=true`) 정적 요청을 넘기면 `/datasets/42` 같은 딥링크가 접두 밖 경로로 온다. frontend nginx는 이 경우 루트 SPA fallback(`/index.html`)으로 응답하도록 바꿨다(03b 17-1 결정 6). 앞단이 접두를 떼는 방식이면 딥링크·새로고침이 동작하는지, 앞단 자체가 별도 fallback을 하는지 확인한다. | 협의 필요 | 배포 협의 시 확인 |
+| 43 | **뷰 DDL 실패 시 DB 서버 로그에 남는 문장** | 수식 열이 있는 데이터셋의 뷰 DDL(`CREATE OR REPLACE VIEW`)이 잠금 시간 초과 등으로 실패하면 PostgreSQL 서버 로그의 `STATEMENT:` 줄에 그 문장이 수식의 글자 상수와 함께 남을 수 있다(앱 로그에는 남지 않음). 비밀값(비밀번호·키·토큰)은 포함되지 않는다. 운영 DB의 `log_min_error_statement` 설정과 로그 보관·접근 범위를 확인한다(우리는 `bi_app` 역할 수준 로그 설정을 바꾸지 않기로 했다, 03b 21-1 결정 3). | 협의 필요 | 운영 설정 준비 시 확인 |
+| 44 | **Superset에 다른 DB 연결을 추가하지 말 것** | 훅의 embedded uuid 등록 대조는 H0(라이브 대조 없음)으로 종결했다(03b 23-1 B). 대신 Superset에 등록된 DB 연결이 `bi_readonly` 하나뿐이어야 하고 `bi_author`가 DB 연결을 추가할 수 없어야 하며, 관리자·서비스 계정 외에 대시보드 임베드 설정 권한을 가진 역할이 없어야 한다. 운영에서 관리자는 다른 DB 연결을 추가하지 않는다(추가하면 `bi_data` 밖 데이터가 입장권으로 노출될 수 있음). | 운영 설정 준비 시 확인 | 협의 필요 |
+| 45 | **PG `max_connections` 대비 전체 연결 수** | 사용자 결정(2026-10-13)으로 backend 연결 풀을 10+5(최대 15)로 올렸다. 운영 PG의 `max_connections`가 아래 합계보다 충분히 큰지 확인한다. 계산 근거와 표는 아래 "45번 상세" | 협의 필요(운영 `max_connections` 확인), QA 실측 칸 비어 있음 | 2026-10-13 표 작성(추정 포함) |
+| 46 | **컨테이너 Env의 비밀값(보호 등급)** | 비밀번호·`SECRET_KEY` 등은 compose가 컨테이너 환경변수로 전달한다. 사용자 결정(2026-10-13): 이미지(`docker image inspect`·`docker history`), 컨테이너 Cmd·Args, 로그, `ps`, 프런트 번들, 브라우저 저장소에는 0건을 유지하고, **컨테이너 Env는 `.env`와 같은 보호 등급(호스트 Docker 권한자만 접근)으로 허용**한다. 운영 호스트에서 Docker 소켓·`docker inspect` 권한을 가진 사람이 곧 비밀 접근자라는 점을 운영 권한 설계에 반영한다. 파일 전달(Docker secrets, 새 `*_FILE` 변수) 전환은 후속(project-brief 4.3 후속 목록, 변수 추가 승인 필요) | 합의됨(사용자 결정) | 2026-10-13 |
+
+### 45번 상세: PG 전체 연결 수 (2026-10-13)
+
+**근거(확인한 것)**
+- PG 서버 값: `compose.yml`은 `max_connections`를 지정하지 않는다(`postgres -c shared_buffers=256MB`만). `postgres:16.10-bookworm` 임시 인스턴스(`bf1g`)에서 `SHOW max_connections` = **100**, `superuser_reserved_connections` = **3** 이었다. 일반 계정(`bi_app`, `bi_readonly`, `superset_meta`, `bi_owner`)이 쓸 수 있는 연결은 **97개**다. 운영 PG(별도 관리형이면 값이 다를 수 있음)는 운영자가 확인한다.
+- backend: `backend/app/db.py`의 `POOL_SIZE=10`, `POOL_MAX_OVERFLOW=5`(코드 상수, 환경변수 아님). `python -m app` 단일 프로세스(worker 1, `backend/Dockerfile` CMD). 풀은 필요할 때만 연결을 열고 유휴 연결을 유지하므로 최댓값은 15다. `pool_pre_ping`은 같은 연결로 확인한다.
+- Superset 메타 DB(`superset_meta`): 이미지 안 `run-server.sh`가 `gunicorn --workers ${SERVER_WORKER_AMOUNT:-1} --worker-class gthread --threads ${SERVER_THREADS_AMOUNT:-20}`이고, compose가 `SERVER_WORKER_AMOUNT=1`을 주며 `SERVER_THREADS_AMOUNT`는 주지 않는다(기본 20). `superset/superset_config.py`는 `SQLALCHEMY_ENGINE_OPTIONS`를 설정하지 않아 상류 기본값 `{}`(`superset/config.py`)이다. Flask-SQLAlchemy 2.5.1이 풀 옵션을 주지 않으면 SQLAlchemy 1.4.54의 `QueuePool` 기본(`pool_size=5`, `max_overflow=10`)이므로 워커 1개 기준 최대 **15**다(스레드 20개가 한 엔진 풀을 공유, 초과 요청은 풀에서 대기). Redis/Celery가 없어 별도 비동기 워커의 연결은 없다.
+- Superset의 분석 DB(`bi_readonly`): 상류 `superset/models/core.py`의 `_get_sqla_engine(nullpool=True)` 기본이 `poolclass=NullPool`이다. 즉 연결을 풀에 두지 않고 **엔진을 쓰는 동안만 1연결**을 연다. 동시 질의 상한은 요청 스레드 수(20)에 묶인다고 **추정**한다(요청 하나가 분석 DB 연결을 둘 이상 동시에 쥐는 경로는 확인하지 않았다).
+- 일회성 서비스(`db-bootstrap`, `migrate`, `superset-init`)는 `restart: "no"`로 시작 때만 돈다. `migrate`는 Alembic이 `NullPool`(`backend/migrations/env.py`)이라 1연결이다.
+
+| 항목 | 접속 계정 | 최댓값 | 계산 | 근거 구분 | QA 실측(`pg_stat_activity`) |
+| --- | --- | --- | --- | --- | --- |
+| backend 런타임 | `bi_app` | 15 | 풀 10 + 초과 5, worker 1 | 확인(코드) | |
+| 관리 명령(`docker exec`로 수동 실행) | `bi_app` | 1 | CLI 한 번에 1연결 | 추정 | |
+| Superset 메타 DB | `superset_meta` | 15 | gthread 워커 1 × QueuePool(5 + 10), 스레드 20이 공유 | 확인(설정·상류 기본값), 실제 수치는 추정 | |
+| Superset 분석 DB | `bi_readonly` | 20 | NullPool, 동시 요청 스레드 20 × 1연결 | 추정(상한은 스레드 수) | |
+| `db-bootstrap`(시작 때) | 슈퍼유저 | 1 | `psql` 한 세션 | 추정 | |
+| `migrate`(시작 때) | `bi_owner` | 1 | Alembic NullPool | 확인(코드) | |
+| `superset-init`(시작 때) | `superset_meta` 2, `bi_readonly` 1 | 3 | 명령이 순서대로 실행(메타 DB 1~2, 연결 등록·권한 동기화 때 분석 DB 1) | 추정 | |
+| 헬스체크·모니터링 | (`pg_isready`는 인증 전 순간 연결) | 2 | compose `pg_isready`(5초 간격, 순간 1연결) + 운영 모니터링 1. `/api/health/db`는 backend 풀 안이라 중복 계산하지 않는다 | 추정 | |
+| 운영자 수동 `psql` | 임의 | 2 | 점검용 | 추정 | |
+| **합계** | | **60** | 15 + 1 + 15 + 20 + 1 + 1 + 3 + 2 + 2 | | |
+| 사용 가능 연결 | | 97 | 100 - 예약 3 | 확인(`SHOW`) | |
+| **여유** | | **37** | 97 - 60 (약 38%) | | |
+
+해석과 주의
+- 위 합계는 **모든 풀이 동시에 최대**인 이론 상한이다. 일회성 서비스는 시작 때만 돌고 Superset 서비스가 뜨기 전에 끝나므로 실제로 겹치는 정도는 더 작다.
+- 재배포(`up -d`) 중 옛 컨테이너와 새 컨테이너가 잠깐 겹치면 backend 15, Superset 메타 15, 분석 DB 20이 한 번 더 잡혀 이론 상한이 약 110으로 97을 넘는다(실제로는 옛 컨테이너가 먼저 종료되고 풀이 가득 차는 일도 드물어 도달 가능성은 낮다고 **추정**). 롤링 배포(옛것을 종료하기 전에 새것 시작)를 쓰면 운영 PG `max_connections`를 올리거나 풀을 줄여야 한다.
+- backend worker를 2 이상으로 늘리면 `bi_app` 최댓값이 15 × worker 수가 된다(전역 동시 제한·사용자별 제한 같은 메모리 상태도 worker 1을 전제한다).
+- 운영 PG가 다른 시스템과 공유되면 그쪽 연결 수를 더해야 한다. `bi_app` 등 계정에 `CONNECTION LIMIT`은 걸지 않았다.
+- **QA 실측(2026-10-13, 최종 QA 커밋 `96a5974`, 5개 흐름 동시 열 추가 + 차트 5명 동시):** `bi_app` 최대 14, `superset_meta` 최대 12, `bi_readonly` 최대 3, 동시 합계 22(여유 75). **부하를 한 번 겪은 뒤 유휴에도 `bi_app`은 풀 크기(10)만큼 연결을 유지한다**(풀은 유휴 연결을 닫지 않는다). **Superset 쪽 이론 상한(메타 15, 분석 20)은 동시 5명까지만 측정해 미검증이다.**
+- QA가 실측 칸을 채운다: 부하(예: 열 추가 5개 흐름 동시, 차트 여러 개 동시 로딩) 중 `SELECT usename, count(*) FROM pg_stat_activity GROUP BY 1`의 최댓값을 위 표 계정별로 기록하고 추정과 다르면 이 표를 고친다.
 
 ## 이미 확인된 사항
 
