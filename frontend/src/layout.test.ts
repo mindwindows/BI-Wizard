@@ -73,3 +73,12 @@ describe("S7 작성자 안내문 코드 표기", () => {
     expect(rule(".author-guide ul")).toContain("word-break: keep-all");
   });
 });
+
+describe("S10 감사 기록 표", () => {
+  it("일시·행위자·행위는 한 줄, 대상·요약 칸만 어절 단위로 줄을 바꾸고 표 영역이 가로 스크롤한다", () => {
+    expect(rule(".audit-table td")).toContain("white-space: nowrap");
+    expect(rule(".audit-table td.audit-summary")).toContain("white-space: normal");
+    expect(rule(".audit-table td.audit-summary")).toContain("word-break: keep-all");
+    expect(rule(".audit-filters")).toContain("flex-wrap: wrap");
+  });
+});

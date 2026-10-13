@@ -1,5 +1,6 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from "react-router-dom";
 import { getConfig } from "./config";
+import { AuditPage } from "./features/audit/AuditPage";
 import { AccessDenied } from "./features/access/AccessDenied";
 import { ChecksPage } from "./features/checks/ChecksPage";
 import { PermissionsPage } from "./features/access/permissions/PermissionsPage";
@@ -38,6 +39,7 @@ export const routes: RouteObject[] = [
       { path: "dashboards", element: <DashboardsPage /> },
       { path: "admin/dashboards", element: <DashboardAdminPage /> },
       { path: "admin/status", element: <AdminStatusPage /> },
+      { path: "admin/audit", element: <AuditPage /> },
       { path: "*", element: <NotFound /> },
     ],
   },

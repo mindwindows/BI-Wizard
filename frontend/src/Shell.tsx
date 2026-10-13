@@ -16,6 +16,7 @@ const ADMIN_LINKS = [
   { to: "/admin/permissions", label: "권한 관리" },
   { to: "/admin/dashboards", label: "대시보드 연결" },
   { to: "/admin/status", label: "현황" },
+  { to: "/admin/audit", label: "감사 기록" },
 ];
 
 function ShellFrame() {
@@ -39,7 +40,7 @@ function ShellFrame() {
           <StubSwitcher />
           {ready ? <span className="who">{state.me.display_name}</span> : null}
           {/*
-            관리 메뉴(S6·S8·S9)는 편의상 관리자에게만 보여 준다. 숨김은 보안 경계가 아니다.
+            관리 메뉴(S6·S8·S9·S10)는 편의상 관리자에게만 보여 준다. 숨김은 보안 경계가 아니다.
             최종 방어선은 서버의 권한 검사(관리자 전용 API가 403 FORBIDDEN)이며 화면도 직접 접속 때 다시 막는다.
           */}
           {ready && state.me.is_admin ? (

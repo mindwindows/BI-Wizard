@@ -53,6 +53,12 @@ const FIELD_LABELS: Record<string, string> = {
   position: "위치",
   expected_version: "정의 버전",
   embedded_uuid: "임베드 번호",
+  from: "시작일",
+  to: "종료일",
+  actor_user_id: "행위자",
+  target_type: "대상 종류",
+  target_id: "대상 번호",
+  action: "행위",
 };
 
 const FIELD_CODE_PHRASES: Record<string, string> = {
