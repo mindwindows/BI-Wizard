@@ -1,6 +1,6 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-11 작성, 2026-10-12 FU-1 착수 기준으로 갱신)
+## 다음 세션 인계 (2026-10-13 FU-1 완료·main 반영 PR 기준으로 갱신)
 
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
@@ -8,38 +8,28 @@
 - 새 세션이 `harness/setup`을 옛 커밋으로 여는 경우가 반복됐으므로, **새 세션은 `main`으로 시작해 `harness/setup`으로 전환하는 방식을 기본으로 한다**(`git fetch` 뒤 HEAD가 `origin/main` 최신인지, `git merge-base --is-ancestor origin/harness/setup origin/main`과 `git diff origin/harness/setup origin/main`이 비어 있는지 확인하고 `git checkout -B harness/setup origin/harness/setup`).
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
-### 현재 상태
-- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. PR #2·#3은 `main`에 merge가 끝났다. merge된 PR에는 새 커밋이 붙지 않으므로 `main` 반영이 필요하면 **새 PR**이 필요하다(요청받을 때만 만든다). 현재 `harness/setup`의 EW-3~EW-8 변경은 아직 `main`에 없다.
-- **Gate ①** 승인. **Gate ②** 조건부 승인(보류 2건 아래). **Gate ③** 승인(FU-1 범위, 2026-10-11, `docs/decisions/03b` 6절, `04~08` 합계 787줄). **Gate ④**는 대기이며 진입 전 환경 작업(EW-1·3·4·5·6·7·8)이 모두 완료·검증됐다. **FU-1 착수는 새 세션에서, 사용자 승인 뒤에 한다.**
-- **환경 상태:** backend는 `bi_app`, migrate는 `bi_owner`로만 접속(슈퍼유저 접속 없음), db-bootstrap이 매 기동 두 역할의 `NOSUPERUSER NOCREATEDB NOCREATEROLE`을 재차단한다. revision은 `0001`(baseline, 의도적 no-op)과 `0002`(`bi_data` 권한)뿐이고 정적 표는 아직 없다. `superset-init`이 `db-bootstrap`·`migrate` 완료 뒤 `sync_permissions → ensure_roles → ensure_accounts`를 실행하고(종료 뒤 `unhealthy` 표시 없음), 역할 `bi_service`(4)·`bi_guest_issuer`(2)·`bi_author`(Gamma 복사본)·`bi_author_schema`(1)·`bi_guest`(4), `Public` 0개, 계정 `bi_service`·`bi_guest_issuer`, 입장권 검증 훅(거부 5가지)과 `GUEST_TOKEN_JWT_EXP_SECONDS` 300 가드가 있다. `.env.example` 30개(Secret 10개). 인증 스텁은 `AUTH_STUB_ENABLED` 시작 거부 논리만 있고 업무 기능 코드는 없다.
-- **에이전트 모델:** 7개 모두 sonnet, 모델 재판단은 필요 없다(03b 14-1 4번). 호출 시 모델을 바꾸지 않는다.
-- **알려진 현상:** `superset` 컨테이너는 stop 때 약 10초 뒤 exit 137로 종료된다(변경하지 않음, `deploy-coordination.md` 40번). `bi_app`의 `REPLICATION`·`BYPASSRLS`는 재차단 대상이 아니다.
+### 현재 상태 (FU-1 완료)
+- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. FU-1(1a~1e, 1e-f 포함) 전체를 `main`에 반영하는 **새 PR**을 만들었다(병합은 사용자가 한다, PR 번호는 PR 목록 참조). 병합 뒤에는 새 작업마다 `main` 최신에서 `harness/setup`을 다시 만든다(`git fetch origin main && git checkout -B harness/setup origin/main`, 로컬에 미반영 커밋이 없을 때만).
+- **Gate ①~③ 승인**(③은 FU-1 범위). **Gate ④: FU-1(1a 권한 관리, 1b 데이터셋·열 정의, 1c 입력 그리드, 1d 수식 열, 1e Superset 등록·임베딩) 구현·검증 완료.** 결정 기록은 `docs/decisions/03b` 15~28절.
+- **검증 요약:** 전체 검증(마지막 커밋 `96a5974`, QA 독립): 실제 PG 전체 pytest 3310 passed·pg 변형 skip 0, 차분 7,353 수식 불일치 0, 프런트 616 passed, STRIP true·false Superset 스모크, 비밀값 검사, 메모리 약 0.5~0.6GB(8GB 예산 안), 연결 풀 상향 효과(5개 흐름 동시 열 추가 503 0건). 이후 범위 재검증(스크립트·문서만 변경, 제품 영향 경로 변경 0건): PR 본문에 최종 커밋과 증명이 있다.
+- **환경:** backend `bi_app`, migrate `bi_owner`(슈퍼유저 접속 없음), revision 0001~0006, `superset-init`이 역할·권한 적용, 연결 풀 `bi_app` 10+5(코드 상수), 컨테이너 Env는 `.env` 등급으로 허용(`deploy-coordination.md` 46번).
+- **에이전트 모델:** 7개 모두 sonnet, 호출 시 모델을 바꾸지 않는다.
 
-### FU-1 진행 상황 (2026-10-12)
-- **단위 0(공통 기반)·1a(권한 관리) 구현·QA·reviewer 완료, 사용자 보고 대기.** QA 실패 0, reviewer 차단 0(중요 지적 반영). 상세와 사용자 결정 대기 항목은 `docs/decisions/03b` 16절.
-- 1a 결정 7건 반영(`docs/decisions/03b` 17절): 405·503 `SERVICE_UNAVAILABLE`·409 `TARGET_INACTIVE`·422 통일, `team_is_active`, 길이 상한 계약화, `public_create` 시작 거부, nginx 루트 SPA fallback, `REQUIRE_PG`. 이어서 1b·1c 진행 중(1c 완료 후 보고).
-- **1e 승인 결정 반영(2026-10-12, `docs/decisions/03b` 23절):** A `certifi` 예외 승인, B H0(실측 2건 모두 참일 때만), C 60초 30회, E ①③ 승인·②조건부, D 제안대로, F 보류. 1e 구현 진행 중(프로브 → backend·frontend → QA·reviewer·스크린샷), 완료 후 보고만(PR 금지). 아래는 직전 정지 상태 기록(승인 항목 원문).
-- **1e 설계 점검 완료, 구현은 사용자 승인 대기로 멈춤(2026-10-12):** 0단계(게이트 부품 4종 거부, bootstrap 로그 `SET`/`RESET`, 표시 자릿수) QA 통과(실제 PG 2861 passed, 차분 불일치 0). 설계 문서 `docs/research/fu1e-design.md`가 승인 필요 항목을 모았다 — **A** `httpx` 승격에 딸린 전이 의존성 `certifi`(MPL-2.0)의 운영 런타임 포함, **B** 훅 embedded uuid 대조 방식(H1 공유 볼륨 허용 목록 파일 권장 = `compose.yml` 볼륨·Dockerfile 디렉터리 변경 필요, 또는 H0 이월 수용), **C** 입장권 429 한도(권장 사용자당 60초 30회), **D**(조건부) `bi_service` 5번째 권한, **E** 시작 점검 범위·Superset 준비 대기(08 문구 변경). 승인 전에는 구현·커밋하지 않는다(`docs/decisions/03b` 22절).
-- **1d 결정 4건 반영(`docs/decisions/03b` 21절):** 07 §10-1 한도 확정, 계산 열 표시 자릿수(화면 표시만), bootstrap 로그 실측, 이름·위치·태그 UI와 `decimals` 후속. 이어서 0단계(게이트 부품 4종 거부, 전체 QA 재실행 — 실패·불일치 1건이라도 있으면 1e 보류) 후 1e(revision `0006`, `httpx`, Embedded SDK 0.4.0) 진행 중이며 1e 완료 후 보고만 한다(PR 금지).
-- **단위 1d(수식 열) 구현·QA·reviewer 완료(2026-10-12), 사용자 보고 대기.** 차분 시험 불일치 0건(7,353개 수식·1,353,335칸), 주입 L0~L3 회귀 고정, 실제 PG 2820 통과. 상세와 사용자 결정 대기 항목(07 §10-1 한도 승인, 계산 열 표시 자릿수, DB 서버 로그의 뷰 생성 문장, 계산 열 이름 변경)은 `docs/decisions/03b` 20절. 다음은 1e(Superset 등록·임베딩, revision `0006`, `httpx` 승격, `@superset-ui/embedded-sdk` 0.4.0)이며 사용자 승인 뒤 시작한다.
-- **1b·1c 결정 5건 반영(`docs/decisions/03b` 19절):** 비활성 팀 데이터셋 생성 409, 이름순(가나다) 정렬, 이름 변경 잠금 서술(06 §5), `details.truncated`, 화면 문제 7건. 이어서 QA 독립 재검증과 스크린샷 교체, 그다음 1d(수식 열, `lark` 1.3.1) 진행 중이며 1d 완료 후 보고한다.
-- **단위 1b(데이터셋·열 정의)·1c(입력 그리드) 구현·QA·reviewer 완료(2026-10-12), 사용자 보고 대기.** QA 실패 0(1b: 실제 PG pytest 1194, 1c: 1548→수정 후 1554 통과, skip 0), reviewer 차단 0·중요 지적 반영. 상세는 `docs/decisions/03b` 18절. 다음은 1d(formulas·formula_deps, revision `0005`, 수식 엔진, `lark` 1.3.1 설치)이며 사용자 승인 뒤 시작한다.
+### 새 세션 시작 방법
+1. `git fetch origin` 뒤 `main` 병합 여부를 확인한다. PR이 병합됐으면 `main` 최신에서 `harness/setup`을 새로 만든다. 병합 전이면 `harness/setup`을 그대로 쓴다.
+2. `CLAUDE.md` → `docs/project-brief.md` → 이 파일 → `docs/decisions/03b`(15~28절) → `04~08` → `AGENTS.md`, `skills/local-environment/SKILL.md`를 읽는다.
+3. 에이전트·스킬 정의(`.claude/`)는 세션 시작 시점 버전이 적용되므로 최신 커밋에서 새 세션을 연다.
+4. 새 환경변수·새 의존성·기준과 다른 설정·권한 확대·에이전트 모델 변경은 적용 전 사용자 승인을 받는다. 최종 검증·재검증 규칙은 `.claude/skills/qa-verification`(범위 재검증 포함), 커밋 전 자체 점검(`ruff`·lint·typecheck)은 `.claude/skills/bi-wizard-dev`.
 
-### 1e 결과(2026-10-13)
-- 1e 구현·QA·reviewer·스크린샷 완료, 사용자 확인 항목은 `docs/decisions/03b` 24절, 결정은 25절(1e-f 진행). PR은 만들지 않았다.
+### 남은 결정·후속 (사용자)
+- **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md`). 정해질 때까지 스텁 신원, 운영 어댑터는 후속 단위에서 교체, 방식별 새 환경변수는 따로 승인.
+- **Superset 로고 이중 접두:** 상류 6.1.0 결함, 새 설정 없이 알려진 문제로 둔다(`deploy-coordination.md` 13번). 우회(`THEME_*.brandLogoUrl`)는 새 설정이라 승인 필요.
+- **후속 보류:** 502 안내 문구가 임베드 해제 원인을 구분하지 못함, 임베드 안 영어 문구·월 이름(Superset 언어·D3 로캘 설정, 승인 필요), 비밀값 파일 전달 강화(`*_FILE`, 새 변수 승인 필요), 저장 지표 `d3format`↔`decimals`, `listDashboards` 200개 초과 잘림, S9 순차 읽기, guest 목록 API 스모크의 CI 편입, 20만 행 부하 메모리, BAT 실행 검증·HTTPS·다중 워커·한글 IME·Superset 한국어는 미시험.
+- **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`deploy-coordination.md` 6번).
+- **운영 협의:** `docs/deploy-coordination.md`(1~46번) — 특히 운영 DB 슈퍼유저(29번), PG `max_connections`(45번), 컨테이너 Env 등급(46번).
 
-### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
-1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.
-2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.
-3. **FU-1 이월 항목(해당 단위에서 구현하고 검증):**
-   - **(1e에서 H0로 대체: `08-superset-embedding.md` §9 참조, 실측 2 해석은 확정(사용자 판정 2026-10-13: 조건의 목적은 미등록 대시보드의 새 임베드 설정을 막는 것이고 `can_set_embedded`는 Admin만 가진다. `can_write Dashboard`는 내용 편집 권한이며, 조건 ①로 Superset이 읽는 데이터는 원래 모두에게 공개된 것뿐이다))** **훅의 embedded uuid 등록 표 검사(FU-1e):** "포털 등록 표의 embedded uuid만 허용" 검사는 등록 표가 FU-1에서 생기므로 훅의 확장 지점(`superset/superset_config.py`의 `_EXTRA_GUEST_TOKEN_CHECKS`, 현재 빈 목록)에 넣는다. backend가 보내는 embedded uuid는 정규 형식(하이픈 있는 36자)이어야 훅의 uuid 형식 검사를 통과한다.
-   - **발급 API 사용자별 429 속도 제한(FU-1e):** 한도 값은 구현 때 제안한다(08 §4, 03b 4-4 Z9).
-   - **backend 시작 자가 점검(FU-1a):** 슈퍼유저·`CREATEROLE`·`CREATEDB` 접속 거부와 정적 `MetaData` 연결, `/health` 필드, 스텁 시작 거부(03b 3-6 BY3, `docs/decisions/04-modules.md`).
-   - **정적 표 권한 매트릭스 재확인:** 첫 실제 표 revision `0003` 이후 실제 표로 EW-1 매트릭스(03c X-15 기준)를 다시 확인한다.
-   - 강제 복구 건수를 포털 점검 화면에 노출할지는 FU-1 단계에서 정한다(현재는 `docker compose logs superset-init`의 `경고:`·`점검 요약`으로만 확인).
-4. **FU-1 합격 기준의 위치:** 개요는 `docs/decisions/04-modules.md` §8, 상세는 `docs/decisions/08-superset-embedding.md` §6(P1~P5: 서비스 계정 권한, guest 부정 시험, 훅·입장권, 6가지 차트 임베딩, Superset 불가 시 동작)과 `docs/decisions/07-formula-engine.md` §6(미리보기와 뷰 결과 불일치 0건)이다. 공통 완료 기준은 `feature-unit` 스킬이다.
-5. **이월:** EW-2(업로드 상한, `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)는 엑셀 가져오기 단위(FU-7)에서 요청한다. 후속 기능 단위 목록은 04 끝의 절.
-6. **main 반영:** 작업 단위가 끝나 `main` 반영이 필요해지면 새 PR을 요청받아 만든다(PR #2·#3은 merge 완료).
+### 후속 단위 순서 (제안, 사용자 지시 후 시작)
+`docs/decisions/04-modules.md` 끝의 후속 기능 단위 목록(FU-2 이후)과 §7을 따른다. 엑셀 가져오기(FU-7)는 EW-2(업로드 상한 `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)를 먼저 요청한다. 한 번에 한 단위만 진행하고 단위마다 구현→테스트→제품 Skill→QA→reviewer→사용자 승인 순서를 지킨다.
 
 ### 미결 항목
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md` 20개, 핵심 10개). 정해질 때까지 스텁 신원으로 진행하고, 운영 어댑터는 Gate ④ 중 교체한다. 각 방식의 새 환경변수는 정해질 때 따로 승인받는다.
