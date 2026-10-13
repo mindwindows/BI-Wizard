@@ -25,6 +25,9 @@
 - **1b·1c 결정 5건 반영(`docs/decisions/03b` 19절):** 비활성 팀 데이터셋 생성 409, 이름순(가나다) 정렬, 이름 변경 잠금 서술(06 §5), `details.truncated`, 화면 문제 7건. 이어서 QA 독립 재검증과 스크린샷 교체, 그다음 1d(수식 열, `lark` 1.3.1) 진행 중이며 1d 완료 후 보고한다.
 - **단위 1b(데이터셋·열 정의)·1c(입력 그리드) 구현·QA·reviewer 완료(2026-10-12), 사용자 보고 대기.** QA 실패 0(1b: 실제 PG pytest 1194, 1c: 1548→수정 후 1554 통과, skip 0), reviewer 차단 0·중요 지적 반영. 상세는 `docs/decisions/03b` 18절. 다음은 1d(formulas·formula_deps, revision `0005`, 수식 엔진, `lark` 1.3.1 설치)이며 사용자 승인 뒤 시작한다.
 
+### 1e 결과(2026-10-13)
+- 1e 구현·QA·reviewer·스크린샷 완료, 사용자 확인 대기 항목은 `docs/decisions/03b` 24절. PR은 만들지 않았다.
+
 ### 다음 할 일 (사용자 지시를 받은 뒤 이 순서로, 단위마다 보고하고 멈춘다)
 1. **AP-15 의존성 승인됨(2026-10-12, `docs/decisions/03b` 15절):** `lark` 1.3.1(단위 1d), `react-router-dom` 7.18.4(단위 0), `ag-grid-community`·`ag-grid-react` 36.2.0(1c), `@superset-ui/embedded-sdk` 0.4.0(1e). 고정 표기·lock 커밋, 각 단위에서 설치. `ag-grid-enterprise`·`ag-charts-enterprise` 혼입 정적 검사는 `ci-validate-env.sh`에 추가한다. `httpx` 운영 의존성 승격은 FU-1e.
 2. **FU-1 착수(1a→1e):** 단위 구성은 `docs/decisions/04-modules.md` §7-1, 첫 단위부터 `feature-unit` 절차(backend-dev·frontend-dev가 테스트·제품 Skill·회귀 테스트까지). 한 번에 한 단위만 진행한다.

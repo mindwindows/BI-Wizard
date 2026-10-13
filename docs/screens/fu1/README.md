@@ -1,4 +1,4 @@
-# FU-1 화면 스크린샷 (1a·1b·1c·1d)
+# FU-1 화면 스크린샷 (1a·1b·1c·1d·1e)
 
 - 촬영일: 2026-10-12(화면 수정분 재촬영: 같은 날, HEAD `809ea5f` 기준으로 이미지를 다시 빌드)
 - 크기: 모두 1920×1080 PNG(viewport, `deviceScaleFactor` 1, 스크롤하지 않은 첫 화면 또는 해당 영역으로 스크롤한 화면). 1a·1b·1c 42장(합계 약 5.6 MiB)과 1d 38장(합계 약 7.6 MiB)을 합쳐 PNG 80장, 약 14 MiB. 1d는 2026-10-12(HEAD `c161979` 기준)에 추가로 찍었고, 같은 날 화면 수정분(HEAD `42c3619` + 작업 트리, 프로젝트 `shots5`)으로 17장을 다시 찍고 2장을 새로 추가했다. 1a·1b·1c 42장과 나머지 1d 장은 바이트 그대로다.
@@ -118,7 +118,53 @@
 
 1d에서 찍지 못한 것: `FORMULA_CIRCULAR` 저장 단계의 경로 안내(검사 단계에서 같은 문구가 먼저 나와 저장 버튼이 막힘), 뷰가 없는 동안의 입력 그리드(계산 열이 빈 값). `PREVIEW_BUSY` 두 장은 서버가 아니라 브라우저에서 응답을 바꾼 모의 화면이다.
 
-촬영하지 못한 화면은 없다(요청한 항목 모두 촬영). 열 목록·붙여넣기 결과 등에서 가로 스크롤바가 보이는 화면은 `fu1c-s4-entry-grid-wide-*`(열 16개)이며, 열이 6개인 "월별 매출"은 세로 스크롤바가 생기는 화면에서만 아래쪽에 가로 스크롤바가 함께 나타난다. 단 "개발용 신원 전환기가 보이는 상태"는 모든 화면 위쪽에 항상 나타나므로 전환기를 펼친 화면을 별도 파일로 두었다.
+### 1e Superset 연동(S7 대시보드, S8 연결 관리, S9 동기 구역, S2 동기 상태 열)
+
+촬영 조건 공통: 2026-10-13, HEAD `361c32f`, 1920×1080, `deviceScaleFactor` 1, Chromium(`ignoreDefaultArgs: ['--hide-scrollbars']`, `timezoneId: 'Asia/Seoul'`, locale `ko-KR`). compose 프로젝트 `shot1e`(포털 36180, backend 39180, DB 36480, `APP_BASE_PATH=/bi-wizard`, `APP_PROXY_STRIP_PREFIX=false`, `AUTH_STUB_ENABLED=true`), 임시 env 파일(더미 비밀값, 사용자 `.env` 미사용). 합성 데이터셋 "일별 손익"(365일 × 구분 4종, 계산 열 이익·비용률), "월별 수금" 등. 대시보드는 Superset에서 `seed1e.py`가 만들고 임베드를 켰으며 `bi_guest` 입장권으로 열었다. 입장권·비밀번호는 어느 화면에도 나오지 않는다. 시나리오는 `capture/capture1e.cjs`, 데이터는 `capture/seed1e.py`다.
+
+| 파일 | 화면 | 상태 | 촬영 조건 |
+| --- | --- | --- | --- |
+| `fu1e-s7-dashboard-select-prompt.png` | S7 대시보드 | 대시보드를 고르기 전 빈 상태("왼쪽 목록에서 대시보드를 고르세요"), 작성자 안내문은 접힌 상태 | `stub-viewer`, `/dashboards` |
+| `fu1e-s7-dashboard-loading.png` | S7 | 입장권을 받는 중 "대시보드를 불러오는 중…" | 입장권 요청(`/guest-token`) 응답만 브라우저 쪽에서 6초 늦춤(지연 주입, 서버·화면 코드는 그대로) |
+| `fu1e-s7-dashboard-six-charts-viewer.png` | S7 정상 | 목록 3개 + 차트 6종(선·막대·표·큰 숫자 추세·원형·혼합)이 모두 그려진 임베드 첫 화면(둘째 줄은 임베드 안쪽 스크롤 때문에 아래가 잘림) | `stub-viewer`, 대시보드 "손익 현황 (지원 차트 6종)" |
+| `fu1e-s7-dashboard-six-charts-viewer-scrolled-down.png` | S7 정상 | 같은 대시보드를 임베드 안에서 아래로 스크롤해 둘째 줄(큰 숫자·원형·혼합)이 온전히 보임 | 위 화면에서 마우스 휠 |
+| `fu1e-s7-author-guide-open.png` | S7 작성자 안내문 | 펼친 상태: 지원 차트 6가지, `[팀] 이름` 데이터셋 이름, 시간 필터, `team` 열, Superset 별도 로그인 안내. 위쪽 "차트 만들기 (새 창)" 링크 | `stub-viewer`, 안내문 펼침 |
+| `fu1e-s7-dashboard-blank-allowed-domains.png` | S7 화면이 비어 있음 안내 | 임베드 허용 도메인이 포털 주소와 다른 대시보드("허용 도메인이 다른 대시보드"): 입장권은 받지만 Superset이 403을 돌려줘 15초 뒤 "대시보드 화면이 비어 있습니다…" 안내가 뜬다 | 허용 도메인 `https://other.example`로 임베드를 켠 대시보드 |
+| `fu1e-s7-dashboard-error-429-rate-limited.png` | S7 429 안내 | "요청이 너무 많습니다. 약 59초 뒤에 다시 시도해 주세요." + 문의 번호 + "다시 시도" | 같은 사용자(`stub-entry`)가 60초 안에 입장권 API를 33번 호출(30번 200, 3번 429, 실제 한도) 직후 화면을 연다 |
+| `fu1e-s7-dashboard-error-503-superset-down.png` | S7 503 안내 | "대시보드 서비스에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요." + 문의 번호 + "다시 시도" | `docker compose stop superset` 상태 |
+| `fu1e-s7-dashboard-none-linked.png` | S7 대시보드 없음 | "연결된 대시보드가 없습니다. 차트를 만든 뒤 관리자에게 대시보드 연결을 요청하세요." | 관리자가 대시보드 3개를 모두 연결 해제(촬영 뒤 다시 연결) |
+| `fu1e-s8-connections-list-admin.png` | S8 연결 관리 | 관리자: 연결 방법 안내, 새 연결 폼(등록 버튼 비활성), 연결된 대시보드 3개 | `stub-admin`, `/admin/dashboards` |
+| `fu1e-s8-form-error-uuid-format.png` | S8 폼 오류 | 번호 형식 오류("임베드 번호는 하이픈이 있는 36자…여야 합니다"), 등록 버튼 비활성 | 번호에 `1234-not-a-uuid` 입력 |
+| `fu1e-s8-form-uuid-uppercase-normalized-notice.png` | S8 폼 안내 | 대문자 번호 입력 시 "대문자는 소문자로 바꿔서 등록합니다" 안내 | 기존 번호를 대문자로 입력 |
+| `fu1e-s8-form-error-duplicate-409.png` | S8 폼 오류 | 409 중복: "이미 연결된 임베드 번호입니다. 목록에서 해제된 항목이 있으면 '다시 연결'을 쓰세요." + 문의 번호 | 이미 등록된 번호로 "연결 등록" |
+| `fu1e-s8-form-error-empty-name.png` | S8 폼 오류 | 이름이 공백뿐: "이름을 입력해 주세요." | 이름에 공백만 입력 |
+| `fu1e-s8-rename-inline.png` | S8 이름 변경 | 행 안에서 이름을 고치는 상태(저장은 값이 바뀔 때까지 비활성) | 행의 "이름 변경" |
+| `fu1e-s8-connections-list-inactive-row.png` | S8 보관(연결 해제) | 한 항목이 "해제됨" 배지, 버튼은 "다시 연결" | 행의 "연결 해제" |
+| `fu1e-s8-connections-list-reactivated.png` | S8 활성 전환 | "다시 연결" 뒤 "연결됨"으로 돌아옴 | 행의 "다시 연결" |
+| `fu1e-s8-access-denied-non-admin.png` | S8 접근 거부 | "관리자만 사용할 수 있는 화면입니다." | `stub-entry`가 `/admin/dashboards` 직접 접속 |
+| `fu1e-s9-sync-all-registered.png` | S9 동기 구역 registered | 전체 2개 모두 "등록됨", 마지막 등록 시각, "대기·실패 전부 다시 동기" 비활성 | `stub-admin`, `/admin/status` |
+| `fu1e-s9-sync-failed-with-error-code-admin.png` | S9 failed(관리자) | "등록 실패" 2개, 실패 사유 `UNAVAILABLE_CONNECT: 대시보드 서비스에 연결하지 못했습니다.`(코드는 관리자에게만), 행마다 "다시 동기" | `docker compose stop superset` 중 데이터셋 생성 |
+| `fu1e-s9-sync-filter-failed-admin.png` | S9 failed 필터 | 상태 필터 "등록 실패"로 거른 목록 | 필터 선택 |
+| `fu1e-s9-sync-retry-accepted.png` | S9 다시 시도 | "2개를 다시 등록하도록 접수했습니다…" 안내(Superset이 멈춰 있어 결과는 여전히 실패) | "대기·실패 전부 다시 동기" 클릭 |
+| `fu1e-s9-sync-pending-admin.png` | S9 pending | "등록 대기" 3개와 "다시 동기" 버튼, 사유 칸은 비어 있음 | Superset 컨테이너를 `docker compose pause`한 채 데이터셋 3개 생성(응답이 없어 처리 중) |
+| `fu1e-s9-sync-filter-pending-admin.png` | S9 pending 필터 | 상태 필터 "등록 대기"로 거른 목록 | 필터 선택 |
+| `fu1e-s9-sync-recovered-all-registered.png` | S9 복구 | Superset을 되살린 뒤 7개 모두 "등록됨" | `unpause` 후 약 10초 |
+| `fu1e-s9-access-denied-non-admin.png` | S9 접근 거부 | 정의 담당자가 `/admin/status` 접속: "관리자만 사용할 수 있는 화면입니다." | `stub-definer` |
+| `fu1e-s2-dataset-list-sync-registered.png` | S2 동기 상태 열 registered | "등록됨" 배지 | `stub-definer`, `/datasets` |
+| `fu1e-s2-dataset-list-sync-failed-definer.png` | S2 failed(정의 담당자) | "등록 실패" 배지(사유 코드는 보이지 않음) | `stub-definer`, Superset 정지 상태 |
+| `fu1e-s2-dataset-list-sync-failed-viewer.png` | S2 failed(열람자) | 같은 배지, "새 데이터셋" 없이 안내 문구 | `stub-viewer` |
+| `fu1e-s2-dataset-list-sync-pending-definer.png` | S2 pending | "등록 대기" 배지 | Superset 일시 정지 중 |
+| `fu1e-superset-계산열숫자.png` | Superset 화면(선택) | Superset 대시보드 "계산 열 숫자 확인": 표에 계산 열 비용률·이익 숫자, 큰 숫자 0.6115, 비용률 선 | Superset에 관리자로 로그인해 대시보드를 직접 연다(포털 아님) |
+
+"비관리자에게 `last_error`가 숨겨진다"는 API 응답으로도 확인했다(정의 담당자의 E1 응답의 `last_error`가 전부 `null`, 촬영 스크립트의 메모 출력). S2 목록 화면에는 어느 사용자에게도 사유 코드가 보이지 않는다.
+
+1e에서 찍지 못한 것(사유):
+- 한 화면에 registered·pending·failed 배지가 함께 나오는 S2: 실패는 Superset 정지(연결 거부)에서, 대기는 Superset 일시 정지에서만 만들어져 같은 시점에 둘을 겹쳐 만들지 못했다. 상태별로 따로 찍었다(S9에는 registered와 pending, registered와 failed가 함께 나온 화면이 있다).
+- S8 등록 성공 화면("'이름' 대시보드를 연결했습니다"): 새 임베드 번호를 만들려면 Superset 대시보드를 하나 더 만들어 S7 목록에 남게 되어 생략했다. 단위 시험(`dashboards.test.tsx`)이 문구를 검증한다.
+- 5분 넘는 열람의 입장권 갱신 실패 배너, 허용 도메인 안내가 아닌 502(`SUPERSET_REJECTED`) 안내: 재현에 Superset 설정을 바꾸거나 5분 이상 기다려야 해 제외했다.
+
+
+(1a~1d) 촬영하지 못한 화면은 없다(요청한 항목 모두 촬영). 열 목록·붙여넣기 결과 등에서 가로 스크롤바가 보이는 화면은 `fu1c-s4-entry-grid-wide-*`(열 16개)이며, 열이 6개인 "월별 매출"은 세로 스크롤바가 생기는 화면에서만 아래쪽에 가로 스크롤바가 함께 나타난다. 단 "개발용 신원 전환기가 보이는 상태"는 모든 화면 위쪽에 항상 나타나므로 전환기를 펼친 화면을 별도 파일로 두었다.
 
 ## 재촬영 방법
 
@@ -139,3 +185,15 @@
 1. 위 1~3번과 같이 새 DB로 스택을 띄우고 `seed-stub-users`까지 실행한다(포트는 65535 이하여야 한다).
 2. 시드: `python3 capture/seed1d.py http://127.0.0.1:<FRONTEND_PORT>/bi-wizard/api <ids1d.json>`
 3. 촬영은 단계로 나눠 `--only`로 실행한다: ① `editor-empty,editor-chip,editor-autocomplete,editor-errors,editor-preview-ok,editor-preview-mixed,editor-preview-busy,editor-circular,editor-readonly,grid,formula-view,s5,s9-ok` ② 관리자 DB에서 `DROP VIEW bi_data.dv_1`, `dv_2` 후 `datasets` 행 `FOR NO KEY UPDATE` 잠금을 80초 쥐고(별도 psql 세션) backend를 재시작해 `LOCK_TIMEOUT` 실패를 만든 뒤 `LOCK_WAIT_MS=62000`으로 `s9-failed` ③ `fixdata,s5-empty,result-type-changed`. `capture1d.cjs`는 `capture.cjs`와 같은 방식으로 DOM 텍스트·HTML을 임시 env의 비밀성 값과 대조한다.
+
+
+### 1e 재촬영 방법
+
+1. 더미 값만 든 임시 env 파일을 저장소 밖 또는 Git이 무시하는 위치(`_workspace/qa/`)에 만든다(`AUTH_STUB_ENABLED=true`, `APP_ENV=local`, `APP_BASE_PATH=/bi-wizard`, `APP_PROXY_STRIP_PREFIX=false`, 비밀 변수 10개는 새로 만든 무작위 값, 포트는 65535 이하). 새 DB(전용 프로젝트명 `shot1e`)로 `docker compose -p shot1e --env-file <임시 env> up -d`. 이미지는 먼저 `build backend frontend`(이 세션은 CA 묶음을 넣는 보조 Dockerfile을 `-f` override로 썼다). `${SUPERSET_APP_ROOT}/health`가 200이 될 때까지 기다린 뒤 `exec -T backend python -m app.cli seed-stub-users`.
+2. 합성 데이터: `python3 capture/seed1e.py portal http://127.0.0.1:<FRONTEND_PORT>/bi-wizard/api <ids1e.json>` 다음, Superset 관리자 값을 환경변수로만 넘겨 `SUPERSET_ADMIN_USER=… SUPERSET_ADMIN_PASSWORD=… python3 capture/seed1e.py superset <API 주소> http://127.0.0.1:<FRONTEND_PORT>/bi-wizard/superset <ids1e.json> http://127.0.0.1:<FRONTEND_PORT>`(임시 env를 `set -a; . <임시 env>; set +a`로 읽어 넘긴다. 값을 파일·명령줄에 쓰지 않는다). 포털이 가상 데이터셋을 등록하는 동안(최대 약 1분) 스크립트가 기다린다.
+3. 촬영(`PLAYWRIGHT_MODULE`·`CHROMIUM_PATH` 지정, `node capture/capture1e.cjs --origin http://127.0.0.1:<FRONTEND_PORT> --base /bi-wizard --ids <ids1e.json> --out . --env <임시 env> --only …`)은 단계로 나눈다.
+   - ① 정상 단계: `s7-select,s7-loading,s7-six,s7-guide,s7-blank,s8,s8-toggle,s8-denied,sync-registered,s7-nodash,s7-429,superset-calc`(`superset-calc`만 `SUPERSET_ADMIN_USER`·`SUPERSET_ADMIN_PASSWORD` 환경변수 필요. `s7-429`는 해당 사용자의 60초 한도를 쓰므로 마지막에 둔다)
+   - ② `docker compose -p shot1e … stop superset` → `python3 capture/seed1e.py extra <API 주소> "지점별 재고"`(8초쯤 기다리면 `failed`) → `s7-503`, 이어서 `sync-failed,sync-retry`
+   - ③ `docker compose … start superset`로 되살린 뒤 `docker compose … pause superset` → `seed1e.py extra`로 데이터셋 3개 → **곧바로** `sync-pending`(처리 중 대기는 잠시만 유지된다) → `docker compose … unpause superset` → 약 10초 뒤 `sync-recovered`
+4. 정리: `docker compose -p shot1e --env-file <임시 env> stop`, 컨테이너는 `rm -f`(서비스 이름 지정), 볼륨은 이름을 지정해 삭제한다(`down -v` 금지).
+5. 촬영 스크립트는 촬영 순간마다 포털 DOM 텍스트·HTML(임베드 iframe 안 포함)을 임시 env의 비밀성 값과 입장권 모양(`eyJ…`)·`Bearer`·`Authorization`·내부 경로 패턴에 대조해 발견 건수를 출력한다(0이어야 한다).
