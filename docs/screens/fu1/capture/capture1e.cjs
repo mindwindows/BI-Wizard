@@ -14,7 +14,8 @@ const arg = (name, def) => { const i = process.argv.indexOf('--' + name); return
 const ORIGIN = arg('origin'), BASE = arg('base', ''), OUT = path.resolve(arg('out', '.'));
 const IDS = JSON.parse(fs.readFileSync(arg('ids'), 'utf8'));
 const ENV_FILE = arg('env'), ONLY = (arg('only', '') || '').split(',').filter(Boolean), DUMP = arg('dump');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const pw = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { chromium } = pw;
 const CHROMIUM = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const D1 = IDS.d1, D2 = IDS.d2, D3 = IDS.d3;
@@ -159,6 +160,26 @@ const dumps = [], made = [], notes = [];
       } finally {
         for (const r of active) await api('stub-admin', `/dashboards/${r.id}`, 'PATCH', { is_active: true });
       }
+    },
+    async 's7-502'() {
+      // 1e-f 추가: 관리자가 Superset에서 대시보드의 임베드를 껐다(D3). 포털 연결은 그대로 남아 입장권 발급이 Superset에 거부된다(502).
+      // 비밀번호는 환경변수로만 받는다(SUPERSET_ADMIN_USER, SUPERSET_ADMIN_PASSWORD). 화면에는 나오지 않는다.
+      const user = process.env.SUPERSET_ADMIN_USER, pass = process.env.SUPERSET_ADMIN_PASSWORD;
+      if (!user || !pass) throw new Error('SUPERSET_ADMIN_USER/PASSWORD 환경변수가 필요하다');
+      const root = `${ORIGIN}${BASE}/superset`;
+      const sctx = await pw.request.newContext();
+      const login = await sctx.post(`${root}/api/v1/security/login`, { data: { username: user, password: pass, provider: 'db', refresh: true } });
+      if (login.status() !== 200) throw new Error('Superset 로그인 ' + login.status());
+      const bearer = { Authorization: 'Bearer ' + (await login.json()).access_token };
+      const csrf = (await (await sctx.get(`${root}/api/v1/security/csrf_token/`, { headers: bearer })).json()).result;
+      const del = await sctx.delete(`${root}/api/v1/dashboard/${D3.superset_id}/embedded`, { headers: { ...bearer, 'X-CSRFToken': csrf, Referer: root + '/' } });
+      notes.push('임베드 해제 응답 ' + del.status());
+      await sctx.dispose();
+      const page = await newPage();
+      await loginAs('stub-viewer'); await open(page, dashUrl(D3));
+      await page.waitForSelector('[data-testid=embed-failed]', { timeout: 30000 });
+      await shot(page, 'fu1e-s7-dashboard-error-502-embed-disabled');
+      await page.close();
     },
     async 's7-503'() {
       // 사전: 셸에서 `docker compose stop superset`
