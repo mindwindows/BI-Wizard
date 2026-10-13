@@ -184,7 +184,7 @@ function AuditConsole() {
           <input
             type="text"
             inputMode="numeric"
-            size={8}
+            size={16}
             value={draft.targetId}
             disabled={draft.targetType === ""}
             placeholder={draft.targetType === "" ? "종류를 먼저 선택" : "번호"}
@@ -300,7 +300,7 @@ function targetName(details: unknown): string {
 }
 
 function AuditRow({ item, resolveUser }: { item: AuditItem; resolveUser: (id: number) => string | undefined }) {
-  const actor = item.actor?.display_name ? item.actor.display_name : SERVER_ACTOR;
+  const actor = item.actor === null ? SERVER_ACTOR : item.actor.display_name ? item.actor.display_name : `사용자 #${item.actor.id}`;
   const action = isAuditAction(item.action) ? ACTION_LABELS[item.action] : "알 수 없는 행위";
   const kind = isTargetType(item.target_type) ? TARGET_TYPE_LABELS[item.target_type] : "알 수 없는 대상";
   const name = targetName(item.details);

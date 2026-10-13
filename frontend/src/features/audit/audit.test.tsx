@@ -6,7 +6,7 @@ import { ADMIN_ME, HEALTH_HANDLERS, MEMBER_ME, apiError, installFetch, json, typ
 import { buildAuditQuery } from "./api";
 import { EMPTY_FILTERS } from "./types";
 
-/** S10 감사 기록 목록 시험(FU-2a). 응답은 05 §2-7 F1 계약대로 만든 가짜 서버다(백엔드 구현 전). */
+/** S10 감사 기록 목록 시험(FU-2a). 응답은 05 §2-7 F1 계약대로 만든 가짜 서버다(F1은 backend에 구현됐고 시험은 계약 모양의 목으로 한다). */
 const BASE = "/bi-wizard";
 
 beforeEach(() => {
@@ -99,6 +99,16 @@ describe("S10 목록", () => {
     expect(screen.getByRole("navigation", { name: "관리 메뉴" })).toBeTruthy();
   });
 
+  it("행위자 표시: actor가 null이면 '서버 명령', actor가 있는데 이름이 비면 '사용자 #번호'", async () => {
+    open({
+      "GET /audit-logs": () =>
+        pageOf([item(2, { actor: null, actor_source: "cli" }), item(1, { actor: { id: 42, display_name: "" } })]),
+    });
+    await ready();
+    await screen.findByRole("table", { name: "감사 기록" });
+    expect(rows().map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["서버 명령", "사용자 #42"]);
+  });
+
   it("읽기 전용이다: 수정·삭제·내보내기·저장 버튼이 없다", async () => {
     open({ "GET /audit-logs": () => pageOf([item(1)]) });
     await ready();
@@ -147,14 +157,16 @@ describe("S10 필터", () => {
     fireEvent.click(screen.getByRole("button", { name: "다음" }));
     await waitFor(() => expect(lastQuery(calls).offset).toBe("50"));
 
+    const before = auditCalls(calls).length;
     fireEvent.change(field("시작일"), { target: { value: "2026-10-01" } });
     fireEvent.change(field("종료일"), { target: { value: "2026-10-13" } });
     fireEvent.change(field("행위자"), { target: { value: "7" } });
     fireEvent.change(field("대상 종류"), { target: { value: "dataset" } });
     fireEvent.change(field("대상 번호"), { target: { value: "12" } });
     fireEvent.change(field("행위"), { target: { value: "column.add" } });
-    const before = auditCalls(calls).length;
-    // 조회 전에는 요청하지 않는다.
+    // 조회 전에는 요청이 늘지 않는다(바꾼 입력이 화면에 반영될 시간을 준 뒤 확인).
+    await screen.findByTestId("audit-draft-hint");
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(auditCalls(calls)).toHaveLength(before);
     fireEvent.click(screen.getByRole("button", { name: "조회" }));
     await waitFor(() => expect(auditCalls(calls)).toHaveLength(before + 1));
