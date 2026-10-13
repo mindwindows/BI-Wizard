@@ -60,6 +60,9 @@ body {
 
 .muted {
   color: #616e7c;
+  /* 안내·설명 문단: 어절 중간에서 갈라지지 않게 하되 긴 URL·번호는 넘치지 않게 한다. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .state {
@@ -670,7 +673,7 @@ button.link {
 .panel-form p,
 .state-error-inline {
   word-break: keep-all;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
 }
 
 .panel-form input,

@@ -31,7 +31,7 @@ import httpx
 from pydantic import SecretStr
 
 from app.superset.constants import DATABASE_NAME, HEALTH_TIMEOUT, LOGIN_RETRY_BACKOFF_SECONDS
-from app.superset.errors import SupersetRejected, SupersetUnavailable
+from app.superset.errors import SupersetLocalError, SupersetRejected, SupersetUnavailable
 
 for _noisy in ("httpx", "httpcore"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
@@ -105,10 +105,10 @@ class SupersetSession:
         return SupersetRejected("BAD_RESPONSE")
 
     @staticmethod
-    def _unexpected(error: Exception) -> SupersetRejected:
+    def _unexpected(error: Exception) -> SupersetLocalError:
         """`httpx.HTTPError`가 아닌 예외. 클래스 이름만 남기고 사유 코드로 바꾼다."""
         logger.error("Superset 호출 중 예기치 않은 예외: %s", type(error).__name__)
-        return SupersetRejected("INTERNAL")
+        return SupersetLocalError("INTERNAL")
 
     def _exchange(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """HTTP 요청 한 번. 모든 예외를 사유 코드 예외로 바꾼다(원인 예외는 붙이지 않는다)."""
@@ -129,7 +129,7 @@ class SupersetSession:
         """
         if self._login_blocked_until is not None:
             if self._clock() < self._login_blocked_until:
-                raise SupersetRejected("AUTH_FAILED")
+                raise SupersetLocalError("AUTH_FAILED")  # Superset을 부르지 않았다
             self._login_blocked_until = None
         body = {
             "username": self._username,

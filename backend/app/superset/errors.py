@@ -52,3 +52,9 @@ class SupersetUnavailable(SupersetError):
 
 class SupersetRejected(SupersetError):
     """Superset이 요청을 거부했다(인증·권한·검증 실패 등). 같은 요청을 다시 보내도 같다."""
+
+
+class SupersetLocalError(SupersetRejected):
+    """Superset의 응답이 아닌 로컬 오류(접속 전 예기치 않은 예외, 로그인 백오프로 호출을 건너뜀).
+
+    서킷 브레이커에 성공으로도 실패로도 기록하지 않는다(`CircuitBreaker.release_probe`)."""

@@ -5,9 +5,11 @@ import logging
 import httpx
 import pytest
 
+from app.superset.breaker import CircuitBreaker
 from app.superset.client import DatasetApi, rison_string
 from app.superset.constants import LOGIN_RETRY_BACKOFF_SECONDS
-from app.superset.errors import SupersetRejected, SupersetUnavailable
+from app.superset.errors import SupersetLocalError, SupersetRejected, SupersetUnavailable
+from app.superset.tokens import GuestTokenIssuer
 from tests.fake_superset import new_fake
 from tests.superset_helpers import ISSUER, SERVICE, Clock, make_api, make_session
 
@@ -440,3 +442,56 @@ def test_fake_superset_accepts_uppercase_embedded_uuid_like_the_real_hook():
             accept=(400,),
         )
         assert response.status_code == status, sent
+
+
+# --- 로컬 오류는 서킷 브레이커에 기록하지 않는다 ---
+
+
+def _half_open_breaker(clock: Clock) -> CircuitBreaker:
+    breaker = CircuitBreaker(failure_threshold=3, cooldown_seconds=5, clock=clock)
+    for _ in range(3):
+        breaker.record_failure()
+    clock.advance(6)  # 쿨다운은 지났고 로그인 백오프(30초)는 아직이다
+    return breaker
+
+
+def test_login_backoff_error_is_local_and_does_not_consume_the_half_open_probe():
+    fake = new_fake()
+    clock = Clock()
+    session = make_session(fake, ("bi_guest_issuer", "wrong"), clock=clock)
+    with pytest.raises(SupersetRejected) as real:  # 실제로 Superset이 거부했다
+        session.request("GET", DATASET_PATH)
+    assert not isinstance(real.value, SupersetLocalError)
+    breaker = _half_open_breaker(clock)
+    issuer = GuestTokenIssuer(session, breaker)
+    logins = fake.count("POST", "/api/v1/security/login")
+    with pytest.raises(SupersetLocalError) as error:  # 백오프: Superset을 부르지 않았다
+        issuer.issue(username="1", dashboard_uuid="11111111-2222-3333-4444-555555555555")
+    assert error.value.code == "AUTH_FAILED"
+    assert fake.count("POST", "/api/v1/security/login") == logins
+    assert breaker.is_open  # 성공으로 닫히지도, 실패로 다시 열리지도 않았다
+    assert breaker.allow()  # 시험 호출 자리가 풀려 다음 호출이 시험한다
+
+
+def test_invalid_dashboard_uuid_resolves_the_probe_and_is_a_meaningful_error():
+    fake = new_fake()
+    clock = Clock()
+    breaker = _half_open_breaker(clock)
+    issuer = GuestTokenIssuer(make_session(fake, ISSUER, clock=clock), breaker)
+    with pytest.raises(SupersetRejected) as error:  # 500(ValueError)이 아니다
+        issuer.issue(username="1", dashboard_uuid="not-a-uuid")
+    assert error.value.code == "INTERNAL"
+    assert breaker.allow()  # 시험 호출 자리가 풀렸다
+    assert fake.calls == []
+
+
+def test_real_rejection_after_contact_still_counts_as_success():
+    fake = new_fake()
+    clock = Clock()
+    breaker = _half_open_breaker(clock)
+    issuer = GuestTokenIssuer(
+        make_session(fake, ("bi_guest_issuer", "wrong"), clock=clock), breaker
+    )
+    with pytest.raises(SupersetRejected):
+        issuer.issue(username="1", dashboard_uuid="11111111-2222-3333-4444-555555555555")
+    assert not breaker.is_open  # Superset에 닿았다: 닫힌다

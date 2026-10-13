@@ -77,6 +77,9 @@ def test_constants_match_approved_values():
     assert constants.GUEST_TOKEN_RATE_WINDOW_SECONDS == 60
     assert constants.DATABASE_NAME == "BI-Wizard (read-only)"
     assert constants.SCHEMA == "bi_data"
+    assert constants.SYNC_DEBOUNCE_SECONDS == 3.0
+    assert constants.LOGIN_RETRY_BACKOFF_SECONDS == 30
+    assert (constants.BREAKER_FAILURE_THRESHOLD, constants.BREAKER_COOLDOWN_SECONDS) == (3, 30)
 
 
 def test_database_name_matches_superset_init_constant():
@@ -242,6 +245,18 @@ def test_half_open_does_not_stay_blocked_forever_if_the_probe_never_reports():
     clock.advance(31)
     assert breaker.allow()  # 쿨다운만큼 지나면 다음 한 건을 다시 통과시킨다
     assert not breaker.allow()
+
+
+def test_release_probe_frees_the_half_open_slot_without_recording_anything():
+    clock = Clock()
+    breaker = opened_breaker(clock)
+    breaker.release_probe()  # 닫혀 있지 않지만 시험 호출이 없다: 아무 일도 없다
+    assert not breaker.allow()
+    clock.advance(31)
+    assert breaker.allow() and not breaker.allow()  # 시험 호출 한 건
+    breaker.release_probe()  # 로컬 오류로 끝났다: 성공도 실패도 아니다
+    assert breaker.is_open
+    assert breaker.allow()  # 다음 호출이 시험한다
 
 
 # --- 사용자별 한도 기록의 정리 ----

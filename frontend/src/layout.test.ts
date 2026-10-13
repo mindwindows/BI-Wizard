@@ -25,6 +25,21 @@ describe("S9 동기 목록 줄바꿈", () => {
   });
 });
 
+describe("안내·설명 문단", () => {
+  it(".muted(S9 안내 포함)는 어절 단위로 줄을 바꾸고 긴 URL·번호는 넘치지 않게 꺾는다", () => {
+    const muted = rule(".muted");
+    expect(muted).toContain("word-break: keep-all");
+    expect(muted).toContain("overflow-wrap: anywhere");
+  });
+  it("S8 폼 문단과 인라인 오류도 같은 규칙이다", () => {
+    for (const selector of [".panel-form p", ".state-error-inline"]) {
+      const block = rule(selector);
+      expect(block, selector).toContain("word-break: keep-all");
+      expect(block, selector).toContain("overflow-wrap: anywhere");
+    }
+  });
+});
+
 describe("S8 폼 문구", () => {
   it("오류 문구는 어절 단위로 줄을 바꾸고 폼 폭이 넓다", () => {
     expect(rule(".state-error-inline")).toContain("word-break: keep-all");

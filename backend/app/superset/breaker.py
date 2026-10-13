@@ -60,6 +60,13 @@ class CircuitBreaker:
                 self._opened_at = self._clock()
                 self._probe_started = None
 
+    def release_probe(self) -> None:
+        """결과를 기록하지 않고 시험 호출 자리만 푼다(Superset을 부르지 않은 로컬 오류용).
+
+        닫혀 있으면 아무 일도 없다. 반열림이면 다음 호출이 다시 시험한다."""
+        with self._lock:
+            self._probe_started = None
+
     @property
     def is_open(self) -> bool:
         """열림 또는 반열림(시험 호출을 기다리는 중)인가."""

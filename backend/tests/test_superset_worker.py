@@ -174,6 +174,26 @@ def test_circuit_breaker_stops_calling_superset_after_consecutive_failures(db, f
     assert len(fake.datasets) == 5
 
 
+def test_local_internal_error_does_not_consume_the_half_open_probe(
+    db, fake, sync, clock, monkeypatch
+):
+    dataset_id, _, _ = make_dataset(db, fake)
+    for _ in range(3):
+        sync._breaker.record_failure()
+    clock.advance(31)  # 반열림: 시험 호출 한 건
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("local failure")
+
+    monkeypatch.setattr("app.superset.worker.sync_dataset", boom)
+    sync.request_dataset_sync(dataset_id)
+    sync.drain()
+    assert row(db, dataset_id)["last_error"] == summarize("INTERNAL")
+    assert sync._breaker.is_open  # 성공으로 닫히지 않았다
+    assert sync._breaker.allow()  # 시험 호출 자리가 풀렸다
+    assert fake.calls == []
+
+
 def test_change_during_processing_keeps_pending_and_runs_again(db, fake, sync):
     dataset_id, _, _ = make_dataset(db, fake)
     sync.request_dataset_sync(dataset_id)
@@ -380,7 +400,7 @@ def test_loop_recovers_failed_unavailable_datasets_on_its_own(db, fake, loop_syn
     assert len(fake.datasets) == 1  # 중복 등록 없음
 
 
-def test_loop_survives_unexpected_errors(db, fake, loop_sync, monkeypatch):
+def test_loop_survives_unexpected_errors(db, fake, loop_sync, monkeypatch, caplog):
     dataset_id, _, _ = make_dataset(db, fake)
     calls = {"n": 0}
     original = loop_sync._process
@@ -392,6 +412,7 @@ def test_loop_survives_unexpected_errors(db, fake, loop_sync, monkeypatch):
         original(dataset_id_)
 
     monkeypatch.setattr(loop_sync, "_process", flaky)
+    caplog.set_level(logging.DEBUG)
     loop_sync.request_dataset_sync(dataset_id)
     loop_sync._enqueue([dataset_id])
     run_loop(loop_sync, lambda: calls["n"] >= 1)
@@ -400,6 +421,10 @@ def test_loop_survives_unexpected_errors(db, fake, loop_sync, monkeypatch):
         loop_sync,
         lambda: (r := row(db, dataset_id)) is not None and r["sync_status"] == "registered",
     )
+    assert "RuntimeError" in caplog.text  # 클래스 이름만 남는다
+    for forbidden in ("secret", "hunter2", "boom", "http://", "https://", "Traceback"):
+        assert forbidden not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
 
 
 def test_thread_stops_cleanly_and_start_is_idempotent(loop_sync):

@@ -59,6 +59,11 @@ def admin(pg_env):
     )
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         assert conn.execute(sa.text("SHOW fsync")).scalar_one() == "off"  # tmpfs 시험 DB 확인
+        timeout = conn.execute(sa.text("SHOW deadlock_timeout")).scalar_one()
+        if timeout != "1s":
+            pytest.fail(
+                f"시험 DB의 deadlock_timeout은 1s여야 한다(실제 {timeout}): 교착 시험이 가정한다"
+            )
     yield engine
     engine.dispose()
 

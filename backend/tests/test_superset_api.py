@@ -176,11 +176,11 @@ def test_e2_accepts_pending_and_failed_and_missing_rows_but_not_registered(
     services.sync.request_dataset_sync(registered)
     services.sync.drain()
     fresh = make_dataset(db, world, fake, "새 데이터셋")
+    calls_before = len(fake.calls)
     response = sapi("admin", "POST", "/api/superset/sync")
     assert response.status_code == 202
     assert response.json() == {"accepted": [fresh]}
     assert services.sync.pending_ids() == [fresh]
-    calls_before = len(fake.calls)
     assert len(fake.calls) == calls_before  # 접수는 Superset을 부르지 않는다
     services.sync.drain()
     assert all(
@@ -245,7 +245,7 @@ def test_e3_include_inactive_is_admin_only(sapi, db, world):
     add_dashboard(db, "활성", UUID_A)
     add_dashboard(db, "해제", UUID_B, is_active=False)
     admin = sapi("admin", "GET", "/api/dashboards?include_inactive=true").json()
-    assert [d["name"] for d in admin["items"]] == ["해제", "활성"] or admin["total"] == 2
+    assert [d["name"] for d in admin["items"]] == ["해제", "활성"]
     assert admin["total"] == 2
     forbidden = sapi("viewer", "GET", "/api/dashboards?include_inactive=true")
     assert forbidden.status_code == 403 and err(forbidden)["code"] == "FORBIDDEN"

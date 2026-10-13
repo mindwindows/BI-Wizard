@@ -20,7 +20,12 @@ import uuid
 from app.superset.breaker import CircuitBreaker
 from app.superset.client import SupersetSession
 from app.superset.constants import ISSUER_MAX_CONCURRENT
-from app.superset.errors import SupersetError, SupersetRejected, SupersetUnavailable
+from app.superset.errors import (
+    SupersetError,
+    SupersetLocalError,
+    SupersetRejected,
+    SupersetUnavailable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,24 +58,27 @@ class GuestTokenIssuer:
         if not self._slots.acquire(timeout=_ACQUIRE_TIMEOUT_SECONDS):
             raise SupersetUnavailable("UNAVAILABLE_TIMEOUT")
         try:
-            body = {
-                "user": {"username": username},
-                "resources": [{"type": "dashboard", "id": canonical_uuid(dashboard_uuid)}],
-                "rls": [],
-            }
             try:
+                body = {
+                    "user": {"username": username},
+                    "resources": [{"type": "dashboard", "id": canonical_uuid(dashboard_uuid)}],
+                    "rls": [],
+                }
                 response = self._session.request("POST", _GUEST_TOKEN_PATH, json=body, csrf=True)
                 token = self._session.json(response).get("token")
             except SupersetUnavailable:
                 self._breaker.record_failure()
                 raise
-            except SupersetError:
-                self._breaker.record_success()  # 연결은 된다. 거부는 입력·권한 문제다.
+            except SupersetError as error:
+                if isinstance(error, SupersetLocalError):
+                    self._breaker.release_probe()  # Superset을 부르지 않은 로컬 오류: 기록하지 않는다.
+                else:
+                    self._breaker.record_success()  # 연결은 된다. 거부는 입력·권한 문제다.
                 raise
             except Exception as error:  # 클라이언트 경계가 못 바꾼 예외: 클래스 이름만 남긴다
                 logger.error("입장권 발급 중 예기치 않은 예외: %s", type(error).__name__)
-                self._breaker.record_success()
-                raise SupersetRejected("INTERNAL") from None
+                self._breaker.release_probe()
+                raise SupersetLocalError("INTERNAL") from None
             self._breaker.record_success()
             if not isinstance(token, str) or not token:
                 raise SupersetRejected("BAD_RESPONSE")

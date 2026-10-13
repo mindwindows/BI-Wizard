@@ -354,6 +354,42 @@ describe("허용 도메인 불일치 휴리스틱", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("빈 화면 판정 뒤 재판정(3초) 진행 중 언마운트하면 타이머가 0이 된다", async () => {
+    await readyWithFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMPTY_CHECK_MS + 100);
+    });
+    expect(screen.getByTestId("embed-blank-hint")).toBeTruthy();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("빈 화면 안내에서 '다시 시도'로 다시 마운트하면 이전 타이머가 정리되고 새 인스턴스가 정상 동작한다", async () => {
+    await readyWithFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMPTY_CHECK_MS + 100);
+    });
+    expect(screen.getByTestId("embed-blank-hint")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(embedMock).toHaveBeenCalledTimes(2);
+    expect(instances[0].unmount).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("embed-blank-hint")).toBeNull();
+    expect(screen.getByTestId("dashboard-embed").querySelectorAll(".embed-mount")).toHaveLength(1);
+    // 이전 타이머는 정리됐고 남은 것은 새 인스턴스의 첫 확인 타이머 하나뿐이다.
+    expect(vi.getTimerCount()).toBe(1);
+    // 새 인스턴스도 비어 있으면 다시 판정하고, 언마운트하면 모두 정리된다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(EMPTY_CHECK_MS + 100);
+    });
+    expect(screen.getByTestId("embed-blank-hint")).toBeTruthy();
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("looksEmpty: iframe이 없거나 안을 읽을 수 없으면 판단하지 않는다", () => {
     expect(looksEmpty(null)).toBe(false);
     const fake = { get contentDocument(): Document { throw new Error("cross-origin"); } } as unknown as HTMLIFrameElement;

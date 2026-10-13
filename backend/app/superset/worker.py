@@ -49,6 +49,7 @@ from app.superset.constants import (
 from app.superset.errors import (
     UNAVAILABLE_CODES,
     SupersetError,
+    SupersetLocalError,
     SupersetUnavailable,
     summarize,
 )
@@ -278,11 +279,15 @@ class SupersetDatasetSync:
             self._write_result(dataset_id, plan.name, error_code=error.code)
             return
         except SupersetError as error:
-            self._breaker.record_success()  # 연결은 된다: 거부는 이 데이터셋의 문제다.
+            if isinstance(error, SupersetLocalError):
+                self._breaker.release_probe()  # Superset을 부르지 않은 로컬 오류: 기록하지 않는다.
+            else:
+                self._breaker.record_success()  # 연결은 된다: 거부는 이 데이터셋의 문제다.
             self._write_result(dataset_id, plan.name, error_code=error.code)
             return
         except Exception as error:
             logger.error("동기화 중 예기치 않은 오류: %s", type(error).__name__)
+            self._breaker.release_probe()
             self._write_result(dataset_id, plan.name, error_code="INTERNAL")
             return
         self._breaker.record_success()
@@ -321,8 +326,11 @@ class SupersetDatasetSync:
             except SupersetUnavailable:
                 self._breaker.record_failure()
                 raise
-            except SupersetError:
-                self._breaker.record_success()
+            except SupersetError as error:
+                if isinstance(error, SupersetLocalError):
+                    self._breaker.release_probe()
+                else:
+                    self._breaker.record_success()
                 in_sync = False  # 읽을 수 없으면 다시 동기화해 사유를 남긴다.
             else:
                 self._breaker.record_success()
