@@ -582,3 +582,5 @@ PR #6(회고)이 병합돼 `origin/main`(`ce6038c`)에 `da3da70`이 포함됨을
 - 구현: backend(0007, 기록 훅, 관리자 목록 API), frontend(관리자 전용 감사 목록 화면), 관리자 Skill 갱신, 스크린샷 `fu2a-{화면}-{상태}.png`(목록, 필터, 빈 상태, 비관리자 거부).
 - 검증(마지막 커밋 기준, 제품 코드가 바뀌므로 전체 재검증): 실제 PG 전체 pytest, 차분 전수, 프런트 전체, 실제 Superset 스모크(STRIP true·false), 비밀값 검사. 추가 단정: 기록 대상 변경마다 감사 행이 정확히 1건, 롤백 시 감사 행 없음, `bi_app`의 UPDATE·DELETE 거부, `bi_readonly`의 `audit_log` 접근 거부, `details`에 비밀값·행 값 0건.
 - 통과 시 `harness/setup` → `main` 새 PR(병합 금지). 실패, 새 환경변수·새 의존성·기준과 다른 설정·위 승인 범위를 넘는 권한이 필요해지면 그 자리에서 멈추고 보고한다.
+### 29-3. 구현 전 확인 필요(사용자 확인 대기)
+- **0007 `downgrade()`의 `op.drop_table("audit_log")`:** 결정 4의 "`DROP` 없음"은 `upgrade()` 기준으로 읽었다. 0003~0006과 같이 `downgrade()`는 표를 `DROP`하므로(D5 실질 `downgrade` 필수) `test_migrations.py`의 `DROP_APPROVED` 규칙(AGENTS.md 4절, `bi-review` 7-1)상 사용자 확인 대상이다. **승인으로 간주하지 않았다.** 구현은 `DROP_APPROVED`에 "사용자 확인 대기(03b 29-3)"로 표시하고 빈 시험 DB에서만 왕복 시험을 하며, 운영 적용은 확인 뒤에만 한다. 이 절의 답을 받으면 표시를 "사용자 승인"으로 고친다.
