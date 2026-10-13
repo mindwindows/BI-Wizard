@@ -22,20 +22,29 @@
 
 실행 방법 (표준 라이브러리만 쓴다. 저장소 루트에서)
   QA 더미 env로 스택을 띄운다(`_workspace/qa/`의 git 제외 임시 env 파일, 비밀은 더미 값).
-  접두를 떼는 프록시 설정(`APP_PROXY_STRIP_PREFIX`) true와 false 두 가지로 각각 띄워 돌린다.
-  **STRIP true의 전제:** 앞단 프록시가 접두를 떼고 backend·Superset으로 넘기는 구성이므로, 이 스크립트의
-  `--origin`은 그 프록시 주소여야 하고, **대시보드의 Superset 쪽 허용 도메인(allowed_domains)에 그 프록시
-  origin이 들어 있어야** 한다(없으면 임베드 HTML이 403이다. 목록 API 단정 자체는 영향이 없다).
+  접두를 떼는 프록시 설정(`APP_PROXY_STRIP_PREFIX`) false와 true 두 가지로 각각 띄워 돌린다.
   입장권의 `iat`·`exp`는 JSON 실수(float)로 올 수 있으며 스크립트는 정수·실수 모두 받는다.
 
-    # 예: STRIP=true 스택(프런트 nginx가 http://127.0.0.1:37180 에서 응답)
+  1) STRIP false (프런트 nginx가 포털 주소, 예: http://127.0.0.1:37180)
     python3 scripts/manual/superset-guest-list-check.py \\
         --origin http://127.0.0.1:37180 --base-path /bi-wizard \\
         --portal-dashboard 1 --superset-dashboard-id 1 \\
-        --cookie-name bi_stub_login --user stub-viewer --label strip-true
+        --cookie-name bi_stub_login --user stub-viewer --label strip-false
 
-    # STRIP=false 스택으로 다시 띄운 뒤(down -v 쓰지 않는다: stop 후 env 파일만 바꿔 up -d)
-    # 같은 명령을 --label strip-false 로 한 번 더 돌린다.
+  2) STRIP true (메인 플랫폼 프록시가 접두를 떼는 구성. `--origin`은 **그 프록시 주소**여야 한다)
+    - 프록시 세우기: /bi-wizard 접두를 포털·API 경로에서는 떼어 nginx(예: 127.0.0.1:37180)로
+      넘기되, **Superset 경로(`/bi-wizard/superset`)는 접두를 유지한 채** 그대로 넘기는 작은
+      HTTP 프록시를 세운다(QA는 Node 20줄짜리 `stripproxy.cjs`를 쓴다, 예: 127.0.0.1:37199).
+      스택은 stop 후 env 파일만 STRIP true로 바꿔 `up -d`한다(`down -v` 쓰지 않는다).
+    - 허용 도메인: 대시보드의 Superset 쪽 허용 도메인(allowed_domains)에 **프록시 origin이
+      들어 있어야** 임베드 HTML이 열린다(없으면 403, 목록 API 단정 자체는 영향이 없다). Superset
+      관리자 계정으로 `POST /api/v1/dashboard/<Superset id>/embedded`에 본문
+      `{"allowed_domains": ["http://127.0.0.1:37199"]}`를 보낸다(임베드를 이미 켠 대시보드면
+      같은 주소를 `PUT`으로 갱신한다).
+    python3 scripts/manual/superset-guest-list-check.py \\
+        --origin http://127.0.0.1:37199 --base-path /bi-wizard \\
+        --portal-dashboard 1 --superset-dashboard-id 1 \\
+        --cookie-name bi_stub_login --user stub-viewer --label strip-true
 
   인자 설명
     --origin               포털 origin(스킴+호스트+포트, 경로 없음)
@@ -131,11 +140,7 @@ def main() -> int:
     print(f"PASS [{label}] 포털 E6 200 (입장권은 출력하지 않는다)")
 
     iat, exp = token_times(token)
-    seconds = (
-        exp - iat
-        if isinstance(iat, (int, float)) and isinstance(exp, (int, float))
-        else None
-    )
+    seconds = exp - iat if isinstance(iat, (int, float)) and isinstance(exp, (int, float)) else None
     check(
         f"[{label}] exp - iat == {EXPECTED_TOKEN_SECONDS}",
         seconds == EXPECTED_TOKEN_SECONDS,

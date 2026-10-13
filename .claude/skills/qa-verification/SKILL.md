@@ -118,6 +118,8 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - 비밀값 조건(사용자 결정 2026-10-13): 이미지(`docker image inspect`·`docker history`), 컨테이너 Cmd·Args, 로그, `ps`, 프런트 번들, 브라우저 저장소에는 0건이다. **컨테이너 Env는 `.env`와 같은 보호 등급(호스트 Docker 권한자만 접근)으로 허용**한다.
 - 실패가 1건이라도 있으면 PR을 만들지 않고 멈춰 보고한다.
 
+- **커밋 전 자체 점검(사용자 결정 2026-10-13):** 누가 고치든(리드 포함) 커밋 전에 바뀐 `.py` 파일은 `ruff check`와 `ruff format --check`(backend `pyproject.toml` 설정)를, 바뀐 프런트 파일은 lint와 typecheck를 직접 돌린다. 문서 규칙이며 훅·설정 변경은 없다(`scripts/manual/` 같은 CI 밖 스크립트도 포함).
+
 ## 보고 형식
 | 항목 | 결과 | 근거 | 담당 |
 | --- | --- | --- | --- |
