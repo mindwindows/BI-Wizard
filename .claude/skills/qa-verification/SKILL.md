@@ -110,6 +110,11 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - 변경된 기능의 `skills/<기능>/SKILL.md`에 적힌 실행 명령, API 경로, 실패 확인 방법이 실제 코드와 맞는지 확인한다.
 - 맞지 않으면 "Skill 미갱신"으로 보고한다.
 
+## 최종 검증(main 반영 직전) 규칙 (사용자 결정 2026-10-13)
+- 최종 검증은 **마지막 커밋(해시를 보고에 적는다)** 기준으로 QA가 독립으로 돌린다: 실제 PG 전체 pytest(`REQUIRE_PG=1`, slow 포함, pg 변형 skip 0), 차분 전수, 프런트 전체(vitest·build·빌드 뒤 static-checks), 실제 Superset 스모크(STRIP true·false, guest 목록 한정 스크립트 `scripts/manual/superset-guest-list-check.py` 포함), 비밀값 검사(번들·로그·`ps`·`docker inspect`·브라우저 저장소).
+- **QA 뒤에 코드가 한 줄이라도 바뀌면 이 전체 검증을 다시 돌린다.** 문서·스크린샷만 바뀐 경우는 해당 커밋이 코드 파일을 건드리지 않았다는 `git diff --stat`를 근거로 보고에 적는다.
+- 실패가 1건이라도 있으면 PR을 만들지 않고 멈춰 보고한다.
+
 ## 보고 형식
 | 항목 | 결과 | 근거 | 담당 |
 | --- | --- | --- | --- |

@@ -554,3 +554,11 @@ env-engineer가 EW-1 승인 목록 밖에 넣은 아래 항목을 소급 승인�
 - **원인 확인(설정 변경 없음):** Superset 로고 깨짐은 상류 6.1.0이 하위 경로에서 접두를 두 번 붙이는 동작(루트 배포는 정상), `service-worker.js` 404도 상류, `pwa-manifest.js` 404는 curl 확인 요청의 기록(브라우저 요청 아님), 표 차트 경고 아이콘은 시드 차트의 `row_limit=12` 도달 알림. 로고 우회는 `THEME_*.brandLogoUrl` 새 설정이라 승인 필요(`docs/deploy-coordination.md` 13번).
 - **스크린샷 교체(1e-f):** `docs/screens/fu1/fu1e-*.png` 31장을 같은 이름으로 교체하고 `fu1e-s7-dashboard-error-502-embed-disabled.png` 1장을 추가했다(1920×1080, 비밀값 대조 0건). reviewer·QA 후속(반열림 시험 호출의 로컬 오류 비소비, 시험 단언 정정, S9 문단 줄바꿈)도 반영했다.
 - **사용자 확인 대기(1e-f):** (1) 연결 풀 크기(`pool_size=5`) 상향 여부(5개 흐름 동시 열 추가 시 503), (2) Superset 로고 이중 접두 우회 설정(`THEME_*.brandLogoUrl`) 승인 여부, (3) `vite.config.ts`의 시험 전용 `css.include` 한 줄 소급 승인 또는 `node:fs` 읽기로 대체, (4) 502 안내 문구가 임베드 해제 원인을 구분하지 못함(구분하려면 오류 코드 추가 필요).
+
+## 27. 1e-f 결과 결정과 main 반영 단계 지시 (2026-10-13, 사용자)
+1. **연결 풀 상향 승인:** `pool_size=10, max_overflow=5`, 코드 상수(환경변수 없음). PG `max_connections` 대비 전체 연결 수 표를 `docs/deploy-coordination.md`에 기록하고, QA가 5개 흐름 동시 열 추가를 다시 돌려 503 수를 상향 전과 비교하며 입력·조회 응답과 메모리 최고치를 기록한다.
+2. **로고 이중 접두:** 새 설정 없이 알려진 문제로 둔다(상류 6.1.0 결함, 루트 배포에서는 정상). `docs/deploy-coordination.md` 13번과 gate-status에 기록.
+3. **`frontend/vite.config.ts`의 시험 전용 `css.include` 한 줄: 소급 승인.** `src/styles.css`만 포함하며 런타임·빌드에 영향이 없다.
+4. **502 안내 문구 구분(임베드 해제 원인 표시):** 후속으로 보류, 알려진 한계로 기록.
+5. **확인·보완:** `LOGIN_RETRY_BACKOFF_SECONDS`는 환경변수가 아님을 확인(코드 상수 30.0), 로그인 백오프 30초 동안 재시도가 즉시 실패한다는 운영 안내를 관리자 Skill에 기록. guest 목록 한정 단정 스모크를 `scripts/manual/superset-guest-list-check.py`(수동 실행 시험)로 저장소에 둔다. 작성자 안내문의 `,.2f` 줄바꿈 수정. 1024px 가로 스크롤·신원 선택 상자 여백은 알려진 관찰(대상 해상도 1920×1080). 로컬 이미지 `qa1f-*`·`shot1f-*`는 디스크가 필요하면 이름 지정으로 삭제 가능(일괄 prune 금지).
+6. **최종 검증 규칙:** 마지막 커밋 기준 QA 독립 전체 검증, QA 뒤 코드가 한 줄이라도 바뀌면 전체 재검증(`qa-verification` Skill에 기록). 실패 1건이라도 있으면 PR 없이 멈춰 보고. 통과 시 `harness/setup` → `main` 새 PR 작성(병합 금지, 만들기 전 main이 harness/setup에 포함되는지 확인, 본문에 FU-1 요약·최종 검증 수치·검증 커밋 해시·적용 후 보고 항목·알려진 한계와 미시험 항목·후속 단위 목록 포함), gate-status "다음 세션 인계" 갱신.
