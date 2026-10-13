@@ -187,6 +187,93 @@ def test_breaker_opens_after_consecutive_failures_and_recovers_after_cooldown():
     assert breaker.allow()  # 성공이 연속 실패를 끊었다
 
 
+def opened_breaker(clock: Clock) -> CircuitBreaker:
+    breaker = CircuitBreaker(failure_threshold=3, cooldown_seconds=30, clock=clock)
+    for _ in range(3):
+        breaker.record_failure()
+    assert not breaker.allow()
+    return breaker
+
+
+def test_half_open_lets_exactly_one_probe_through_concurrently():
+    clock = Clock()
+    breaker = opened_breaker(clock)
+    clock.advance(31)
+    results: list[bool] = []
+    start = threading.Barrier(16)
+
+    def caller():
+        start.wait()
+        results.append(breaker.allow())
+
+    threads = [threading.Thread(target=caller) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(results) == 1  # 시험 호출 1건만 통과하고 나머지는 결과가 날 때까지 막힌다
+    assert breaker.is_open
+    breaker.record_success()  # 시험 호출 성공: 닫힌다
+    assert all(breaker.allow() for _ in range(5))
+
+
+def test_half_open_probe_failure_reopens_for_another_cooldown_and_blocks_others():
+    clock = Clock()
+    breaker = opened_breaker(clock)
+    clock.advance(31)
+    assert breaker.allow()  # 시험 호출
+    assert not breaker.allow()  # 진행 중에는 다른 호출을 막는다
+    clock.advance(10)
+    assert not breaker.allow()
+    breaker.record_failure()  # 시험 실패: 쿨다운을 다시 센다
+    assert not breaker.allow()
+    clock.advance(29)
+    assert not breaker.allow()
+    clock.advance(2)
+    assert breaker.allow() and not breaker.allow()  # 다시 한 건만
+
+
+def test_half_open_does_not_stay_blocked_forever_if_the_probe_never_reports():
+    clock = Clock()
+    breaker = opened_breaker(clock)
+    clock.advance(31)
+    assert breaker.allow()  # 시험 호출이 나갔지만 결과가 기록되지 않는다(예기치 않은 예외 등)
+    assert not breaker.allow()
+    clock.advance(31)
+    assert breaker.allow()  # 쿨다운만큼 지나면 다음 한 건을 다시 통과시킨다
+    assert not breaker.allow()
+
+
+# --- 사용자별 한도 기록의 정리 ----
+
+
+def test_limiter_sweeps_idle_users_on_its_own_once_per_window():
+    clock = Clock()
+    limiter = SlidingWindowLimiter(limit=5, window_seconds=60, clock=clock)
+    for user_id in range(100):
+        assert limiter.acquire(user_id) is None
+    assert limiter.tracked_users() == 100
+    clock.advance(30)
+    limiter.acquire(1000)
+    assert limiter.tracked_users() == 101  # 윈도가 아직 안 지났으니 정리하지 않는다
+    clock.advance(31)  # 처음 100명은 윈도가 지났다
+    limiter.acquire(1001)  # 호출 경로가 스스로 정리한다(forget_idle을 따로 부르지 않는다)
+    assert limiter.tracked_users() == 2  # 1000(윈도 안)과 방금의 1001
+    assert limiter.acquire(1000) is None  # 정리가 아직 유효한 기록을 지우지 않았다
+
+
+def test_limiter_sweep_keeps_the_limit_for_users_still_inside_the_window():
+    clock = Clock()
+    limiter = SlidingWindowLimiter(limit=2, window_seconds=60, clock=clock)
+    assert limiter.acquire(1) is None and limiter.acquire(1) is None
+    clock.advance(59)
+    limiter.acquire(2)
+    clock.advance(2)  # 사용자 1의 기록은 61초 전: 윈도가 지났다
+    assert limiter.acquire(3) is None
+    assert limiter.tracked_users() == 2  # 2와 3
+    assert limiter.acquire(1) is None  # 새로 시작
+
+
 # --- 사유 코드 ----
 
 

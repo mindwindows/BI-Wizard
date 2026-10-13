@@ -373,6 +373,27 @@ def test_e6_sends_lowercase_canonical_uuid(sapi, db, world, fake):
     assert call.body["resources"][0]["id"] == UUID_B
 
 
+def test_e6_normalizes_an_uppercase_stored_value_because_the_real_hook_would_let_it_through(
+    sapi, db, world, fake, monkeypatch
+):
+    """실제 훅은 대문자 uuid를 통과시키므로(프로브 P-3) 가짜 서버도 통과시킨다. 정규화가 빠지면
+    본문의 id가 대문자로 나가 이 시험이 실패한다."""
+    from app.superset import repo
+
+    dashboard_id = add_dashboard(db, embedded_uuid=UUID_B)
+    fake.embedded_uuids.add(UUID_B)
+    real = repo.get_dashboard
+
+    def uppercase_row(session, wanted):
+        row = real(session, wanted)
+        return {**row, "embedded_uuid": UUID_B.upper()}
+
+    monkeypatch.setattr(repo, "get_dashboard", uppercase_row)
+    assert sapi("viewer", "POST", f"/api/dashboards/{dashboard_id}/guest-token").status_code == 200
+    call = next(c for c in fake.calls if c.path == "/api/v1/security/guest_token/")
+    assert call.body["resources"][0]["id"] == UUID_B  # 소문자 정규형으로 보냈다
+
+
 def test_e6_only_takes_the_portal_id_any_body_is_422_and_superset_is_not_called(
     sapi, db, world, fake
 ):
@@ -426,6 +447,49 @@ def test_e6_superset_down_is_503_and_rejection_is_502(sapi, db, world, fake):
         text = response.text.lower()
         for internal in ("superset", "csrf", "rls", "guest", "token", "http", "400"):
             assert internal not in text.replace("superset_", "").replace("request_id", "")
+
+
+def test_e6_issuer_login_failure_is_502_and_logins_are_not_hammered(sapi, db, world, fake, clock):
+    from app.superset.constants import LOGIN_RETRY_BACKOFF_SECONDS
+
+    dashboard_id = add_dashboard(db)
+    fake.embedded_uuids.add(UUID_A)
+    fake.accounts[ISSUER[0]] = "changed-by-someone-else"  # 발급 계정 비밀번호가 어긋났다
+    path = f"/api/dashboards/{dashboard_id}/guest-token"
+    for _ in range(6):
+        response = sapi("viewer", "POST", path)
+        assert response.status_code == 502 and err(response)["code"] == "SUPERSET_REJECTED"
+    assert fake.count("POST", "/api/v1/security/login") == 1  # 사용자 요청마다 로그인하지 않는다
+    fake.accounts[ISSUER[0]] = ISSUER[1]  # 바로잡았다
+    assert sapi("viewer", "POST", path).status_code == 502  # 창 안에서는 아직 막혀 있다
+    clock.advance(LOGIN_RETRY_BACKOFF_SECONDS)
+    assert sapi("viewer", "POST", path).status_code == 200
+    assert fake.count("POST", "/api/v1/security/login") == 2
+
+
+def test_e6_unexpected_client_exception_is_502_with_class_name_only_in_logs(
+    sapi, db, world, fake, caplog
+):
+    import httpx
+
+    caplog.set_level(logging.DEBUG)
+    dashboard_id = add_dashboard(db)
+    fake.embedded_uuids.add(UUID_A)
+    path = f"/api/dashboards/{dashboard_id}/guest-token"
+
+    def explode(call):
+        raise httpx.CookieConflict("secret-detail http://superset:8088/x?token=abc")
+
+    fake.respond_once(lambda c: c.path == "/api/v1/security/guest_token/", explode)
+    response = sapi("viewer", "POST", path)
+    assert response.status_code == 502 and err(response)["code"] == "SUPERSET_REJECTED"
+    assert response.status_code != 500  # 전역 500 핸들러로 가지 않았다
+    text = "\n".join(f"{r.getMessage()} {r.exc_text or ''}" for r in caplog.records)
+    assert "CookieConflict" in text
+    for leaked in ("secret-detail", "superset:8088", "token=abc"):
+        assert leaked not in text and leaked not in response.text
+    assert all(r.exc_info is None for r in caplog.records)
+    assert sapi("viewer", "POST", path).status_code == 200  # 브레이커가 열리지 않았다
 
 
 def test_e6_without_superset_configuration_is_503(db, stub_settings, world):

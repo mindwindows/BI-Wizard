@@ -59,17 +59,17 @@ description: 포털 데이터셋을 Superset 가상 데이터셋으로 자동 �
 3. 열 표시 이름을 **전체 열을 한 번에** 보내 갱신한다(Superset의 `columns`는 병합이 아니라 교체라, 일부만 보내면 나머지 열이 지워진다). `c_<번호>` 열은 포털의 열 표시 이름, `team`은 "팀", `row_id`는 "행 번호"가 된다. 열 수와 열 id는 바뀌지 않는다.
 4. 성공하면 `registered`와 시각을 기록한다.
 
-동기화를 요청하는 곳(모두 커밋 뒤): 데이터셋 만들기 B2, 이름·날짜 단위·기준 열 변경 B4(바뀐 경우만), 열 추가 B5, 열 변경 B6(바뀐 경우만), 계산 열 만들기·고치기 D4·D5, 뷰 다시 만들기 D10(다시 만들어진 데이터셋만), 팀 이름 변경 A4(그 팀의 데이터셋 전부). 가상 데이터셋 SQL은 위 고정 모양 하나뿐이고 서비스 계정만 등록한다. 요청 처리 중에는 Superset을 부르지 않는다: 데이터셋 만들기·열 추가·수식 저장·이름 변경·팀 이름 변경은 커밋 뒤 `pending` 표시와 대기열 투입만 하고, 단일 작업 스레드가 순서대로 Superset을 부른다. 같은 데이터셋의 중복 요청은 합쳐지고, 처리 도중 정의가 또 바뀌면 그 결과를 `registered`로 쓰지 않고 한 번 더 돌린다. 연결 실패·시간 초과·5xx가 연속 3회면 30초 동안 Superset을 부르지 않는다(서킷 브레이커).
+동기화를 요청하는 곳(모두 커밋 뒤): 데이터셋 만들기 B2, 이름·날짜 단위·기준 열 변경 B4(바뀐 경우만), 열 추가 B5, 열 변경 B6(바뀐 경우만), 계산 열 만들기·고치기 D4·D5, 뷰 다시 만들기 D10(다시 만들어진 데이터셋만), 팀 이름 변경 A4(그 팀의 데이터셋 전부). 가상 데이터셋 SQL은 위 고정 모양 하나뿐이고 서비스 계정만 등록한다. 요청 처리 중에는 Superset을 부르지 않는다: 데이터셋 만들기·열 추가·수식 저장·이름 변경·팀 이름 변경은 커밋 뒤 `pending` 표시와 대기열 투입만 하고, 단일 작업 스레드가 순서대로 Superset을 부른다. 같은 데이터셋의 요청은 **3초 동안 모여 Superset 호출 한 번**이 된다(디바운스: 첫 요청 시각부터 3초이고 뒤따르는 요청이 창을 늘리지 않으며 데이터셋마다 독립이다. 그동안 E1은 `pending`). 처리 도중 정의가 또 바뀌면 그 결과를 `registered`로 쓰지 않고, 그 요청의 3초 뒤에 한 번 더 돌린다. 시작 대조와 연결 문제 자동 재시도(약 1분마다)는 이 3초를 기다리지 않는다. 연결 실패·시간 초과·5xx가 연속 3회면 30초 동안 Superset을 부르지 않고(서킷 브레이커), 30초가 지나면 **시험 호출 1건만** 통과시키며 그 결과가 날 때까지 나머지는 계속 막는다(성공하면 닫히고 실패하면 다시 30초). 3초와 30초는 코드 상수(`constants.py`)다.
 
 ### 시작할 때
 backend는 Superset을 기다리지 않고 바로 시작한다. 작업 스레드가 Superset `/health`가 200이 될 때까지(최대 10분, 10초 간격) 기다린 뒤 활성 데이터셋 전체를 대조한다: 등록 행이 없거나 `pending`·`failed`이면 대기열에 넣고, `registered`는 Superset의 이름·열 수·열 표시 이름을 읽어 어긋나면 다시 동기화한다(커밋 직후 서버가 죽어 열 변경이 반영되지 않은 경우). 대조 자체는 읽기뿐이다.
 
 ### 입장권 발급 (E6)
-발급 전용 계정으로 `POST /security/guest_token/`을 부른다. 본문은 항상 `user.username`(포털 사용자 번호 문자열)만, `resources`는 대시보드 하나(소문자 정규형 uuid), `rls`는 항상 빈 목록이다. 서버는 JWT를 만들거나 해석하지 않고(서명 키 없음) Superset이 준 글자를 그대로 돌려준다. 오류 대응: 연결 불가·시간 초과·5xx는 503 `SUPERSET_UNAVAILABLE`, Superset이 거부(로그인 실패, 임베드 안 켠 번호, 훅 거부)는 502 `SUPERSET_REJECTED`.
+발급 전용 계정으로 `POST /security/guest_token/`을 부른다. 본문은 항상 `user.username`(포털 사용자 번호 문자열)만, `resources`는 대시보드 하나(소문자 정규형 uuid), `rls`는 항상 빈 목록이다. 서버는 JWT를 만들거나 해석하지 않고(서명 키 없음) Superset이 준 글자를 그대로 돌려준다. 오류 대응: 연결 불가·시간 초과·5xx는 503 `SUPERSET_UNAVAILABLE`, Superset이 거부(로그인 실패, 임베드 안 켠 번호, 훅 거부)는 502 `SUPERSET_REJECTED`. 발급 계정(서비스 계정도 같다) 로그인이 거부되면 **30초 동안 로그인을 다시 시도하지 않고** Superset을 부르지 않은 채 곧바로 같은 502를 돌려준다(틀린 비밀번호로 사용자 요청마다 로그인 시도를 퍼붓지 않는다. 연결 문제는 이 대기를 시작하지 않는다). 예상 밖 예외(`httpx.HTTPError`가 아닌 것)도 502로 바뀌며 로그에는 예외 클래스 이름만 남는다.
 
 ### 사용자별 429 (`GUEST_TOKEN_RATE_LIMITED`)
 사용자당 **60초에 30회**(슬라이딩 윈도). 넘으면 429 + 헤더 `Retry-After`(초) + `details.retry_after`. 통과한 요청만 센다(거절된 요청을 계속 보내도 영원히 막히지 않는다). 없는 번호(404)를 두드리는 요청도 센다. 정상 사용(대시보드를 열 때 1회 + 보는 동안 약 5분마다 1회, 실패 시 10초마다 재시도)은 한도에 닿지 않는다.
-- **저장은 프로세스 메모리다. backend 워커(프로세스)가 여러 개면 한도가 워커별로 걸려 실효 한도가 워커 수 배가 된다.** 지금은 워커 1개(`app/__main__.py`)라 문제가 없고, 워커를 늘리면 공유 저장소로 재설계한다(08 §4). 코드 상수는 `backend/app/superset/constants.py`다.
+- **저장은 프로세스 메모리다. backend 워커(프로세스)가 여러 개면 한도가 워커별로 걸려 실효 한도가 워커 수 배가 된다.** 지금은 워커 1개(`app/__main__.py`)라 문제가 없고, 워커를 늘리면 공유 저장소로 재설계한다(08 §4). 윈도가 지난 사용자 기록은 호출 경로가 윈도 길이(60초)마다 한 번 스스로 정리한다. 코드 상수는 `backend/app/superset/constants.py`다.
 
 ## 5. 실행 방법
 ### 사람(화면)
@@ -128,14 +128,14 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 | --- | --- | --- |
 | 동기 상태가 계속 `pending` | 작업 스레드가 Superset 준비를 기다리는 중이거나 큐가 밀림 | `${SUPERSET_APP_ROOT}/health`가 200인지(`docker compose ps`), backend 로그 `Superset 시작 대조 완료`. 한참 지나도 그대로면 관리자가 E2로 다시 시도 |
 | `failed` + `UNAVAILABLE_CONNECT`/`UNAVAILABLE_TIMEOUT`/`UNAVAILABLE_5XX` | Superset이 멈췄거나 느리다 | `docker compose ps superset`, 로그. Superset이 돌아오면 약 1분 안에 자동 재시도된다. 서킷 브레이커가 열려 있으면 30초 뒤에 다시 시도 |
-| `failed` + `AUTH_FAILED` | 서비스 계정 로그인/권한 실패(비밀번호가 `superset-init`과 다름, 역할 변조) | `docker compose logs superset-init`의 `bi_service` 줄, `.env`의 `SUPERSET_SERVICE_*` 확인. `superset-init`을 다시 실행하면 비밀번호와 역할을 되돌린다 |
+| `failed` + `AUTH_FAILED` | 서비스 계정 로그인/권한 실패(비밀번호가 `superset-init`과 다름, 역할 변조) | `docker compose logs superset-init`의 `bi_service` 줄, `.env`의 `SUPERSET_SERVICE_*` 확인. `superset-init`을 다시 실행하면 비밀번호와 역할을 되돌린다. 로그인 거부 뒤 30초 동안은 E2로 다시 시도해도 Superset을 부르지 않고 바로 같은 사유로 실패하므로 고친 뒤 30초를 기다리거나 backend를 다시 시작한다 |
 | `failed` + `NOT_OWNER` | 서비스 계정이 소유하지 않은 데이터셋(관리자가 같은 SQL로 만든 것 등) | Superset에서 그 데이터셋을 지우거나 이름을 바꾼 뒤 E2 |
 | `failed` + `NAME_CONFLICT` | 같은 이름의 다른 데이터셋이 Superset에 있다 | Superset에서 그 데이터셋 이름을 바꾸거나 포털 데이터셋 이름을 바꾼다 |
 | `failed` + `VIEW_MISSING` | 포털 `dv_` 뷰가 없다(수식 뷰 재생성 실패) | S9의 뷰 재생성 구역(`formula-column`)에서 다시 시도한 뒤 E2 |
 | `failed` + `DB_NOT_FOUND`/`DB_MISMATCH` | Superset 업무 데이터 연결 이름이 `BI-Wizard (read-only)`가 아니거나 서비스 계정이 못 본다 | `superset-init` 로그, Superset 데이터베이스 목록에 연결이 **하나뿐**인지 확인 |
 | `failed` + `REJECTED_<상태>` | Superset이 그 요청을 거부했다 | 상태 번호로 원인을 좁힌다(422: 입력/뷰, 403: 권한). 응답 본문은 일부러 남기지 않으므로 `docker compose logs superset`를 본다 |
 | E6 503 `SUPERSET_UNAVAILABLE` | Superset 연결 불가/시간 초과 또는 연동 설정 없음(변수 5개 중 누락) | 위와 같고, backend 환경변수 5개가 모두 있는지 확인 |
-| E6 502 `SUPERSET_REJECTED` | 발급 계정 로그인 실패, Superset에서 임베드를 켜지 않은 번호, 훅 거부 | 포털 등록 번호가 Superset 임베드 번호와 같은지(오타), 임베드가 켜져 있는지, `superset-init` 로그의 `bi_guest_issuer` |
+| E6 502 `SUPERSET_REJECTED` | 발급 계정 로그인 실패(실패 뒤 30초 동안은 Superset을 부르지 않고 즉시 502), Superset에서 임베드를 켜지 않은 번호, 훅 거부 | 포털 등록 번호가 Superset 임베드 번호와 같은지(오타), 임베드가 켜져 있는지, `superset-init` 로그의 `bi_guest_issuer`. 계정을 고친 뒤에는 30초 안에 다시 시도되거나 backend를 다시 시작한다 |
 | E6 429 `GUEST_TOKEN_RATE_LIMITED` | 한 사용자가 60초에 30회를 넘김(브라우저 재시도 폭주, 시계가 5분 이상 어긋난 PC) | `Retry-After` 초 뒤에 다시. 반복되면 그 사용자의 브라우저 시계와 네트워크를 확인 |
 | 대시보드가 흰 화면/403 JSON | 임베드 `allowed_domains`에 포털 주소가 없음(이 경우 입장권 발급은 성공한다) | Superset에서 임베드 설정의 허용 도메인에 포털 origin 추가 |
 | E4 409 `ALREADY_EXISTS` | 같은 번호가 이미 등록(해제된 항목일 수 있음) | `GET /api/dashboards?include_inactive=true`에서 찾아 E5로 다시 활성화 |
@@ -165,6 +165,13 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 7. 포털과 Superset이 같은 origin이라 Superset 앱의 `localStorage`(`redux` 등)를 포털과 공유한다(프로브 5-4). 포털은 `localStorage`를 쓰지 않는다.
 8. S9는 E1을 전체(200개씩 이어 읽기)로 받아 상태 필터·건수·쪽 이동을 화면에서 계산한다. 데이터셋이 수천 개를 넘으면(25쪽 상한) 일부만 보인다.
 
+### 알려진 한계(서버, 1e-f 기록)
+1. **E1 읽기 비용:** E1은 요청마다 전체 데이터셋 이름과 동기 행을 읽어 메모리에서 거르고 쪽을 나눈다. S9가 200개씩 이어 읽으면 같은 전체 읽기가 쪽마다 반복되므로 데이터셋이 수천 개를 넘으면 느려진다(후속: DB 쪽 필터·쪽 나누기).
+2. **E2 "전부"·팀 이름 변경의 접수 비용:** 대상 데이터셋마다 `pending` 표시를 따로 커밋하므로(Superset은 부르지 않는다) 대상이 수천 개이면 접수 응답이 길어진다.
+3. **가짜 Superset과 실제의 CSRF 차이:** 자동 시험의 가짜 서버는 CSRF 토큰을 호출마다 새 세션 쿠키와 함께 따로 발급·기억한다. 실제 Superset의 세션·토큰 수명이나 여러 요청이 동시에 토큰을 받을 때의 모양은 같다고 확인되지 않았다. 동시 CSRF는 실제 Superset 스모크에서만 확인한다.
+4. **시작 대기 10분 포기 뒤의 `pending`:** Superset이 10분 안에 준비되지 않으면 시작 대조를 포기하고 주기 재시도(약 1분)만 돈다. 주기 재시도는 연결 문제로 `failed`가 된 데이터셋만 다시 넣으므로, 그 시점까지 요청이 없었던 `pending`(또는 등록 행 없음) 데이터셋은 관리자가 E2를 누르거나 backend를 다시 시작할 때까지 `pending`으로 남는다.
+5. **디바운스 중 종료:** 대기열은 메모리라 3초 지연 중에 backend가 내려가면 그 항목이 사라진다. 상태는 DB에 `pending`으로 남아 있어 다음 시작 대조가 처리한다.
+
 ### Embedded SDK 설치 기록
 - `frontend/package.json`: `"@superset-ui/embedded-sdk": "0.4.0"` (정확한 고정, `^`·`~` 없음). `package-lock.json` 커밋 대상.
 - `npm ls` / lock 실제 전이 버전과 `license` 필드:
@@ -182,12 +189,13 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 
 ## 8. 검증 방법
 - 자동(DB 없이, `docker build --target test backend`와 같다): `pytest -m "not slow"`. Superset은 가짜 서버(`backend/tests/fake_superset.py`, 프로브 문서의 실제 응답 모양)를 `httpx.MockTransport`로 연결한다. 파일별 내용:
-  - `test_superset_client.py`: 로그인 재사용, 401일 때만 갱신·재시도, CSRF 400 재시도와 훅 거부 400 비재시도, 연결 오류 → 사유 코드, 로그에 비밀번호·토큰·URL 없음, 전체 열 `PUT`(일부 열 호출 없음)
+  - `test_superset_client.py`: 로그인 재사용, 401일 때만 갱신·재시도, CSRF 400 재시도와 훅 거부 400 비재시도, 연결 오류 → 사유 코드, 로그에 비밀번호·토큰·URL 없음, 전체 열 `PUT`(일부 열 호출 없음), 로그인 거부 뒤 30초 백오프, `httpx.HTTPError`가 아닌 예외(`InvalidURL`·`CookieConflict` 등)가 로그인·CSRF·요청·`health` 어디서든 클래스 이름만 남기고 `INTERNAL`로 바뀜, 가짜 서버가 대문자 uuid를 실제 훅처럼 통과시킴
   - `test_superset_sync.py`: 등록·재동기화 멱등(Superset에 데이터셋 하나, 열 수·id 불변), 이름 변경, 중복 이름 채택/충돌, DB 불일치, 소유자 아님, 시작 대조 판정
-  - `test_superset_worker.py`: 요청은 Superset을 부르지 않음(P4), 큐 중복 병합, 상태 기계, 서킷 브레이커, 세대 번호, 팀 단위 갱신, 시작 대조, Superset 정지 → 복구
+  - `test_superset_worker.py`: 요청은 Superset을 부르지 않음(P4), 큐 중복 병합, 상태 기계, 서킷 브레이커, 세대 번호, 팀 단위 갱신, 시작 대조, Superset 정지 → 복구, **디바운스**(주입 시계로 연속 20건이 지연 안에 쓰기 호출 한 번으로 합쳐짐, 창 비연장, 데이터셋별 독립, 시작 대조·자동 재시도·`drain()`은 지연을 받지 않음, 처리 중 요청의 재큐는 자기 지연을 따름, 실제 스레드가 지연 중에도 바로 종료)
   - `test_superset_api.py`: E1~E6(권한·입력 검증·오류 코드), 입장권 요청 본문(`user`·`rls: []`·소문자 uuid), 사용자별 429(한도·시계 주입), 토큰이 로그에 없음, Superset을 멈춘 채 앱 즉시 시작과 다른 API 정상, 복구, 역할 × 엔드포인트
-  - `test_superset_units.py`: 고정 SQL 정규식, 속도 제한기, 서킷 브레이커, 사유 코드 요약, 서명 흔적 없음(`GUEST_TOKEN_JWT_SECRET`·JWT 라이브러리 0)
+  - `test_superset_units.py`: 고정 SQL 정규식, 속도 제한기(윈도 지난 사용자 기록의 자동 정리 포함), 서킷 브레이커(반열림에서 동시 16호출 중 시험 호출 1건만 통과, 시험 실패·미보고 처리), 사유 코드 요약, 서명 흔적 없음(`GUEST_TOKEN_JWT_SECRET`·JWT 라이브러리 0)
   - `test_permission_matrix.py`: 모든 보호 경로(E1~E6 포함) × 7가지 역할
+  - `test_definition_deadlock_pg.py`(실제 PostgreSQL 전용): 뷰 DDL(`CREATE OR REPLACE VIEW`) 중 **진짜 교착**(다른 슈퍼유저 연결이 뷰 잠금을 쥔 채 반대 순서로 `datasets` 행을 기다림)에서 포털 요청이 희생자(40P01)가 되면 503 `DEFINITION_BUSY`, 롤백(정의·열·뷰·해시 이전 상태, 동기화 요청 없음), 같은 요청 재전송이 정상 처리
 - 자동(실제 PostgreSQL): `skills/permission-management/SKILL.md` 8절 절차로 tmpfs 시험 DB를 띄우고 `REQUIRE_PG=1 pytest -m "not slow"`(`pg` 변형 skip 0). `test_static_acl.py`가 `0006` 두 표의 `bi_app` 표·열 권한(DELETE·TRUNCATE·불변 열 거부, 업서트 동작), `bi_readonly` 접근 거부, 제약을 확인한다. 마이그레이션: `python -m migrations.roundtrip`(0006 한 단계 포함)와 `alembic check`.
 - 수동(Superset이 떠 있는 환경): 데이터셋을 만들고 S9/E1에서 `pending` → `registered`, Superset 화면에서 `[팀] 이름` 데이터셋과 열 표시 이름 확인, `docker compose stop superset` 뒤 데이터셋을 만들면 `failed`(`UNAVAILABLE_CONNECT`)인데 입력 API는 정상이고 `docker compose start superset` 뒤 자동으로 `registered`가 되며 Superset에 중복이 없는지, 임베드를 켠 대시보드를 S8에 등록해 S7에서 보이는지.
 

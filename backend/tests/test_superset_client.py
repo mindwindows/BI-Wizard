@@ -431,7 +431,11 @@ def test_fake_superset_accepts_uppercase_embedded_uuid_like_the_real_hook():
         response = session.request(
             "POST",
             "/api/v1/security/guest_token/",
-            json={"user": {"username": "1"}, "resources": [{"type": "dashboard", "id": sent}], "rls": []},
+            json={
+                "user": {"username": "1"},
+                "resources": [{"type": "dashboard", "id": sent}],
+                "rls": [],
+            },
             csrf=True,
             accept=(400,),
         )

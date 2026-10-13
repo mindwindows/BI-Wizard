@@ -216,8 +216,9 @@ class FakeSuperset:
             return self._json(
                 {"message": {"resources": {"0": {"type": ["Must be one of: dashboard."]}}}}, 400
             )
-        # 실제 6.1.0(프로브 P-3): 훅의 형식 검사는 `str(uuid.UUID(v)) == v.lower()`라 **대문자도 통과**하고
-        # Superset 기본 검사의 임베드 조회도 대소문자를 가리지 않는다(토큰의 resource id는 보낸 그대로).
+        # 실제 6.1.0(프로브 P-3): 훅의 형식 검사는 `str(uuid.UUID(v)) == v.lower()`라 **대문자도
+        # 통과**하고 Superset 기본 검사의 임베드 조회도 대소문자를 가리지 않는다(토큰의 resource
+        # id는 보낸 그대로).
         resource_id = resource.get("id")
         try:
             well_formed = isinstance(resource_id, str) and (
