@@ -39,7 +39,6 @@ from sqlalchemy import (
     column,
     false,
     func,
-    text,
     true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -241,7 +240,8 @@ AUDIT_DETAILS_MAX_BYTES = 4000
 audit_log = Table(
     "audit_log",
     metadata,
-    # 행이 계속 쌓이는 유일한 표라 bigint. identity라 INSERT 권한만으로 번호가 붙는다(시퀀스 GRANT 없음).
+    # 행이 계속 쌓이는 유일한 표라 bigint. identity라 INSERT 권한만으로 번호가 붙는다
+    # (시퀀스 GRANT 없음).
     Column("id", BigInteger, Identity(), primary_key=True),
     Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     # 사용자 번호만 둔다(표시 이름은 조회 때 users에서 읽는다). 서버 명령(cli)이면 NULL.
@@ -255,7 +255,7 @@ audit_log = Table(
         "details",
         JSON().with_variant(JSONB(), "postgresql"),
         nullable=False,
-        server_default=text("'{}'"),
+        server_default="{}",  # DEFAULT '{}' (빈 객체)
     ),
     CheckConstraint(column("action").in_(AUDIT_ACTIONS), name="action"),
     CheckConstraint(column("target_type").in_(AUDIT_TARGET_TYPES), name="target_type"),
@@ -268,7 +268,8 @@ audit_log = Table(
     # jsonb 함수·`::text` 캐스트는 PostgreSQL 전용이라 SQLite 시험용 create_all에서는 만들지 않는다
     # (`ddl_if`). 실제 DB에서는 revision 0007이 같은 제약을 만든다.
     CheckConstraint("jsonb_typeof(details) = 'object'", name="details_object").ddl_if(**_PG_ONLY),
-    # 4000은 AUDIT_DETAILS_MAX_BYTES와 같다(시험이 대조한다). SQL에 변수를 넣지 않으려고 리터럴로 쓴다.
+    # 4000은 AUDIT_DETAILS_MAX_BYTES와 같다(시험이 대조한다). SQL에 변수를 넣지 않으려고
+    # 리터럴로 쓴다.
     CheckConstraint("octet_length(details::text) <= 4000", name="details_size").ddl_if(**_PG_ONLY),
 )
 # 인덱스 3개(06 §2-1): 기간·기본 정렬, 행위자 필터, 대상 필터. `action` 필터는 인덱스 없이 건다.

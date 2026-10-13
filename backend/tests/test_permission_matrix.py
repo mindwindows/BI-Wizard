@@ -1,5 +1,5 @@
 """권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
-A1~A9, B1~B6, C1~C4, D1~D10, E1~E6, DV1~DV3.
+A1~A9, B1~B6, C1~C4, D1~D10, E1~E6, F1, DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from app.auth.guard import PUBLIC_PATHS
 from app.db_metadata import (
     DYNAMIC_SCHEMA,
+    audit_log,
     dataset_columns,
     datasets,
     formula_deps,
@@ -330,6 +331,8 @@ ENDPOINTS: list[Endpoint] = [
         503,
         READER,
     ),
+    # F1(FU-2a): 감사 기록 조회는 관리자 전용이다(05 §4, 06 §4-1). 권한 검사가 쿼리 검증보다 먼저다.
+    ("F1", "GET", "/api/audit-logs", lambda w: "/api/audit-logs", lambda w: None, 200, ADMIN),
 ]
 
 
@@ -399,6 +402,7 @@ def _snapshot(db: Db):
         db.rows(formula_deps, formula_deps.c.column_id, formula_deps.c.depends_on_column_id),
         db.rows(superset_datasets, superset_datasets.c.dataset_id),
         db.rows(superset_dashboards, superset_dashboards.c.id),
+        db.rows(audit_log, audit_log.c.id),  # 거부된 요청은 감사 기록도 남기지 않는다
         dynamic,
     )
 

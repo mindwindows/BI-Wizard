@@ -50,9 +50,7 @@ class ActionSpec:
 
 
 ACTIONS: Mapping[str, ActionSpec] = {
-    "dataset.create": ActionSpec(
-        "dataset", {"team_id": INT, "date_unit": STR, "def_version": INT}
-    ),
+    "dataset.create": ActionSpec("dataset", {"team_id": INT, "date_unit": STR, "def_version": INT}),
     "dataset.update": ActionSpec(
         "dataset",
         {"team_id": INT, "def_version": INT},

@@ -222,6 +222,7 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 
 ## 9. 연관 Skill
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
+- `permission-management`(FU-2a 감사 기록 조회): 데이터셋 만들기·수정(B2·B4)과 열 추가·수정(B5·B6)은 성공하고 실제로 바뀐 경우에만 감사 기록(`dataset.create`·`dataset.update`·`column.add`·`column.update`)이 한 건 남는다. 검증 규칙 값은 기록되지 않고 `rules_changed`만 남는다. 관리자가 5-1절 API로 조회한다.
 - `data-entry`(FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
 - `formula-column`(FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `formulas`·`formula_deps`, `dv_`·`de_` 뷰, `def_hash`(뷰 정의 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
 - `dashboard-link`(FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다. 열 표시 이름은 Superset에서 `c_<번호>` 열의 이름이 되고(전체 열 한 번에 갱신), 이름 변경(B4)·열 추가(B5)·열 이름 변경(B6)도 같은 경로로 반영된다

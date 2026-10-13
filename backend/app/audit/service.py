@@ -10,7 +10,8 @@ INSERT가 실패하면 변경도 실패한다(같은 트랜잭션, 감사 없는
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -55,6 +56,16 @@ def _fail(action: str, reason: str) -> AuditRecordError:
     return AuditRecordError(f"감사 기록을 쓸 수 없다({action}): {reason}")
 
 
+_SAFE_NAME = re.compile(r"[a-z][a-z_]{0,39}")
+
+
+def _names(keys: Iterable[Any]) -> list[str]:
+    """오류 메시지용 키 이름. 코드 식별자 모양이 아니면 값이 섞였을 수 있어 이름을 싣지 않는다."""
+    return sorted(
+        k if isinstance(k, str) and _SAFE_NAME.fullmatch(k) else "<식별자가 아닌 키>" for k in keys
+    )
+
+
 def _check_scalar(action: str, name: str, value: Any, kind: str) -> None:
     ok: bool
     if value is None:
@@ -77,7 +88,7 @@ def _check_changes(action: str, spec: ActionSpec, changes: Any) -> None:
         raise _fail(action, "`changes`는 객체여야 한다")
     for field_name, pair in changes.items():
         if field_name not in allowed:
-            raise _fail(action, f"`changes`에 허용 밖 필드 `{field_name}`가 있다")
+            raise _fail(action, f"`changes`에 허용 밖 필드 {_names([field_name])}가 있다")
         if not isinstance(pair, dict) or set(pair) != {CHANGE_FROM, CHANGE_TO}:
             raise _fail(action, f"`changes.{field_name}`는 from·to만 가져야 한다")
         _check_scalar(action, f"changes.{field_name}.from", pair[CHANGE_FROM], allowed[field_name])
@@ -90,9 +101,7 @@ def _check_changes(action: str, spec: ActionSpec, changes: Any) -> None:
 
 def _serialized_size(details: Mapping[str, Any]) -> int:
     """DB `details::text`와 같은 모양(구분자 뒤 공백, 글자는 그대로)으로 직렬화한 바이트 수."""
-    return len(
-        json.dumps(details, ensure_ascii=False, separators=(", ", ": ")).encode("utf-8")
-    )
+    return len(json.dumps(details, ensure_ascii=False, separators=(", ", ": ")).encode("utf-8"))
 
 
 def validate_details(action: str, target_name: str, details: Mapping[str, Any]) -> dict[str, Any]:
@@ -105,9 +114,10 @@ def validate_details(action: str, target_name: str, details: Mapping[str, Any]) 
         raise _fail(action, "`target_name`은 인자로만 준다")
     actual, expected = set(full), set(spec.detail_keys)
     if actual != expected:
-        extra = sorted(actual - expected)
-        missing = sorted(expected - actual)
-        raise _fail(action, f"허용 키와 다르다(밖 {extra}, 빠짐 {missing})")
+        raise _fail(
+            action,
+            f"허용 키와 다르다(밖 {_names(actual - expected)}, 빠짐 {_names(expected - actual)})",
+        )
     _check_scalar(action, TARGET_NAME_KEY, target_name, STR)
     if not target_name:
         raise _fail(action, "`target_name`이 비어 있다")
@@ -159,8 +169,12 @@ def record(
 # --- F1 목록 ----
 
 
-def _day_start_kst(day: date) -> datetime:
-    return datetime(day.year, day.month, day.day, tzinfo=KST).astimezone(UTC)
+def _day_start_kst(day: date) -> datetime | None:
+    """한국 시간 그날 00:00을 UTC로. 표현할 수 없는 아주 이른 날짜(0001-01-01)는 None(하한 없음)."""
+    try:
+        return datetime(day.year, day.month, day.day, tzinfo=KST).astimezone(UTC)
+    except OverflowError:
+        return None
 
 
 def list_logs(

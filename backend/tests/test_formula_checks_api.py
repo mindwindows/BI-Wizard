@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app import ddl
+from app.auth.models import CurrentUser
 from app.core.ports import DefinitionHooks
 from app.db_metadata import datasets
 from app.formula.hook import FormulaDefinitionHook
@@ -383,6 +384,9 @@ def test_row_write_waiting_on_a_definition_change_then_gets_version_mismatch(
                 session,
                 hooks,
                 dataset["id"],
+                actor=CurrentUser(
+                    id=world.ids["definer"], display_name="정의", is_active=True, is_admin=False
+                ),
                 expected_version=start,
                 display_name="합",
                 expression="[매출] + 1",

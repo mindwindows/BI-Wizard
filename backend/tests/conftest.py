@@ -21,6 +21,7 @@ from app.dataset.hashing import structure_hash
 from app.db import build_database_url, create_db_engine
 from app.db_metadata import (
     DYNAMIC_SCHEMA,
+    audit_log,
     dataset_columns,
     datasets,
     formula_deps,
@@ -265,6 +266,7 @@ def drop_dynamic_tables(engine: Engine) -> None:
 def clear_static_tables(engine: Engine) -> None:
     drop_dynamic_tables(engine)
     with engine.begin() as conn:
+        conn.execute(delete(audit_log))  # users를 가리키는 외래키가 있어 먼저 지운다(bi_owner 전용)
         conn.execute(delete(superset_datasets))
         conn.execute(delete(superset_dashboards))
         conn.execute(update(datasets).values(base_date_column_id=None))  # 순환 FK 해제
@@ -537,3 +539,7 @@ def pytest_terminal_summary(terminalreporter) -> None:
         f"불일치 {SUMMARY['mismatches']}건, DB 예외 {SUMMARY['exceptions']}건",
     ):
         terminalreporter.write_line(line)
+
+
+# 감사 기록 시험(tests/test_audit_*.py)이 함께 쓰는 환경 fixture. 정의는 audit_helpers에 있다.
+from tests.audit_helpers import ctx  # noqa: E402, F401

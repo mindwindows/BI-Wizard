@@ -2,7 +2,9 @@
 
 - 등록(B2)은 `datasets` 행 INSERT + `ds_<번호>` 원본 표 생성(`ddl`)을 **한 트랜잭션**으로 한다. 어느
   한쪽이 실패하면 둘 다 롤백된다(PostgreSQL DDL은 트랜잭션 안에서 되돌려진다).
-- 정의를 바꾸는 B4~B6은 정의 변경 진입점(`definition.apply_definition_change`)을 지난다.
+- 정의를 바꾸는 B4~B6은 정의 변경 진입점(`definition.apply_definition_change`)을 지난다. 감사 기록
+  (FU-2a, 04 §5-1)은 B2는 이 모듈이 훅 뒤·커밋 앞에서 직접, B4~B6은 진입점이 `AuditSpec`으로
+  바뀐 것이 있을 때만 한 번 부른다. 해당 함수는 행위자(`actor`)를 받는다.
 - 권한은 router가 판정한다(정의(팀) = 그 데이터셋 팀의 `definer`, 관리자라도 소속이 아니면 불가).
 - 동기 상태는 읽지 않는다(04 §3). 커밋 뒤 동기화 요청은 router가 `DatasetSyncPort`로 한다.
 """
@@ -16,7 +18,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app import ddl
+from app import audit, ddl
 from app.auth.models import CurrentUser
 from app.auth.permissions import can_define, can_enter
 from app.core.db_errors import sqlstate
@@ -35,6 +37,7 @@ from app.core.timefmt import to_kst_iso
 from app.dataset import repo, rules
 from app.dataset.definition import (
     ROW_WRITE_LOCK_TIMEOUT,
+    AuditSpec,
     apply_definition_change,
     set_lock_timeout,
     translate_db_error,
@@ -359,6 +362,14 @@ def create_dataset(
         view_hash = hooks.run(session, dataset_id)
         if view_hash is not None:
             repo.update_dataset(session, dataset_id, {"def_hash": view_hash})
+        audit.record(
+            session,
+            actor=user,
+            action="dataset.create",
+            target_id=dataset_id,
+            target_name=name,
+            details={"team_id": team_id, "date_unit": date_unit, "def_version": 1},
+        )
         session.commit()
     except DBAPIError as error:
         translated = translate_db_error(session, error)
@@ -385,6 +396,7 @@ def update_dataset(
     hooks: DefinitionHooks,
     dataset_id: int,
     *,
+    actor: CurrentUser,
     expected_version: int,
     name: str | None,
     date_unit: str | None,
@@ -431,10 +443,26 @@ def update_dataset(
         if not updates:
             return False, {}
         repo.update_dataset(session, dataset_id, updates)
-        return True, {}
+        return True, {
+            "name": updates.get("name", locked["name"]),
+            "team_id": int(locked["team_id"]),
+            "changes": {k: {"from": locked[k], "to": v} for k, v in updates.items()},
+        }
+
+    def describe(result: dict[str, Any], version: int) -> tuple[str, dict[str, Any]]:
+        return result["name"], {
+            "team_id": result["team_id"],
+            "changes": result["changes"],
+            "def_version": version,
+        }
 
     outcome = apply_definition_change(
-        session, hooks, dataset_id, expected_version=expected_version, change=change
+        session,
+        hooks,
+        dataset_id,
+        expected_version=expected_version,
+        change=change,
+        audit_spec=AuditSpec(actor, "dataset.update", describe),
     )
     return outcome.changed, outcome.def_version
 
@@ -461,6 +489,7 @@ def add_column(
     hooks: DefinitionHooks,
     dataset_id: int,
     *,
+    actor: CurrentUser,
     expected_version: int,
     display_name: str,
     column_type: str,
@@ -487,10 +516,24 @@ def add_column(
             position=position if position is not None else (0 if last is None else last + 1),
         )
         ddl.add_raw_column(session.connection(), dataset_id, column_id, column_type)
-        return True, {"column_id": column_id}
+        return True, {"column_id": column_id, "dataset_name": locked["name"]}
+
+    def describe(result: dict[str, Any], version: int) -> tuple[str, dict[str, Any]]:
+        return result["dataset_name"], {
+            "column_id": result["column_id"],
+            "column_name": display_name,
+            "column_type": column_type,
+            "required": required,
+            "def_version": version,
+        }
 
     outcome = apply_definition_change(
-        session, hooks, dataset_id, expected_version=expected_version, change=change
+        session,
+        hooks,
+        dataset_id,
+        expected_version=expected_version,
+        change=change,
+        audit_spec=AuditSpec(actor, "column.add", describe),
     )
     column = repo.get_column(session, dataset_id, outcome.result["column_id"])
     assert column is not None  # noqa: S101 - 방금 커밋한 행
@@ -506,6 +549,7 @@ def update_column(
     dataset_id: int,
     column_id: int,
     *,
+    actor: CurrentUser,
     expected_version: int,
     fields: set[str],
     values: dict[str, Any],
@@ -559,10 +603,34 @@ def update_column(
         if not updates:
             return False, {}
         repo.update_column(session, column_id, updates)
-        return True, {}
+        # 검증 규칙 값은 기록하지 않는다(`rules_changed` 불리언만, 06 §2-1 ③).
+        return True, {
+            "dataset_name": locked["name"],
+            "column_name": updates.get("display_name", current["display_name"]),
+            "changes": {
+                k: {"from": current[k], "to": v}
+                for k, v in updates.items()
+                if k in ("display_name", "required", "tag", "position")
+            },
+            "rules_changed": "rules" in updates,
+        }
+
+    def describe(result: dict[str, Any], version: int) -> tuple[str, dict[str, Any]]:
+        return result["dataset_name"], {
+            "column_id": column_id,
+            "column_name": result["column_name"],
+            "changes": result["changes"],
+            "rules_changed": result["rules_changed"],
+            "def_version": version,
+        }
 
     outcome = apply_definition_change(
-        session, hooks, dataset_id, expected_version=expected_version, change=change
+        session,
+        hooks,
+        dataset_id,
+        expected_version=expected_version,
+        change=change,
+        audit_spec=AuditSpec(actor, "column.update", describe),
     )
     column = repo.get_column(session, dataset_id, column_id)
     assert column is not None  # noqa: S101 - 존재를 change에서 확인했다

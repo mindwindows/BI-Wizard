@@ -1,6 +1,6 @@
 ---
 name: permission-management
-description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리와 내 정보 조회, 최초 관리자 만들기, 개발·시험용 인증 스텁 사용법. "팀 만들어줘", "사용자 등록", "관리자 지정", "정의 담당자로 바꿔줘", "첫 관리자 만들기", "스텁으로 로그인" 같은 요청에 사용한다. 화면(S1, S6)은 FU-1a 프런트 단위에서 붙고 이 문서는 backend API·명령 기준이다.
+description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리와 내 정보 조회, 최초 관리자 만들기, 개발·시험용 인증 스텁 사용법, 관리자의 감사 기록 조회(누가 언제 무엇을 바꿨는지). "팀 만들어줘", "사용자 등록", "관리자 지정", "정의 담당자로 바꿔줘", "첫 관리자 만들기", "스텁으로 로그인", "누가 이걸 바꿨어?", "감사 기록 보기", "변경 이력 조회" 같은 요청에 사용한다. 화면(S1, S6, S10)은 프런트 단위에서 붙고 이 문서는 backend API·명령 기준이다.
 ---
 
 # permission-management — 팀·사용자·권한 관리
@@ -9,7 +9,7 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 관리자가 팀을 만들고, 사용자를 사전 등록하고, 사용자를 팀에 정의 담당자(`definer`) 또는 입력자(`entry`)로 넣고 빼며, 비활성화한다. 모든 사용자는 자기 정보와 소속 팀을 본다. 인증된 모든 사용자는 모든 팀의 데이터를 열람할 수 있고(별도 역할 값 없음), 관리자는 팀 소속 역할이 없으면 데이터셋 정의·입력 권한이 없다(06 §4-1).
 
 ## 2. 사용 조건 / 사전 요구사항
-- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0005`로 데이터셋 표와 수식 표(`formulas`·`formula_deps`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
+- `local-environment` 통과(`migrate`가 `0003`까지 적용. 지금 head는 `0007`로 데이터셋 표, 수식 표(`formulas`·`formula_deps`), Superset 등록 표, 감사 기록 표(`audit_log`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
 - 로그인 방식(미결정 8번)이 정해지기 전에는 **인증 스텁**으로만 신원을 만든다. 스텁은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 켜진다(그 밖이면 backend가 시작하지 않는다).
 - 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`. **사용자를 조회하는 중에 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다**(로그아웃과 구분하며 접근은 계속 닫혀 있다. 모든 보호 경로가 같다). 신원 어댑터 자체의 예외는 기존대로 401이다.
 - 최초 관리자는 아래 서버 명령으로 만든다(화면·API로는 만들 수 없다: 관리자가 한 명도 없기 때문).
@@ -98,10 +98,72 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 6. 저장하지 않은 변경이 있으면 탭을 닫을 때 브라우저가 한 번 묻는다.
 - 새로 만든 팀·사용자는 저장 뒤 격자에 나타나며, 그때 소속을 지정한다(같은 저장 묶음에서 새 객체의 소속은 지정할 수 없다).
 
+## 5-1. 감사 기록 조회 (관리자, FU-2a)
+누가 언제 무엇을 바꿨는지를 관리자가 읽는다. 기록은 변경과 **같은 트랜잭션**에서 서버가 남기고, 읽기만 가능하다(수정·삭제·내보내기 경로가 없다). 규칙은 `docs/decisions/04-modules.md` §5-1, API는 05 §2-7 F1, 표는 06 §2-1이다.
+
+### API로 조회하기 (관리자만)
+```
+curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from=2026-10-01&to=2026-10-13&action=member.set&limit=50"
+```
+(`jar`는 위 스텁 로그인으로 관리자 신원을 고른 쿠키 파일이다.) 쿼리는 모두 선택이고 **모두 AND**로 걸린다.
+
+| 쿼리 | 뜻 |
+| --- | --- |
+| `from`, `to` | 날짜 `YYYY-MM-DD`, **한국 시간 기준 그날 포함**(`from`은 그날 00:00부터, `to`는 그날 24:00 전까지). 둘 다 없으면 전체 기간 |
+| `actor_user_id` | 행위자 사용자 번호(정수). 서버 명령(`create-admin`) 행은 행위자가 없어 이 필터로는 나오지 않는다 |
+| `target_type` | `team` · `user` · `dataset` · `dashboard` 중 하나 |
+| `target_id` | 대상 번호(정수). **`target_type`과 함께만** 보낸다(번호는 종류마다 따로 매겨진다) |
+| `action` | 아래 15개 값 중 하나 |
+| `limit`, `offset` | 기본 50, 최대 200 / 0 이상(상한 없음) |
+
+응답 `200 {items, total, limit, offset}`. **정렬은 항상 최신순**(`occurred_at` 내림차순, 같으면 `id` 내림차순)이고 정렬 인자는 없다. `total`은 필터를 적용한 정확한 전체 건수다. 항목은 `{id, occurred_at(+09:00), actor{id, display_name} 또는 null, actor_source("user"|"cli"), action, target_type, target_id, details}`이다. `actor.display_name`은 조회 시점의 사용자 이름이다(이름을 바꾸면 이전 행에도 새 이름이 보인다). `details`는 행위마다 정해진 키만 있고 항상 `target_name`(대상 이름 스냅샷)이 있다.
+
+### 기록되는 행위 15개
+| `action` | 언제 | `details`(`target_name` 외) |
+| --- | --- | --- |
+| `dataset.create` | 데이터셋 만들기(B2) | `team_id`, `date_unit`, `def_version` |
+| `dataset.update` | 이름·날짜 단위·기준 날짜 열 변경(B4) | `team_id`, `changes{name, date_unit, base_date_column_id}`, `def_version` |
+| `column.add` | 원본 열 추가(B5) | `column_id`, `column_name`, `column_type`, `required`, `def_version` |
+| `column.update` | 열 이름·필수·태그·순서·규칙 변경(B6) | `column_id`, `column_name`, `changes{display_name, required, tag, position}`, `rules_changed`(규칙 값 자체는 없다), `def_version` |
+| `formula_column.add` | 계산 열 만들기(D4) | `column_id`, `column_name`, `result_type`, `ast_hash`, `def_version` |
+| `formula_column.update` | 수식 고치기(D5, 같은 수식이면 기록 없음) | `column_id`, `column_name`, `result_type`, `result_type_changed`, `ast_hash_from`, `ast_hash`, `def_version` |
+| `team.create` | 팀 만들기(A3) | `code` |
+| `team.update` | 팀 이름·활성 변경(A4) | `changes{name, is_active}` |
+| `member.set` | 소속 추가·역할 변경(A8) | `user_id`, `role`, `role_from`(새 소속이면 null) |
+| `member.remove` | 소속 해제(A9) | `user_id`, `role_from` |
+| `user.create` | 사용자 등록(A6) | `is_admin` |
+| `user.update` | 이름·관리자·활성 변경(A7) | `changes{is_admin, is_active}`, `display_name_changed`(이름 값은 `target_name`에만) |
+| `user.bootstrap_admin` | 서버 명령 `create-admin`으로 최초 관리자를 만듦 | `is_admin`(항상 true). 행위자 없음, `actor_source="cli"` |
+| `dashboard.create` | 대시보드 연결 등록(E4) | `embedded_uuid` |
+| `dashboard.update` | 대시보드 이름·활성 변경(E5). `is_active` true→false는 "연결 해제", false→true는 "다시 연결" | `changes{name, is_active}` |
+
+대상은 `target_type`·`target_id`로 가리킨다. 소속(`member.*`)은 `team`을 대상으로 하고 사용자는 `details.user_id`에 있다. 열·수식 변경은 `dataset`을 대상으로 하고 `details.column_id`가 열이다(데이터셋 하나의 정의 이력이 `target_type=dataset&target_id=<번호>` 한 번으로 모인다). 한 번의 요청은 **최대 한 건**이고(여러 필드를 바꿔도 `changes`에 함께), **실제로 바뀐 것이 없으면 한 건도 남지 않는다**(같은 값으로 저장, 빈 본문, 같은 역할 재요청, 이미 활성 관리자인 `create-admin` 재실행). 실패한 요청(409·404·422·503)과 롤백된 요청도 남지 않는다.
+
+### 기록되지 않는 것
+행 값 입력·수정·붙여넣기(C2~C4), 입장권 발급(E6), Superset 동기 상태 변경·동기화 접수(E2), 시작 시 뷰 재생성·다시 시도(D10, 정의가 안 바뀜), 팀 이름 변경 뒤의 동기화 같은 후속 부수 효과, 시험용 사용자 시드(`seed-stub-users`), `/dev/*` 신원 전환, 모든 조회(GET). **`details`에는 행 값, 수식 원문, 검증 규칙 값, 로그인 ID, 토큰·비밀번호가 들어가지 않는다**(사용자는 표시 이름만, 수식은 열 번호와 `ast_hash`만).
+
+### 조회할 수 없는 사용자
+관리자(`is_admin`)만 읽는다. 정의 담당자·입력자·소속 없는 사용자·다른 팀 구성원은 모두 `403 FORBIDDEN`, 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 로그인 정보가 없으면 401 `UNAUTHENTICATED`. 권한 검사가 쿼리 검증보다 먼저라 권한 없는 사용자는 입력 오류의 내용도 알 수 없다. 화면 메뉴를 숨기는 것은 편의이고, 막는 것은 서버다(주소로 직접 열어도 403).
+
+### 오류
+`422 VALIDATION_ERROR`의 `details.fields[].code`: 날짜 형식 오류 `BAD_FORMAT`(필드 `from`·`to`, `YYYY-MM-DD` 아님·없는 날짜·공백·전각 숫자), `from`이 `to`보다 늦으면 필드 `to`에 `OUT_OF_RANGE`, `target_type`·`action`이 목록 밖이면 `NOT_IN_OPTIONS`, `target_id`만 있고 `target_type`이 없으면 필드 `target_type`에 `REQUIRED`, 정수가 아니거나 범위 밖이면 `BAD_FORMAT`, `limit`·`offset` 범위 밖은 다른 목록과 같다. DB 장애는 503 `SERVICE_UNAVAILABLE`.
+
+### 운영 주의
+- **자동 삭제가 없다.** 기록은 계속 쌓이고 보존·삭제 정책은 후속이다. 하루 건수는 측정하지 않았다(확인 못 함). 새 기록이 계속 쌓이므로 `offset` 페이지 사이에 행이 밀릴 수 있고(알려진 한계), 아주 깊은 페이지의 속도는 측정하지 않았다.
+- **`bi_app`(서버)은 읽기와 추가만 한다**(UPDATE·DELETE·TRUNCATE 권한 없음). 잘못 남은 기록을 서비스로 고치거나 지울 수 없다. 정정 방법은 후속이다.
+- **`alembic downgrade`로 `0007`을 내리면 `audit_log` 표와 기록 전체가 지워진다.** 되돌리기용이 아니라 빈 시험 DB의 왕복 시험용이다. 운영에서는 하지 않고 문제는 수정 revision으로 대응한다. 이 `DROP`은 아직 사용자 확인 전이다(`docs/decisions/03b-gate3-round-decisions.md` 29-3, `backend/tests/test_migrations.py`의 `DROP_APPROVED`에 "사용자 확인 대기"로 기록).
+- **`skills/admin-cleanup`의 수동 `psql` 정리는 감사 기록에 남지 않는다.** 서비스를 거치지 않기 때문이다. 정리한 사실은 변경 요약·운영 노트에 따로 적는다. 정리해도 `audit_log`의 `target_id`(외래키 없음)는 그대로 남는다.
+- 감사 기록은 변경과 같은 트랜잭션이라 **기록 INSERT가 실패하면 변경도 실패한다**(500 `INTERNAL_ERROR`, 감사 없는 변경은 없다). `occurred_at`은 DB의 트랜잭션 시작 시각이라 오래 걸린 요청은 조금 이른 시각으로 남는다.
+- 시작 자가 점검은 정적 표 정의에 `audit_log`가 있어 `0007`이 적용되지 않은 DB에서는 backend가 시작하지 않는다(`migrate`가 끝났는지 확인).
+
+### 화면 (S10 감사 기록 목록)
+(화면 절차는 프런트 단위가 이 자리에 추가한다. 아래는 backend가 보장하는 것만이다.) 화면은 위 API만 부른다. 비관리자에게는 메뉴 항목이 없고, 주소로 직접 열면 403을 받아 "관리자만 볼 수 있습니다"를 보여 준다. 수정·삭제·내보내기 버튼은 없다.
+
 ## 6. 관련 UI / API / command / DB
-- UI: S1 포털 셸·접근 안내, S6 권한 관리(`docs/decisions/04-modules.md` §4). S1 `/`, `/access-denied`(경로는 `APP_BASE_PATH` 아래), S6 `/admin/permissions`, 구현 위치 `frontend/src/features/access/`
-- API: A1~A9(05 §2-1), DV1~DV3(05 §2-6). 코드는 `backend/app/access/`(router·service·repo), 스텁은 `backend/app/auth/stub.py`, 사용자 조회는 `backend/app/auth/db_reader.py`
+- UI: S1 포털 셸·접근 안내, S6 권한 관리, S10 감사 기록 목록(`docs/decisions/04-modules.md` §4). S1 `/`, `/access-denied`(경로는 `APP_BASE_PATH` 아래), S6 `/admin/permissions`, 구현 위치 `frontend/src/features/access/`
+- API: A1~A9(05 §2-1), F1 `GET /api/audit-logs`(05 §2-7, 코드는 `backend/app/audit/`: `actions.py`가 행위 15개와 `details` 허용 키의 유일한 출처, `service.py`의 `record`가 쓰기, `router.py`가 조회), DV1~DV3(05 §2-6). 코드는 `backend/app/access/`(router·service·repo), 스텁은 `backend/app/auth/stub.py`, 사용자 조회는 `backend/app/auth/db_reader.py`
 - command: `python -m app.cli create-admin`, `python -m app.cli seed-stub-users` (`backend/app/cli.py`)
+- DB(`audit_log`, revision `0007_audit_log`, `bi_owner` 소유, `public`): `id bigint`(identity, 시퀀스 권한 불필요), `occurred_at`, `actor_user_id`(users 외래키, 서버 명령이면 NULL), `actor_source`, `action`, `target_type`, `target_id`(외래키 없음), `details jsonb`(객체, 4,000바이트 이하). CHECK 6개와 인덱스 3개. `bi_app`은 **SELECT·INSERT만**(UPDATE·DELETE·TRUNCATE 없음)이고 `bi_readonly`(Superset)와 PUBLIC에는 권한이 없다.
 - DB(`public`, revision `0003_users_teams_members`, `bi_owner` 소유): `users`(`login_id` 유일), `teams`(`code` 유일·불변·형식 CHECK, `name` 유일), `team_members`(PK `team_id`+`user_id`, `role` CHECK). `bi_app` 권한은 명시 GRANT뿐이다: 표 단위 SELECT·INSERT(`team_members`는 DELETE도), UPDATE는 열 단위(`users`: `display_name`·`is_admin`·`is_active`, `teams`: `name`·`is_active`, `team_members`: `role`). 불변 열(`login_id`, `code`, `team_id`, `user_id`)은 DB가 변경을 거부한다. `bi_readonly`(Superset)와 PUBLIC에는 아무 권한도 없다.
 - 마지막 활성 관리자 보호: A7이 활성 관리자 행을 id 순서로 한 문장에서 `FOR NO KEY UPDATE`로 잠그고 판정하므로 두 관리자를 동시에 해제해도 활성 관리자가 0명이 되지 않는다(교착 없음).
 
@@ -147,7 +209,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/me"
 
 ## 8. 검증 방법
 - 자동(DB 없이, `docker build --target test backend`와 같다): `pytest`. API 시험은 SQLite로 돌고 `pg` 변형은 건너뛴다. **CI에서 건너뛰어 통과처럼 보이는 일을 막으려면 시험을 실행하는 환경에 `REQUIRE_PG=1`을 준다**: PostgreSQL 시험 환경(접속 정보·tmpfs 시험 DB)이 없을 때 `pg` 변형이 건너뛰지 않고 **실패**한다. 미설정이면 건너뛴다. `.env`·`.env.example`·compose에는 넣지 않는 시험 실행용 옵션이다.
-- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501, `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
+- 자동(실제 PostgreSQL, 권장): tmpfs 시험 DB로 `pg` 변형까지 실행한다. 정적 표 권한 매트릭스(`has_table_privilege`/`has_column_privilege` 대조 + 실제 UPDATE/DELETE 거부 42501, `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`·`superset_datasets`·`superset_dashboards`·`audit_log`), `bi_readonly` 읽기 불가, 제약(CHECK/UNIQUE/FK), LAST_ADMIN 경쟁·교착, 시작 자가 점검(속성 5가지, `bi_data` 객체 종류), 스텁·CLI·API 전체가 대상이다. 안전장치: 서버가 `fsync=off`(시험 DB 서비스만)가 아니면 건너뛴다.
 ```
 docker compose --profile test up -d --wait postgres-test
 docker compose --profile test run --rm --no-deps -e PGHOST=postgres-test db-bootstrap
@@ -156,8 +218,9 @@ docker run --rm --network bi-wizard_default --env-file .env -e POSTGRES_HOST=pos
 docker compose --profile test stop postgres-test && docker compose --profile test rm -f postgres-test
 ```
 (네트워크 이름은 compose 프로젝트 이름에 따른다: `docker network ls`. 이 시험은 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`*_PASSWORD`가 필요하다. 시험 DB는 새 DB여야 한다: 시험이 `users`·`teams`·`team_members`의 행을 지운다.)
-- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`·`0004`·`0005`의 표·열 단위 권한 상태(0005·0004 한 단계 내림 포함)를 확인한다.
+- 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`~`0007`의 표·열 단위 권한 상태(0007·0006·0005·0004 한 단계 내림 포함)를 확인한다. 왕복은 `0007`의 `DROP`(감사 기록 전체 삭제)을 포함하므로 **빈 시험 DB에서만** 한다.
 - 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), C1~C4(`skills/data-entry`), D1~D10(`skills/formula-column`: 읽기 D1·D6·D7·D8, 정의(팀) D2~D5, 관리자 D9·D10), DV1~DV3 × 역할(+ B2의 비활성 팀 행: 정의 담당자 409 `TARGET_INACTIVE`, 그 밖 역할은 403·401로 권한 판정이 먼저)(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
+- 감사 기록(FU-2a): `tests/test_audit_record.py`(허용 키 표·`record` 단위), `test_audit_hooks.py`(행위 15개 각각: 성공 1건·변경 없음 0건·대표 오류 0건·커밋/훅 실패 주입 0건·감사 INSERT 실패 주입 시 변경도 롤백), `test_audit_api.py`(F1: 권한·필터·정렬·페이지·422 필드 코드·경계), `test_audit_coverage.py`(기록 대상 표를 쓰는 service 함수가 행위 표에 있는지 소스 점검), `test_audit_secrets.py`(심은 로그인 ID·셀 값·수식 상수·규칙 값이 `details`에 없음), `test_audit_pg.py`(행위자 `users` 행 잠금 영향·경쟁에서 전이 한 건씩·직렬화 크기), `test_static_acl.py`(`bi_app` UPDATE·DELETE·TRUNCATE 거부, `bi_readonly` 접근 거부, 시퀀스 권한 없이 INSERT 성공, CHECK·FK), 권한 매트릭스에 F1.
 - 수동: 위 스텁 curl로 관리자 로그인 후 팀 만들기 → 사용자 등록 → 소속 지정 → `/api/me`(해당 사용자)로 소속 확인, 마지막 관리자 해제 시 409.
 - 프런트:
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
@@ -177,7 +240,8 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 
 ## 9. 연관 Skill
 - `local-environment`: 환경 기동·마이그레이션 왕복·`/health` 필드·스텁 스위치(`AUTH_STUB_ENABLED`) 설정, 시작 자가 점검 실패 대응
-- `dataset-definition`(FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
+- `dataset-definition`(FU-1b): (데이터셋·열 정의 변경 `dataset.*`·`column.*`은 감사 기록에 남는다, 5-1) 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
 - `data-entry`(FU-1c): `입력(팀)` = 그 팀의 `entry` 또는 `definer`(관리자도 소속 역할이 있어야 한다)로 행 입력(C2~C4)을 판정하고, 행 조회(C1)는 인증된 활성 사용자 누구나 한다
-- `formula-column`(FU-1d): 수식 검사·미리보기·계산 열 만들기·고치기는 정의(팀) 권한, 수식 보기·오류 칸 점검은 인증된 모두, 뷰 점검·다시 시도는 관리자(05 §4). 이 Skill의 인증 스텁·시험 절차를 쓴다
-- `dashboard-link`(FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고(팀 단위, 그 팀의 데이터셋만), 대시보드 연결·입장권 발급(E1~E6, 권한 매트릭스에 포함)에 이 모듈의 신원·권한을 쓴다
+- `formula-column`(FU-1d): (계산 열 만들기·고치기 `formula_column.*`은 감사 기록에 남고 수식 원문은 남지 않는다) 수식 검사·미리보기·계산 열 만들기·고치기는 정의(팀) 권한, 수식 보기·오류 칸 점검은 인증된 모두, 뷰 점검·다시 시도는 관리자(05 §4). 이 Skill의 인증 스텁·시험 절차를 쓴다
+- `dashboard-link`(FU-1e): (대시보드 연결 등록·변경 `dashboard.*`은 감사 기록에 남고 입장권 발급은 남지 않는다) 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고(팀 단위, 그 팀의 데이터셋만), 대시보드 연결·입장권 발급(E1~E6, 권한 매트릭스에 포함)에 이 모듈의 신원·권한을 쓴다
+- `admin-cleanup`: 수동 `psql` 정리는 서비스를 거치지 않아 감사 기록에 남지 않는다(5-1 운영 주의)

@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Engine
 
 from app.access.router import router as access_router
+from app.audit.router import router as audit_router
 from app.auth import current_user
 from app.auth.db_reader import DbUserReader
 from app.auth.guard import DEV_STUB_PATHS, check_public_routers
@@ -56,6 +57,7 @@ PROTECTED_ROUTERS: tuple[APIRouter, ...] = (
     entry_router,
     formula_router,
     superset_router,
+    audit_router,
 )
 DEV_ROUTERS: tuple[APIRouter, ...] = (stub_router,)
 

@@ -237,6 +237,7 @@ curl -b "bi_stub_login=viewer" -X POST http://127.0.0.1:8000/api/dashboards/1/gu
 - `dataset-definition`: 데이터셋·열 정의 변경(B2·B4~B6)이 커밋 뒤 `DatasetSyncPort`로 동기화를 요청한다. S2 목록에 동기 상태 열을 붙인다
 - `formula-column`: 계산 열 추가·수정(D4·D5)과 뷰 재생성이 Superset 열 목록을 바꾸므로 동기화 대상이다. 가상 데이터셋 SQL은 `dv_<번호>` 뷰를 읽는다. 열 표시 이름은 계산 열의 이름도 포함한다
 - `permission-management`: 팀 이름 변경(A4)이 팀 단위 동기화를 요청한다. 인증 스텁·권한 매트릭스·실제 DB 시험 절차(8절)를 이 Skill이 쓴다. 입장권 `user`는 포털 사용자 번호다
+- `permission-management`(FU-2a 감사 기록 조회): 대시보드 연결 등록·변경(E4·E5)은 감사 기록(`dashboard.create`·`dashboard.update`, `is_active` true→false가 "연결 해제")이 남는다. 입장권 발급(E6)과 Superset 동기 상태 변경은 기록되지 않는다.
 - `local-environment`: `0006` 마이그레이션 왕복, `httpx` 운영 의존성과 `certifi` 예외 기록, `superset-init`(서비스·발급 계정, `bi_guest` 역할), 하위 경로 설정
 - `data-entry`: 입력 값이 바뀌어도 Superset 데이터셋은 뷰를 읽으므로 동기화가 필요 없다(정의가 바뀔 때만)
 - `admin-cleanup`: Superset 쪽 객체 정리 절차(데이터셋·대시보드 수동 삭제, 임베드 해제)

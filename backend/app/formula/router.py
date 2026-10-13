@@ -129,6 +129,7 @@ def preview_formula(
 def create_formula(
     dataset_id: int,
     body: FormulaCreate,
+    user: CurrentUserDep,
     session: SessionDep,
     hooks: HooksDep,
     sync: SyncDep,
@@ -139,6 +140,7 @@ def create_formula(
         session,
         hooks,
         dataset_id,
+        actor=user,
         expected_version=body.expected_version,
         display_name=body.display_name,
         expression=body.expression,
@@ -155,6 +157,7 @@ def update_formula(
     dataset_id: int,
     col_id: int,
     body: FormulaUpdate,
+    user: CurrentUserDep,
     session: SessionDep,
     hooks: HooksDep,
     sync: SyncDep,
@@ -166,6 +169,7 @@ def update_formula(
         hooks,
         dataset_id,
         col_id,
+        actor=user,
         expected_version=body.expected_version,
         expression=body.expression,
     )
