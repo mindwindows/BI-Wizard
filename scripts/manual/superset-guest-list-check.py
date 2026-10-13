@@ -23,6 +23,10 @@
 실행 방법 (표준 라이브러리만 쓴다. 저장소 루트에서)
   QA 더미 env로 스택을 띄운다(`_workspace/qa/`의 git 제외 임시 env 파일, 비밀은 더미 값).
   접두를 떼는 프록시 설정(`APP_PROXY_STRIP_PREFIX`) true와 false 두 가지로 각각 띄워 돌린다.
+  **STRIP true의 전제:** 앞단 프록시가 접두를 떼고 backend·Superset으로 넘기는 구성이므로, 이 스크립트의
+  `--origin`은 그 프록시 주소여야 하고, **대시보드의 Superset 쪽 허용 도메인(allowed_domains)에 그 프록시
+  origin이 들어 있어야** 한다(없으면 임베드 HTML이 403이다. 목록 API 단정 자체는 영향이 없다).
+  입장권의 `iat`·`exp`는 JSON 실수(float)로 올 수 있으며 스크립트는 정수·실수 모두 받는다.
 
     # 예: STRIP=true 스택(프런트 nginx가 http://127.0.0.1:37180 에서 응답)
     python3 scripts/manual/superset-guest-list-check.py \\
@@ -85,7 +89,7 @@ def request(
     return status, body if isinstance(body, dict) else {}
 
 
-def token_times(token: str) -> tuple[int | None, int | None]:
+def token_times(token: str) -> tuple[float | None, float | None]:
     """입장권(JWT) payload의 iat·exp만 읽는다. 서명은 검증하지 않고 값은 출력하지 않는다."""
     try:
         payload = token.split(".")[1]
@@ -127,7 +131,11 @@ def main() -> int:
     print(f"PASS [{label}] 포털 E6 200 (입장권은 출력하지 않는다)")
 
     iat, exp = token_times(token)
-    seconds = exp - iat if isinstance(iat, int) and isinstance(exp, int) else None
+    seconds = (
+        exp - iat
+        if isinstance(iat, (int, float)) and isinstance(exp, (int, float))
+        else None
+    )
     check(
         f"[{label}] exp - iat == {EXPECTED_TOKEN_SECONDS}",
         seconds == EXPECTED_TOKEN_SECONDS,
