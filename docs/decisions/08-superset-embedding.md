@@ -69,7 +69,7 @@
 | **직접 서명 금지** | 훅은 **발급 API 경로에서만** 호출된다. 직접 서명한 토큰은 훅을 우회해 비어 있지 않은 `rls`·만료 없는 토큰도 통과한다. 그래서 backend는 `GUEST_TOKEN_JWT_SECRET`을 받지 않고(현 compose도 아님) 토큰을 직접 만들지 않는다. 시험과 `bi-review` 규칙으로 고정(AP-1 승인). **EW-4:** `ci-validate-env.sh`가 backend·migrate 환경과 `backend/app` 코드에 `GUEST_TOKEN_JWT_SECRET`이 없음을 검사하고(네거티브 시험 포함) backend 코드와 의존성에 JWT 서명 라이브러리·토큰 직접 생성 흔적이 없음을 확인했다 | X-28 확인됨 |
 | 발급 전용 계정 | 최소 권한: 세션 로그인 + 폼 CSRF면 `can_grant_guest_token SecurityRestApi` 1개, REST(JWT) 로그인이면 `can_read SecurityRestApi` 포함 2개. 서비스 계정과 같은 클라이언트를 재사용하도록 JWT·2개로 확정했다: 역할 `bi_guest_issuer`(`can_grant_guest_token SecurityRestApi` + `can_read SecurityRestApi`)와 계정(기본 이름 `bi_guest_issuer`) **구현됨(EW-3)**. 지연은 세션 재사용 약 26ms, 로그인 포함 약 240ms. `GUEST_TOKEN_JWT_AUDIENCE`는 불필요해 만들지 않는다 | X-28 확인됨, `03b` 4-7 |
 | 유효·갱신 | 5분(설정 변경 없음, EW-4에서 6.1.0 기본 `GUEST_TOKEN_JWT_EXP_SECONDS=300`과 실제 적용값 확인). **적용값 가드(03b 12-1 2번)**: `superset-init`이 적용값을 확인해 300이 아니면 실패하게 한다 — **구현됨(EW-5)**: `ensure_roles.py`가 바꾸기 전에 실제 적용값을 확인해 300이 아니면 실패하고(`bi_roles.GUEST_TOKEN_EXP_SECONDS`), `ci-validate-env.sh`가 `superset_config.py`의 재정의를 정적으로 막는다. 값을 바꾸려면 사전 승인과 가드 값 변경이 함께여야 한다. SDK가 만료 5초 전 재호출하므로 보는 중에는 대시보드당 5분에 1회(EW-6 QA: 페이지를 400초 열어 두고 `fetchGuestToken`이 0초·295초에 호출되고 401 없이 차트 200 유지를 확인). 실패 시 10초마다 재시도, 만료 뒤 401과 차트 "Data error"(영문)가 보이다 성공하면 복구. 포털이 401이면 로그인으로(8번 후 재확인) | X-28 확인됨, `03b` 4-5 |
-| 제한·실패 | 발급 API는 사용자별 429(`Retry-After`, 승인됨), 한도 값은 정상 갱신 빈도 위에서 구현 때 제안 **[미답]**, 저장은 프로세스 메모리 [제안](Redis 제외, `03a`; 워커를 늘리면 재설계). Superset 불가·거부는 502/503 + 한국어 메시지(05) [제안] | `03b` 4-4 Z9, 4-5 |
+| 제한·실패 | 발급 API는 사용자별 429(`Retry-After`, 승인됨), **한도 값 = 사용자당 슬라이딩 윈도 60초 30회(승인 03b 23-1 C)**, 저장은 프로세스 메모리 [제안](Redis 제외, `03a`). **backend 워커(프로세스)가 여러 개면 한도가 워커별로 걸리므로 실효 한도는 워커 수 배가 된다 — 워커를 늘리면 저장소를 재설계한다(현재 워커 1개 전제, `compose.yml`).** Superset 불가·거부는 502/503 + 한국어 메시지(05) [제안] | `03b` 4-4 Z9, 4-5 |
 
 ## 5. 작성자 역할과 대시보드 연결
 | 항목 | 내용 | 출처·상태 |
@@ -109,3 +109,10 @@
 - 기준값·공통 요약·참조 열 데이터셋의 Superset 등록, 공통 열(기간·팀) 통일 방식.
 - 서비스 계정 소유자 이전 시험, 작성자 계정 자동 생성(미채택, 04 §9-1 결번 설명), 대시보드 템플릿 자동 배포.
 - `allowed_domains` 실제 origin(DC 9)과 다른 origin일 때의 `frame_options`/CSP 변경, HTTPS·다중 워커 시험, 속도 제한 저장소 재설계, `statement_timeout` 효과 시험, 팀 단위 열람 제한이 필요해질 때의 설계 변경.
+
+## 9. 훅의 embedded uuid 등록 대조: H0 종결과 남는 위험 (2026-10-12, 사용자 결정 03b 23-1 B)
+- **결정:** 훅은 Superset 프로세스 안에서 돌고 포털 정적 표를 읽을 권한이 없어서(EW-1 설계, X-15) 라이브 대조(허용 목록 볼륨 H1 등)는 하지 않는다(H0). 대신 **합격 기준 "훅의 uuid 등록 대조"를 아래 두 실측으로 바꾼다.** 기준 문구는 `04-modules.md` §8과 `gate-status.md` 이월 3번에서 이 절을 가리킨다.
+- **실측 1(참, 2026-10-12 `docs/research/fu1e-probes.md`):** Superset에 등록된 DB 연결은 `bi_readonly` 하나뿐(메타 DB `dbs` 1건, 관리자 `GET /database/` 1건)이고, `bi_author` 시험 계정은 DB 추가·`test_connection`·`validate_parameters`·`PUT`·`DELETE`·`import`가 모두 403이다(`can_write Database`는 `Admin`만).
+- **실측 2(참, 임베드 설정 권한 기준):** `can_set_embedded Dashboard`는 `Admin`만 가지고 `bi_service`는 임베드 관련 권한이 없다. 임베드 설정(`set_embedded`)과 해제(`delete_embedded`)는 둘 다 `can_set_embedded`만 요구하고, `bi_author` 시험 계정의 임베드 설정(POST·PUT)·해제(DELETE)는 403이었다. 참고: `can_write Dashboard`·`can_delete_embedded`는 `Alpha`·`Gamma`·`bi_author`도 가지지만 임베드 설정 경로에서 검사하는 권한이 아니다(전체 역할×권한 표는 프로브 문서 2-2). 이 실측 2는 "임베드 설정 권한"(= 실제로 임베드를 켜고 끄는 권한)을 기준으로 참이라고 판단한다.
+- **남는 위험:** (1) 발급 계정 비밀이 유출되고 (2) 관리자가 임베드를 켠 포털 미등록 대시보드가 있으면 그 uuid로 입장권을 만들 수 있다(백엔드는 포털에 등록된 활성 uuid만 요청하지만 발급 계정을 직접 쓰는 공격자는 우회한다). 이 입장권은 `bi_guest` 4권한과 훅 거부 규칙(5가지)과 `bi_readonly`의 `bi_data` 읽기 한계 안에 머문다. 완화: 관리자가 Superset에서 임베드를 켠 대시보드를 포털과 일치시키는 운영 절차, 발급 계정 비밀 보호(`.env`·로그·`ps`·`docker inspect` 0건 검사), `deploy-coordination.md` 44번(Superset에 다른 DB 연결을 추가하지 말 것).
+- **재검토:** 실측 중 하나가 거짓이 되면(예: `bi_author`에 DB 연결 권한이 생김, 임베드 설정 권한을 가진 역할이 늘어남) H0을 버리지 않고 멈추고 사용자에게 보고한다(H1로 임의 변경 금지).
