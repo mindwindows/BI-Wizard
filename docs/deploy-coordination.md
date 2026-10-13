@@ -45,7 +45,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 번호 | 허용한 항목 | 라이선스 | 위치 | 허용 조건 |
 | --- | --- | --- | --- | --- |
 | 22 | `psycopg2-binary` | LGPL | `superset/Dockerfile`로 만드는 Superset 이미지 안(Superset의 PostgreSQL 연결용). backend는 사용하지 않는다(pg8000, BSD) | 수정·재배포하지 않는다(PyPI 배포본을 그대로 설치) |
-| 23 | `certifi` | MPL-2.0 | 테스트 단계 이미지 | 개발·테스트 전용, 수정·재배포하지 않는다 |
+| 23 | `certifi` | MPL-2.0 | 테스트 단계 이미지 **및 backend 운영 런타임**(1e에서 `httpx` 승격의 필수 전이 의존성, **예외 승인 2026-10-12**: 03b 23-1 A) | 수정·재배포(포크·패치·번들 가공)하지 않는다. 이름으로 승인한 예외이며 MPL 전체 허용이 아니다. `httpx` 전이 의존성 전체의 버전·라이선스는 `skills/local-environment/SKILL.md`에 기록 |
 | 24 | `lightningcss`와 플랫폼별 패키지 12개 | MPL-2.0 | 프런트 개발 의존성(Vite 빌드·개발 서버). 운영 번들에는 코드가 들어가지 않는다 | 개발 전용, 수정·재배포하지 않는다 |
 | 25 | `BlueOak-1.0.0`, `MIT-0`, `CC0-1.0`(mdn-data), `CC-BY-4.0`(caniuse-lite) 표기 패키지 | 허용형에 준하는 라이선스(비표준 표기) | 프런트 개발 의존성 | 개발 전용 데이터·도구. `CC-BY-4.0`은 데이터 고지 의무만 있다 |
 
@@ -73,6 +73,7 @@ BI-Wizard는 사내 도메인을 가진 **메인 플랫폼의 URL 하위 경로*
 | 41 | **운영 설정: `APP_ENV`는 `local`·`test`가 아니고 `AUTH_STUB_ENABLED=false`** | 인증 스텁은 쿠키만으로 신원을 정하므로 운영에서 켜지면 안 된다. 36번의 시작 거부 규칙에 더해, 운영 `.env`/Secret 틀을 만들 때 `.env.example`의 `APP_ENV=local`을 그대로 복사하지 않고 운영 값(`production` 등)으로 바꾸며 `AUTH_STUB_ENABLED=false`로 둔다(03b 17-1 결정 7). | 협의 필요 | 운영 설정 준비 시 확인 |
 | 42 | **접두를 떼는 프록시 뒤의 SPA fallback** | 앞단 프록시가 `APP_BASE_PATH` 접두를 떼고(`APP_PROXY_STRIP_PREFIX=true`) 정적 요청을 넘기면 `/datasets/42` 같은 딥링크가 접두 밖 경로로 온다. frontend nginx는 이 경우 루트 SPA fallback(`/index.html`)으로 응답하도록 바꿨다(03b 17-1 결정 6). 앞단이 접두를 떼는 방식이면 딥링크·새로고침이 동작하는지, 앞단 자체가 별도 fallback을 하는지 확인한다. | 협의 필요 | 배포 협의 시 확인 |
 | 43 | **뷰 DDL 실패 시 DB 서버 로그에 남는 문장** | 수식 열이 있는 데이터셋의 뷰 DDL(`CREATE OR REPLACE VIEW`)이 잠금 시간 초과 등으로 실패하면 PostgreSQL 서버 로그의 `STATEMENT:` 줄에 그 문장이 수식의 글자 상수와 함께 남을 수 있다(앱 로그에는 남지 않음). 비밀값(비밀번호·키·토큰)은 포함되지 않는다. 운영 DB의 `log_min_error_statement` 설정과 로그 보관·접근 범위를 확인한다(우리는 `bi_app` 역할 수준 로그 설정을 바꾸지 않기로 했다, 03b 21-1 결정 3). | 협의 필요 | 운영 설정 준비 시 확인 |
+| 44 | **Superset에 다른 DB 연결을 추가하지 말 것** | 훅의 embedded uuid 등록 대조는 H0(라이브 대조 없음)으로 종결했다(03b 23-1 B). 대신 Superset에 등록된 DB 연결이 `bi_readonly` 하나뿐이어야 하고 `bi_author`가 DB 연결을 추가할 수 없어야 하며, 관리자·서비스 계정 외에 대시보드 임베드 설정 권한을 가진 역할이 없어야 한다. 운영에서 관리자는 다른 DB 연결을 추가하지 않는다(추가하면 `bi_data` 밖 데이터가 입장권으로 노출될 수 있음). | 운영 설정 준비 시 확인 | 협의 필요 |
 
 ## 이미 확인된 사항
 
