@@ -58,8 +58,9 @@ SyncDep = Annotated[DatasetSyncPort, Depends(get_dataset_sync)]
 ServicesDep = Annotated[SupersetServices | None, Depends(get_services)]
 
 
-async def require_empty_body(request: Request) -> None:
-    """E6: 본문이 없어야 한다(있으면 422). 첫 조각만 보고 판단한다."""
+async def require_empty_body(request: Request, user: CurrentUserDep) -> None:
+    """E6: 본문이 없어야 한다(있으면 422). 인증이 먼저(401·403)이고 첫 조각만 보고 판단한다."""
+    del user  # 인증 의존성을 본문 검사보다 먼저 풀기 위한 인자
     async for chunk in request.stream():
         if chunk:
             raise validation_failed([("body", FieldErrorCode.BAD_FORMAT)])

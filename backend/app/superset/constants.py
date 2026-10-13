@@ -8,7 +8,7 @@ from app.db_metadata import DYNAMIC_SCHEMA
 
 # Superset에 등록된 업무 데이터 연결의 표시 이름. `superset/bi_roles.py`의 `DATABASE_NAME`과 같은
 # 값이어야
-# 한다(`tests/test_superset_constants.py`가 대조한다). 번호는 환경에 따라 달라 이름으로 조회한다.
+# 한다(`tests/test_superset_units.py`가 대조한다). 번호는 환경에 따라 달라 이름으로 조회한다.
 DATABASE_NAME = "BI-Wizard (read-only)"
 # 가상 데이터셋의 schema.
 SCHEMA = DYNAMIC_SCHEMA

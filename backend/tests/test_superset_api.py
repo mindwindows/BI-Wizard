@@ -406,6 +406,9 @@ def test_e6_requires_login_and_an_active_user(sapi, db, world):
     path = f"/api/dashboards/{dashboard_id}/guest-token"
     assert sapi(None, "POST", path).status_code == 401
     assert sapi("inactive", "POST", path).status_code == 403
+    # 본문이 붙어 있어도 인증 오류가 본문 검사(422)보다 먼저다.
+    assert sapi(None, "POST", path, content=b"x").status_code == 401
+    assert sapi("inactive", "POST", path, content=b"x").status_code == 403
 
 
 def test_e6_superset_down_is_503_and_rejection_is_502(sapi, db, world, fake):
@@ -447,7 +450,7 @@ def test_e6_rate_limit_is_per_user_30_per_60_seconds_with_retry_after(sapi, db, 
     assert blocked.status_code == 429
     assert err(blocked)["code"] == "GUEST_TOKEN_RATE_LIMITED"
     retry_after = int(blocked.headers["retry-after"])
-    assert retry_after == err(blocked)["details"]["retry_after"] == 31 - 1 + 0 or retry_after >= 1
+    assert retry_after == err(blocked)["details"]["retry_after"] == 31
     assert len([c for c in fake.calls if c.path == "/api/v1/security/guest_token/"]) == 30
     # 다른 사용자는 영향이 없다.
     assert sapi("entry", "POST", path).status_code == 200

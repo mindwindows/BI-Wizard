@@ -7,9 +7,8 @@ import re
 from app.ddl.names import view_name
 from app.superset.constants import SCHEMA
 
-# 가상 데이터셋 SQL 고정 템플릿(AP-2): 이 모양 하나뿐이다. `tests/test_superset_naming.py`가
-# 정규식으로
-# 고정하고, 등록은 서비스 계정만 한다.
+# 가상 데이터셋 SQL 고정 템플릿(AP-2): 이 모양 하나뿐이다. `tests/test_superset_units.py`가
+# 정규식으로 고정하고, 등록은 서비스 계정만 한다.
 VIRTUAL_SQL_PATTERN = re.compile(r"SELECT \* FROM bi_data\.dv_[1-9][0-9]*")
 
 # 데이터셋 번호 외의 열(06 §7): 팀 열과 행 번호 열의 표시 이름.
