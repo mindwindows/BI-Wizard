@@ -71,7 +71,7 @@ class GuestTokenIssuer:
                 raise
             except SupersetError as error:
                 if isinstance(error, SupersetLocalError):
-                    self._breaker.release_probe()  # Superset을 부르지 않은 로컬 오류: 기록하지 않는다.
+                    self._breaker.release_probe()  # 로컬 오류(Superset 미호출): 기록 안 함
                 else:
                     self._breaker.record_success()  # 연결은 된다. 거부는 입력·권한 문제다.
                 raise
