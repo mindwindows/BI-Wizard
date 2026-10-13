@@ -94,7 +94,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | `dashboard.create` | E4 | `create_dashboard` (`backend/app/superset/service.py`) | dashboard · 새 대시보드 번호 | `embedded_uuid`(E3가 모두에게 공개하는 값) |
 | `dashboard.update` | E5 | `update_dashboard` (같은 파일) | dashboard · 대시보드 번호 | `changes`(`name`·`is_active`). `is_active`가 `true`→`false`면 "연결 해제", `false`→`true`면 "다시 연결"로 화면이 읽는다 |
 - 멤버십은 별도 대상 종류 없이 `team`을 대상으로 하고 사용자는 `details.user_id`로 남긴다(복합 키라 `target_id` 하나로 못 가리키기 때문). 정의 변경은 열·수식도 `dataset`을 대상으로 하고 `column_id`를 `details`에 둔다(데이터셋 하나의 정의 이력이 `target_type=dataset`·`target_id` 필터 한 번으로 모인다).
-- **기록하지 않는 것(`03b` 29-1 ②):** 행 값 입력·수정·붙여넣기(C2~C4), 입장권 발급(E6), Superset 동기 상태 변경(`superset_datasets`)·E2 접수, 시작 시 뷰 재생성·재시도(`bump=False`, 05 D10: 정의가 안 바뀜), 팀 이름 변경 뒤 동기화 같은 후속 부수 효과, 시험용 사용자 시드(`seed-stub-users`, 개발·시험 전용 명령이라 운영 기록 대상이 아님 [제안]), `/dev/*` 스텁 신원 전환. 조회(GET)는 기록하지 않는다.
+- **기록하지 않는 것(`03b` 29-1 ②):** 행 값 입력·수정·붙여넣기(C2~C4), 입장권 발급(E6), Superset 동기 상태 변경(`superset_datasets`)·E2 접수, 시작 시 뷰 재생성·재시도(`bump=False`, 05 D10: 정의가 안 바뀜), 팀 이름 변경 뒤 동기화 같은 후속 부수 효과, 시험용 사용자 시드(`seed-stub-users`, 개발·시험 전용 명령이라 운영 기록 대상이 아님: 사용자 승인 2026-10-14, `03b` 29-5), `/dev/*` 스텁 신원 전환. 조회(GET)는 기록하지 않는다.
 
 ### 정확히 1건 / 0건 규칙 (시험으로 단정)
 1. **한 API 호출(또는 서버 명령 한 번) = 감사 행 최대 1건.** 여러 service 함수·표를 거쳐도 행위 이름은 호출이 대표하는 하나다. 예: D4는 열 INSERT + `formulas`·`formula_deps` + `dv_`·`de_` 재생성 + `def_hash` 기록이 한 트랜잭션이어도 `formula_column.add` 1건뿐이고, 훅 안의 `set_formula_result_type`·`clear_column_tag` 같은 내부 호출은 따로 기록하지 않는다. A4처럼 한 호출이 여러 필드(이름과 활성)를 바꾸면 **1건**에 `changes`로 함께 담는다. 기록은 호출당 한 번만 부르는 진입 지점(위 정의 변경 진입점, 또는 service 함수 끝)에 두고 repo·hook·내부 helper에서는 부르지 않는다.

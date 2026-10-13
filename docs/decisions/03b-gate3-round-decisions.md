@@ -582,12 +582,15 @@ PR #6(회고)이 병합돼 `origin/main`(`ce6038c`)에 `da3da70`이 포함됨을
 - 구현: backend(0007, 기록 훅, 관리자 목록 API), frontend(관리자 전용 감사 목록 화면), 관리자 Skill 갱신, 스크린샷 `fu2a-{화면}-{상태}.png`(목록, 필터, 빈 상태, 비관리자 거부).
 - 검증(마지막 커밋 기준, 제품 코드가 바뀌므로 전체 재검증): 실제 PG 전체 pytest, 차분 전수, 프런트 전체, 실제 Superset 스모크(STRIP true·false), 비밀값 검사. 추가 단정: 기록 대상 변경마다 감사 행이 정확히 1건, 롤백 시 감사 행 없음, `bi_app`의 UPDATE·DELETE 거부, `bi_readonly`의 `audit_log` 접근 거부, `details`에 비밀값·행 값 0건.
 - 통과 시 `harness/setup` → `main` 새 PR(병합 금지). 실패, 새 환경변수·새 의존성·기준과 다른 설정·위 승인 범위를 넘는 권한이 필요해지면 그 자리에서 멈추고 보고한다.
-### 29-3. 구현 전 확인 필요(사용자 확인 대기)
+### 29-3. 구현 전 확인 필요(2026-10-14 승인됨, 29-5)
 - **0007 `downgrade()`의 `op.drop_table("audit_log")`:** 결정 4의 "`DROP` 없음"은 `upgrade()` 기준으로 읽었다. 0003~0006과 같이 `downgrade()`는 표를 `DROP`하므로(D5 실질 `downgrade` 필수) `test_migrations.py`의 `DROP_APPROVED` 규칙(AGENTS.md 4절, `bi-review` 7-1)상 사용자 확인 대상이다. **승인으로 간주하지 않았다.** 구현은 `DROP_APPROVED`에 "사용자 확인 대기(03b 29-3)"로 표시하고 빈 시험 DB에서만 왕복 시험을 하며, 운영 적용은 확인 뒤에만 한다. 이 절의 답을 받으면 표시를 "사용자 승인"으로 고친다.
 ### 29-4. FU-2a 결과 (2026-10-13, backend-dev·frontend-dev 구현, reviewer·qa-engineer 검증)
 - **구현:** 29-1 범위 그대로. 새 환경변수·새 의존성·기준과 다른 설정 없음. 권한은 `GRANT SELECT, INSERT ON audit_log TO bi_app` 한 줄(시퀀스 권한 불필요, 시험으로 확인), `bi_readonly` 권한 없음, `audit_log`는 `public`.
 - **reviewer:** 차단 0·중요 0·경미 7. 반영: 프런트 시험 단정과 주석, 행위자 표시 구분(`actor === null`만 "서버 명령"), Skill 문구, 06 §5 소속 지정 잠금 한 줄, gate-status 갱신. 미반영(사용자 확인 대기): `seed-stub-users` 기록 제외 [제안]의 승인 표지(경미 5).
 - **QA(커밋 `81cb582`, 독립 전체 검증, 실패 0·미실행 0):** 위 gate-status 요약과 같다. 프런트 vitest는 총 667건 중 663 passed·4 skipped(구현 보고의 "667 passed"는 총 개수였다), 빌드 뒤 static-checks 13 passed. 메모리 렌더 중 샘플과 20만 행 부하는 측정하지 않았다.
 - **적용 후 보고 항목(보안·검사 강화, 새 변수·의존성 없음):** ① `apply_definition_change`가 감사 서술 없이 `bump=True`로 불리면 `AuditRecordError`(되돌리기: `dataset/definition.py`의 검사 한 줄 삭제), ② `audit.service` 오류 메시지에 값·식별자 모양이 아닌 키 이름을 싣지 않음(`_names` 되돌리기), ③ F1의 `actor_user_id`(1~2^31-1)·`target_id`(1~2^63-1) 범위를 쿼리에서 막아 422(`Query(ge, le)` 삭제로 되돌림), ④ `test_migrations.py`의 "확인 대기" 상태와 0007 하나로 고정하는 시험, ⑤ `set_member`가 `team_members` 행을 `FOR NO KEY UPDATE`로 잠그고 INSERT만/UPDATE만 하도록 바꿈(감사의 `role_from` 정확성과 동시 추가 경쟁 버그 수정, `access/repo.py`).
-- **사용자 확인 대기:** 29-3(0007 downgrade `drop_table`), `seed-stub-users` 기록 제외 승인 표지. 답을 받으면 `DROP_APPROVED` 0007 문구와 `test_pending_drop_confirmations_are_exactly_the_known_ones`를 함께 고친다.
+- **사용자 확인 대기였던 것:** 29-3(0007 downgrade `drop_table`), `seed-stub-users` 기록 제외 승인 표지. 2026-10-14에 둘 다 승인됐다(29-5).
 - **미시험·한계:** 하루 기록 건수·깊은 offset 속도, 503/422 화면 스크린샷(vitest로만), 사용자 200명 초과 행위자 선택 목록, BAT·Jenkins 실행(보류 그대로).
+### 29-5. 29-3·`seed-stub-users` 승인 (2026-10-14, 사용자 확인 2026-10-14)
+- **0007 `downgrade()`의 `op.drop_table("audit_log")` 승인.** `DROP_APPROVED`를 "DROP 확인: 사용자 승인 (2026-10-14, 03b 29-3 답 …)"으로 고쳤고, 대기 고정 시험(`test_pending_drop_confirmations_are_exactly_the_known_ones`)을 "대기 항목 없음"(`test_no_pending_drop_confirmations`)으로 바꿨다. 승인은 downgrade의 `DROP`에 한한다. upgrade에는 여전히 `DROP`이 없다. `skills/permission-management`에 경고 "0007 아래로 downgrade하면 `audit_log`가 모두 삭제됨. 실행 전 백업 필수"를 추가했다. 운영에서 downgrade를 하지 않는 원칙(D5, 수정 revision으로 대응)은 그대로다.
+- **`seed-stub-users`(개발·시험 전용)를 감사 기록 대상에서 제외하는 것을 승인.** 근거: 이 명령은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local`/`test`인 설정에서만 실행되며(그 밖은 거부, `bi-review` 7-5), 운영 DB에서는 스텁 신원이 비활성이라 운영 기록 대상이 될 수 없다. 04 §5-1의 [제안] 표지를 승인으로 고쳤다.

@@ -454,7 +454,7 @@ def main() -> int:
         step("alembic check", [f"{type(error).__name__}: {error}"])
 
     # 0007(감사 기록 표) 한 단계만: 내리면 0006 상태(감사 기록 표만 사라짐), 올리면 head와 같다.
-    # 주의: downgrade는 감사 기록 전체를 지운다(빈 시험 DB 전용, 03b 29-3 사용자 확인 대기).
+    # 주의: downgrade는 감사 기록 전체를 지운다(빈 시험 DB 전용, 03b 29-3 사용자 승인 2026-10-14).
     command.downgrade(config, "0006")
     step7 = take_snapshot(engine)
     step(

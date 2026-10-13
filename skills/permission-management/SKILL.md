@@ -151,7 +151,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 ### 운영 주의
 - **자동 삭제가 없다.** 기록은 계속 쌓이고 보존·삭제 정책은 후속이다. 하루 건수는 측정하지 않았다(확인 못 함). 새 기록이 계속 쌓이므로 `offset` 페이지 사이에 행이 밀릴 수 있고(알려진 한계), 아주 깊은 페이지의 속도는 측정하지 않았다.
 - **`bi_app`(서버)은 읽기와 추가만 한다**(UPDATE·DELETE·TRUNCATE 권한 없음). 잘못 남은 기록을 서비스로 고치거나 지울 수 없다. 정정 방법은 후속이다.
-- **`alembic downgrade`로 `0007`을 내리면 `audit_log` 표와 기록 전체가 지워진다.** 되돌리기용이 아니라 빈 시험 DB의 왕복 시험용이다. 운영에서는 하지 않고 문제는 수정 revision으로 대응한다. 이 `DROP`은 아직 사용자 확인 전이다(`docs/decisions/03b-gate3-round-decisions.md` 29-3, `backend/tests/test_migrations.py`의 `DROP_APPROVED`에 "사용자 확인 대기"로 기록).
+- **경고: `alembic downgrade`로 `0007` 아래로 내리면 `audit_log` 표와 기록이 모두 삭제된다. 실행 전 백업이 필수다.** 되돌리기용이 아니라 빈 시험 DB의 왕복 시험용이다. 운영에서는 하지 않고 문제는 수정 revision으로 대응한다. 이 `DROP`은 사용자가 승인했다(2026-10-14, `docs/decisions/03b-gate3-round-decisions.md` 29-3, `backend/tests/test_migrations.py`의 `DROP_APPROVED`에 "DROP 확인: 사용자 승인"으로 기록).
 - **`skills/admin-cleanup`의 수동 `psql` 정리는 감사 기록에 남지 않는다.** 서비스를 거치지 않기 때문이다. 정리한 사실은 변경 요약·운영 노트에 따로 적는다. 정리해도 `audit_log`의 `target_id`(외래키 없음)는 그대로 남는다.
 - 감사 기록은 변경과 같은 트랜잭션이라 **기록 INSERT가 실패하면 변경도 실패한다**(500 `INTERNAL_ERROR`, 감사 없는 변경은 없다). `occurred_at`은 DB의 트랜잭션 시작 시각이라 오래 걸린 요청은 조금 이른 시각으로 남는다.
 - 시작 자가 점검은 정적 표 정의에 `audit_log`가 있어 `0007`이 적용되지 않은 DB에서는 backend가 시작하지 않는다(`migrate`가 끝났는지 확인).

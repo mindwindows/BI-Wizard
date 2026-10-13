@@ -18,8 +18,8 @@
 downgrade는 표를 지운다(`DROP TABLE`, 인덱스·CHECK·권한도 함께 사라진다). 표를 참조하는 쪽은 없고
 `audit_log`만 `users`를 참조하므로 순서 문제가 없다. **경고: downgrade는 감사 기록 전체를 지운다.**
 되돌리기용이 아니라 왕복 시험용이다. 운영에서는 하지 않고 문제는 수정 revision으로 대응한다(D5).
-이 DROP은 `tests/test_migrations.py`의 `DROP_APPROVED`에 "사용자 확인 대기(03b 29-3)"로 기록돼 있고
-운영 적용은 사용자 확인 뒤에만 한다.
+이 DROP은 사용자가 2026-10-14에 승인했고(03b 29-3) `tests/test_migrations.py`의 `DROP_APPROVED`에
+"DROP 확인: 사용자 승인"으로 기록돼 있다. 운영에서는 하지 않고, 부득이하면 실행 전 백업이 필수다.
 
 Revision ID: 0007
 Revises: 0006

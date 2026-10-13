@@ -24,8 +24,8 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # test_migrations_do_not_manage_bi_data_objects가 막는다.
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
 # 여기에 기록한다. **확인이 아직 없는 항목**은 `DROP_PENDING_PREFIX`로 시작하는 문구로 기록하며
-# 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 대기 항목은 아래
-# `test_pending_drop_confirmations_are_exactly_the_known_ones`가 목록을 못 박는다.
+# 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 지금은 대기 항목이 없고(0007은
+# 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이 생기는 것을 막는다.
 DROP_PENDING_PREFIX = "사용자 확인 대기("
 DROP_APPROVED: dict[str, str] = {
     # 0003 downgrade()의 op.drop_table 3개(team_members, teams, users)는 06 §6의 표 역순 삭제다.
@@ -63,12 +63,11 @@ DROP_APPROVED: dict[str, str] = {
         "superset_datasets. 정적 표 대상, 동적 객체 아님)"
     ),
     # 0007 downgrade()의 op.drop_table 1개(audit_log). 03b 29-1 ④의 "DROP 없음"은 upgrade() 기준으로
-    # 읽었고 downgrade()의 DROP까지 승인한 문장인지 확인하지 못했다(03b 29-3). 그래서 **승인으로
-    # 쓰지 않고** 확인 대기로 기록한다: 왕복 시험은 빈 시험 DB에서만 하고, 운영 적용은 사용자 확인
-    # 뒤에만 한다. 답을 받으면 이 문구를 "DROP 확인: 사용자 승인 (날짜, 03b 29-3 답)"으로 고친다.
+    # 읽었고, downgrade()의 DROP은 사용자가 2026-10-14에 승인했다(03b 29-3).
     "20261013_0007_audit_log.py": (
-        "사용자 확인 대기(03b 29-3): downgrade()의 op.drop_table(audit_log) 1개는 확인 전이다. "
-        "왕복 시험은 빈 시험 DB 전용이고 운영 적용 금지. downgrade는 감사 기록 전체를 지운다"
+        "DROP 확인: 사용자 승인 (2026-10-14, 03b 29-3 답: 0007 downgrade()의 "
+        "op.drop_table(audit_log) 1개. 정적 표 대상, 동적 객체 아님. downgrade는 감사 기록 전체를 "
+        "지우므로 운영에서는 하지 않고 실행 전 백업 필수)"
     ),
 }
 
@@ -269,20 +268,20 @@ def test_drop_requires_recorded_user_approval():
             )
 
 
-def test_pending_drop_confirmations_are_exactly_the_known_ones():
-    """확인 대기 DROP은 03b 29-3의 0007 하나뿐이다. 새 대기 항목이 조용히 늘어나지 않게 한다.
+def test_no_pending_drop_confirmations():
+    """확인 대기 DROP은 없다. 0007(03b 29-3)은 2026-10-14에 승인됐다.
 
-    사용자 답을 받으면 DROP_APPROVED 문구를 승인으로 고치고 이 목록을 비운다(그때 이 시험도 고친다).
+    새 대기 항목이 조용히 생기지 않게 하고(대기 문구는 이 시험을 깨뜨린다), 모든 DROP 기록이
+    승인 문구인지 확인한다.
     """
     pending = {name for name, note in DROP_APPROVED.items() if _is_pending(note)}
-    assert pending == {"20261013_0007_audit_log.py"}
-    assert all(_is_approved(note) for name, note in DROP_APPROVED.items() if name not in pending), (
-        "대기도 승인도 아닌 DROP 기록이 있다"
-    )
+    assert pending == set()
+    assert all(_is_approved(note) for note in DROP_APPROVED.values()), "승인이 아닌 DROP 기록"
+    assert "2026-10-14" in DROP_APPROVED["20261013_0007_audit_log.py"]
 
 
-def test_pending_drop_is_only_in_downgrade_never_in_upgrade():
-    """0007은 upgrade()에 DROP이 없다(새 표와 인덱스만 추가, 03b 29-1 ④)."""
+def test_0007_drop_is_only_in_downgrade_never_in_upgrade():
+    """0007은 upgrade()에 DROP이 없다(새 표와 인덱스만 추가, 03b 29-1 ④). DROP은 downgrade뿐."""
     tree = _parse(next(p for p in _revision_files() if "_0007_" in p.name))
     assert _drop_findings_in(_function(tree, "upgrade")) == []
     assert _drop_findings_in(_function(tree, "downgrade")) != []
