@@ -17,6 +17,7 @@
 - **새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경만 적용 후 보고를 허용하며, 보고서에 "적용 후 보고 항목" 목록으로 따로 표시한다. (에이전트 정의 모델: 모든 에이전트가 sonnet이다. 2026-10-11 사용자 승인으로 env-engineer·qa-engineer·frontend-dev를 haiku에서 sonnet으로 바꿨다. 호출 시 모델 변경은 금지)
 - 파괴적 명령(`.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`)은 실행하지 않는다. 필요하면 먼저 묻는다.
 - `main`에 직접 커밋하거나 푸시하지 않는다.
+- **PR 병합은 "Create a merge commit"으로만 한다(Squash, Rebase 금지). 병합 뒤 "Delete branch"는 누르지 않는다.** PR이 열려 있는 동안 `harness/setup`에 push하는 커밋은 모두 그 PR에 포함된다. 다음 단위 커밋은 이전 PR이 병합된 뒤 `harness/setup`을 `origin/main`으로 fast-forward 한 다음에 시작한다(근거: 사용자 지시 2026-10-13).
 - 클라우드 세션은 Linux이므로 BAT 파일은 작성만 하고 실행 검증은 사용자에게 요청한다.
 
 **변경 이력**
@@ -42,3 +43,4 @@
 | 2026-10-12 | EW-5 하네스 문구 정리: D2(전용 schema `bi_data`)·앱 계정 분리(EW-1)·업로드 상한·9~11번 결정이 "Gate ③에서 정한다/옵션만 제시"로 남아 있던 문구를 결정됨으로 갱신, Gate ④ 진입 조건을 EW-1·3·4 완료와 EW-5~7 승인으로 정정, `superset-init`의 `migrate` 대기 반영 | `.claude/agents/architect.md`, `env-engineer.md`, `reviewer.md`, `.claude/skills/modularize`, `backend-fastapi`, `env-bootstrap`, `bi-wizard-dev` | EW-5(사용자 지시 2026-10-12), architect 조사 결과 반영 |
 | 2026-10-12 | EW-5~7 반영: 하네스 문구 추가 정리(`architect`·`modularize`에서 2·3·6·7·9~11번을 결정됨으로, 8번만 미결정), `qa-verification` 정리 명령을 `--profile test down`(실행 중 전체 스택 종료) → `stop`·`rm -f postgres-test`로 수정, `env-bootstrap`에 입장권 유효 시간 가드 추가 | `.claude/agents/architect.md`, `.claude/skills/modularize`, `qa-verification`, `env-bootstrap` | EW-7 reviewer(M1, R2)·EW-6 QA 지적 반영 |
 | 2026-10-12 | 1e 착수 승인(`docs/decisions/03b` 23절): 운영 런타임 라이선스 원칙에 이름 예외 1건(`certifi` MPL-2.0, `httpx` 필수 전이 의존성, 수정·재배포 금지) 추가, 훅 embedded uuid 대조는 H0(실측 2건이 모두 참일 때만 종결) | `.claude/skills/bi-review` | 사용자 결정(2026-10-12, 1e 설계 점검 결과 검토) |
+| 2026-10-13 | 브랜치·PR 규칙 추가: 병합은 merge commit만(Squash·Rebase 금지), Delete branch 금지, PR이 열린 동안의 push는 그 PR에 포함되며 다음 단위는 병합 뒤 `origin/main` fast-forward 후 시작 | `CLAUDE.md`, `docs/retrospective/fu1-harness-operations.md` | 사용자 지시(2026-10-13) |

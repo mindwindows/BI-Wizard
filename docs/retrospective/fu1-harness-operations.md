@@ -39,7 +39,9 @@
 | `main`에 직접 커밋·푸시하지 않는다. 작업 브랜치는 `harness/setup`, `claude/sharp-goldberg-hzsd6c`는 건드리지 않는다 | [CLAUDE.md](../../CLAUDE.md), [AGENTS.md](../../AGENTS.md) 8절, [gate-status.md](../gate-status.md) |
 | PR이 병합된 뒤에는 새 작업마다 `main` 최신에서 `harness/setup`을 다시 만든다(로컬에 미반영 커밋이 없을 때만) | [gate-status.md](../gate-status.md) "현재 상태" |
 | PR 병합은 사용자가 한다(세션은 병합하지 않는다). PR을 만들기 전 `main`이 `harness/setup`에 포함되는지 확인한다 | [03b 27절](../decisions/03b-gate3-round-decisions.md) 결정 6, 이 세션의 사용자 지시 |
-| **merge commit으로 병합, 병합 뒤 Delete branch 금지**(브랜치 `harness/setup`을 계속 쓰기 위함) | **저장소 문서에 규칙 원문 기록 없음.** 확인 가능한 사실은 `main`의 PR #2~#5 병합이 모두 `Merge pull request #N …` 병합 커밋 형태라는 것이다(병합 뒤 브랜치 잔존 여부는 저장소 기록에 없다). 규칙 자체는 이 세션의 사용자 지시에서 나왔다. 규칙 문서화는 "6. 다음에 다르게 할 점"에 올렸다 |
+| **PR 병합은 "Create a merge commit"으로만 한다. Squash와 Rebase는 금지.** | 근거: **사용자 지시 2026-10-13**(저장소 문서에는 이 세션 전까지 원문이 없었고 [CLAUDE.md](../../CLAUDE.md)에 이번에 추가). 확인 가능한 사실: `main`의 PR #2~#5 병합은 모두 `Merge pull request #N …` 병합 커밋 형태 |
+| **"Delete branch"는 누르지 않는다**(`harness/setup`을 계속 쓰기 위함) | 근거: **사용자 지시 2026-10-13**, [CLAUDE.md](../../CLAUDE.md) |
+| **PR이 열려 있는 동안 `harness/setup`에 push하는 커밋은 모두 그 PR에 포함된다.** 다음 단위 커밋은 이전 PR이 병합된 뒤 `harness/setup`을 `origin/main`으로 fast-forward 한 다음에 시작한다 | 근거: **사용자 지시 2026-10-13**, [CLAUDE.md](../../CLAUDE.md) |
 | 강제 push 금지, 로컬이 다르면 다른 작업 전에 동기화를 사용자에게 승인받는다 | [gate-status.md](../gate-status.md) "세션 시작 시 첫 확인", [03b 8절](../decisions/03b-gate3-round-decisions.md) |
 | 커밋 메시지는 한국어, 해당 Gate/단위 명시, 끝에 시스템이 안내한 `Co-Authored-By`·`Claude-Session` 줄 | [gate-status.md](../gate-status.md) "커밋 규칙" |
 
@@ -70,7 +72,7 @@ QA는 사용자의 `.env`를 만들거나 수정하지 않는다. `_workspace/qa
 
 | # | 사건 | 원인 | 바뀐 규칙 | 근거 |
 | --- | --- | --- | --- | --- |
-| 1 | 오래된 커밋에서 세션이 열려 에이전트 정의가 옛 버전이었다 | 새 세션이 `harness/setup`을 옛 커밋으로 여는 일이 반복됐다. 첫 하네스 커밋 `08c4ac0`의 정의 파일은 `env-engineer`·`qa-engineer`·`frontend-dev`가 `haiku`다(그 뒤 `sonnet`으로 승인 변경). **`08c4ac0`에서 세션이 열렸다는 사실 자체는 저장소 문서에 해시로 기록돼 있지 않다**(문서는 "로컬이 옛 커밋이라 정의 파일이 haiku였던 사례"라고만 적음) | 세션 시작 시 첫 확인(HEAD가 `origin/harness/setup` 최신인지), 새 세션은 `main`에서 시작해 `harness/setup`으로 전환, 동기화했다면 새 세션으로 재시작 | [gate-status.md](../gate-status.md) 6~8행, `git show 08c4ac0:.claude/agents/*.md` |
+| 1 | 오래된 커밋에서 세션이 열려 에이전트 정의가 옛 버전이었다 | 새 세션이 `harness/setup`을 옛 커밋으로 여는 일이 반복됐다. 첫 하네스 커밋 `08c4ac0`의 정의 파일은 `env-engineer`·`qa-engineer`·`frontend-dev`가 `haiku`다(그 뒤 `sonnet`으로 승인 변경). **`08c4ac0`에서 세션이 열렸다는 사실은 사용자 진술이다**(출처: 사용자 진술, 2026-10-13 — 세션이 오래된 커밋 `08c4ac0`에서 두 번 열렸고, 이것이 `main`에서 시작하는 규칙을 만든 계기. 저장소 문서에는 해시 없이 "로컬이 옛 커밋이라 정의 파일이 haiku였던 사례"라고만 적혀 있다) | 세션 시작 시 첫 확인(HEAD가 `origin/harness/setup` 최신인지), 새 세션은 `main`에서 시작해 `harness/setup`으로 전환, 동기화했다면 새 세션으로 재시작 | [gate-status.md](../gate-status.md) 6~8행, `git show 08c4ac0:.claude/agents/*.md` |
 | 2 | 에이전트 모델 캐시: env-engineer가 `haiku`로 실행돼 중단하고 정의와 같은 `sonnet`을 명시해 다시 호출했다 | 하네스가 정의를 캐시했다(문서의 서술) | 호출 정보의 실제 모델을 정의와 대조하고 다르면 사용자에게 알린다. 호출 때 `model`을 바꾸지 않는다 | [gate-status.md](../gate-status.md) 43행 |
 | 3 | 사전 승인 없는 변경 | (a) Gate ② 구축·검증 중 env-engineer·qa-engineer를 호출 때 `haiku`→`sonnet`으로 올렸다(사용자 지적, 2026-10-11). (b) 환경변수 4개와 포트·BAT 변경이 승인 전에 들어갔다. (c) EW-1에서 승인 목록 밖 항목(`hide_input_in_errors`, `REVOKE` 2줄과 `bi_data` 소유자 지정, `log_min_error_statement`, `AUTH_STUB_ENABLED` compose 필수 처리, `test-ci-validate-env.sh`)이 추가됐다 | 새 환경변수·운영 가이드 기준선과 다른 설정·에이전트 모델 변경은 적용 전 승인(Gate ② 결정 1), 그 뒤 EW-1 결과 검토에서 "사전 승인 필수 / 적용 후 보고 허용(보안 강화에 한함)"으로 다듬었다. 모델 변경은 정의 파일 변경을 사용자가 승인(AP-17) | [gate-status.md](../gate-status.md) 143·172행, [03b 7절](../decisions/03b-gate3-round-decisions.md), [CLAUDE.md](../../CLAUDE.md) 이력 |
 | 4 | 서비스 계정 이름이 기존 사람·관리자 계정과 충돌하면 덮어쓸 수 있었다("탈취") | 원인은 **기록 없음**이다. 03b 9-2는 "사람·관리자 계정 덮어쓰기 방지" 검사를 적용 후 보고 항목으로 추가했다고만 적었고 "탈취"라는 단어는 기록에 없다. EW-3은 QA 2회·reviewer 2회를 거쳤고 그 반영 목록에 "대소문자 이름 충돌 거부"가 있다(`f8c495e` 커밋 메시지, gate-status 54행) | 대소문자 무시 이름 충돌 거부, 기존 계정 사전 검사(관리자·허용 밖 역할·표식 없는 역할 0개·이메일 충돌 거부). 이어서 EW-4에서 표식(전용 이메일·이름) 있는 계정만 강제 복구, EW-5에서 **표식 없는 기존 계정은 역할과 관계없이 거부**(비밀번호 재설정 없이 exit 1)로 확대 | [03b 9-2·10-1·12-1](../decisions/03b-gate3-round-decisions.md), `f8c495e` 커밋 메시지, [AGENTS.md](../../AGENTS.md) 2절 |
@@ -154,7 +156,7 @@ QA는 사용자의 `.env`를 만들거나 수정하지 않는다. `_workspace/qa
 ### 4-3. 소요 시간
 - 전체 기간(커밋 시각 기준): 첫 하네스 문서 커밋 `41226cd` 2026-10-11 08:13(KST) ~ PR #5 병합 2026-10-13 21:05(KST, 병합 커밋 `ab04245`). PR #5는 2026-10-13 11:36 UTC 생성, 12:05 UTC 병합.
 - 최종 검증 구간의 커밋 시각(UTC): 전체 검증 대상 `96a5974` 06:36 → 수정 `ddf8c0f` 10:20 → `fcc8975` 11:27 → 인계 갱신 `b44abb7` 11:27. 이 시각 차이에는 QA 실행뿐 아니라 보고·사용자 결정 대기가 섞여 있다.
-- **전체 재검증과 범위 재검증 각각의 소요 시간은 기록 없음.** 장비·실행 시간 로그를 문서나 PR 본문에 남기지 않았다.
+- **전체 검증·범위 재검증 소요 시간(세션 보고 기준, 저장소 문서·로그에는 기록 없음):** 전체 검증 약 2시간(`96a5974`), 범위 재검증 약 11분(`ddf8c0f`). 출처: 사용자가 전달한 세션 보고.
 
 ---
 
@@ -200,7 +202,7 @@ CLAUDE.md와 docs/gate-status.md의 "다음 세션 인계"를 먼저 읽고 시�
 | 5 | 커밋 전에 `ruff check`·`ruff format --check`를 누가 고치든 돌린다(CI 밖 스크립트 포함) | [bi-wizard-dev](../../.claude/skills/bi-wizard-dev/SKILL.md) |
 | 6 | 결정이 바뀌면 같은 작업에서 `CLAUDE.md` 변경 이력과 스킬·에이전트 문구를 갱신해 낡은 문구가 남지 않게 한다(EW-5 정리 단위가 별도로 필요했음) | 사건 8 |
 | 7 | QA 비교 실험(예: 빅넘버 헤더)은 같은 시점·같은 데이터의 스택으로 비교한다 | PR #5 본문(40 vs 71.1k는 두 스택의 데이터가 달랐던 탓) |
-| 8 | "merge commit 병합, 병합 뒤 Delete branch 금지"를 `CLAUDE.md` 또는 `gate-status.md`에 규칙으로 기록한다(지금은 저장소 문서에 원문이 없다) | 1-5 표 |
+| 8 | (처리됨) PR 병합 방식·Delete branch·push 시점 규칙을 `CLAUDE.md`와 1-5에 기록했다. 처음에는 저장소 문서에 원문이 없었다 | 1-5 표, 사용자 지시 2026-10-13 |
 | 9 | 8번 인증은 `current_user` 한 곳으로 모아 스텁으로 진행한다(운영 어댑터는 후속에서 교체) | [gate-status.md](../gate-status.md) 미결정 8번(93행) |
 
 기록에 근거가 없어 적지 않은 것: 모델별 비용 비교, 에이전트별 호출 횟수·시간, 단위별 일정 대비 실적.
