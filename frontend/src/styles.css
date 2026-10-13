@@ -885,3 +885,142 @@ button.link {
 /* 선택한 계산 열 칸의 전체 값: 38자리도 잘리지 않게 줄을 바꾼다 */
 .selected-cell { margin-top: 8px; }
 .selected-cell-value { overflow-wrap: anywhere; user-select: all; }
+
+/* ---- 단위 1e: S7 대시보드, S8 연결 관리, S9 Superset 동기 ---- */
+.screen-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.screen-head h1 {
+  margin: 0;
+}
+
+.author-guide {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.author-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.author-guide ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.dashboards-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-top: 8px;
+}
+
+.dashboard-list {
+  flex: 0 0 260px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.dashboard-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dashboard-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid #e4e7eb;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dashboard-item:hover {
+  background: #f0f2f5;
+}
+
+.dashboard-item.active {
+  background: #d9e8fb;
+  font-weight: 600;
+}
+
+.dashboard-view {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-view h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+/* SDK iframe은 높이 100%로 채우므로 칸의 높이를 명시한다. */
+.embed-frame {
+  height: calc(100vh - 260px);
+  min-height: 720px;
+  border: 1px solid #cbd2d9;
+  background: #fff;
+}
+
+.embed-frame[hidden] {
+  display: none;
+}
+
+.embed-mount,
+.embed-mount iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.admin-help ol {
+  margin: 4px 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
+.inline-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-sync .toolbar {
+  gap: 12px;
+}
+
+.sync-registered {
+  background: #d7f0e0;
+  color: #14532d;
+}
+
+.sync-pending {
+  background: #fff3c4;
+  color: #6f4e00;
+}
+
+.sync-failed {
+  background: #fbd5d5;
+  color: #8a1c1c;
+}
+
+/* S9: 1920 폭에서 Superset 동기 구역과 뷰 재생성 구역을 나란히 둔다. */
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(760px, 1fr));
+  gap: 12px;
+  align-items: start;
+}

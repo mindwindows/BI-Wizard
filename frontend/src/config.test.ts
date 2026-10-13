@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { apiUrl, getConfig, normalizePath } from "./config";
+import { apiUrl, getConfig, hasSuperset, normalizePath, supersetDomain, supersetLink } from "./config";
 
 afterEach(() => {
   delete window.__APP_CONFIG__;
@@ -42,5 +42,35 @@ describe("apiUrl", () => {
     expect(getConfig()).toEqual({ basePath: "/bi-wizard", supersetRoot: "/bi-wizard/superset" });
     expect(apiUrl("/health")).toBe("/bi-wizard/api/health");
     expect(apiUrl("/health")).not.toMatch(/^https?:/);
+  });
+});
+
+describe("supersetDomain / supersetLink / hasSuperset", () => {
+  it("origin + 하위 경로로 조립하고 끝에 /를 붙이지 않는다", () => {
+    expect(supersetDomain("/bi-wizard/superset", "http://127.0.0.1:5173")).toBe("http://127.0.0.1:5173/bi-wizard/superset");
+    expect(supersetDomain("/superset", "https://bi.example.com")).toBe("https://bi.example.com/superset");
+  });
+
+  it("기본값은 config.js의 supersetRoot와 현재 페이지 origin을 쓴다", () => {
+    window.__APP_CONFIG__ = { basePath: "/bi-wizard", supersetRoot: "/bi-wizard/superset" };
+    expect(supersetDomain()).toBe(`${window.location.origin}/bi-wizard/superset`);
+    expect(supersetLink("/")).toBe("/bi-wizard/superset/");
+    expect(supersetLink("")).toBe("/bi-wizard/superset/");
+    expect(supersetLink("/chart/add")).toBe("/bi-wizard/superset/chart/add");
+    expect(hasSuperset()).toBe(true);
+  });
+
+  it("supersetRoot가 비었으면 설정이 없는 것으로 본다", () => {
+    window.__APP_CONFIG__ = { basePath: "", supersetRoot: "" };
+    expect(hasSuperset()).toBe(false);
+    window.__APP_CONFIG__ = { basePath: "", supersetRoot: "/a b" };
+    expect(hasSuperset()).toBe(false);
+  });
+
+  it("포털 하위 경로 유무와 상관없이 Superset 주소는 supersetRoot만으로 정해진다(STRIP true/false 동일)", () => {
+    window.__APP_CONFIG__ = { basePath: "/bi-wizard", supersetRoot: "/bi-wizard/superset" };
+    const withBase = supersetDomain();
+    window.__APP_CONFIG__ = { basePath: "", supersetRoot: "/bi-wizard/superset" };
+    expect(supersetDomain()).toBe(withBase);
   });
 });

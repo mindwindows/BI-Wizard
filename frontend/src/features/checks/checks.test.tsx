@@ -32,7 +32,8 @@ const CELLS = [
 ];
 
 async function open(path: string, handlers: Record<string, Handler>, me = ADMIN_ME): Promise<RecordedCall[]> {
-  const { calls } = installFetch({ ...HEALTH_HANDLERS, "GET /me": () => json(200, me), ...handlers });
+  // S9에는 1e의 'Superset 동기' 구역도 있다. 이 파일은 뷰 재생성 구역을 보므로 동기 목록은 빈 목록으로 둔다.
+  const { calls } = installFetch({ ...HEALTH_HANDLERS, "GET /me": () => json(200, me), "GET /superset/datasets": () => json(200, { items: [], total: 0, limit: 200, offset: 0 }), ...handlers });
   render(<App router={createTestRouter(BASE, `${BASE}${path}`)} />);
   return calls;
 }

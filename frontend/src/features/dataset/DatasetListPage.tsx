@@ -5,10 +5,24 @@ import { listAllTeams } from "../access/api";
 import { useMe } from "../access/MeContext";
 import type { Page, Team } from "../access/types";
 import { listDatasets } from "./api";
+import { listSupersetStatusFor } from "../superset/api";
+import { SyncBadge } from "../superset/SyncBadge";
+import type { SupersetDatasetStatus } from "../superset/types";
 import { formatDate } from "./format";
 import { DATE_UNIT_LABELS, type Dataset } from "./types";
 
 const PAGE_SIZE = 50;
+
+/** 동기 상태 칸. undefined = 읽는 중, null = 읽었지만 이 데이터셋의 상태를 못 받음. */
+function SyncCell({ status }: { status: SupersetDatasetStatus | null | undefined }) {
+  if (status === undefined) return <span className="muted">확인 중…</span>;
+  if (status === null) return <span className="muted">확인 못함</span>;
+  return (
+    <span title={status.last_error ?? undefined}>
+      <SyncBadge status={status.sync_status} />
+    </span>
+  );
+}
 
 interface LoadResult {
   key: string;
@@ -18,7 +32,8 @@ interface LoadResult {
 
 /**
  * S2 데이터셋 목록(콘솔형, B1). 정렬(내 소속 팀 먼저)은 서버가 하므로 받은 순서를 그대로 보여 준다.
- * 동기 상태 열은 GET /superset/datasets가 생기는 단위 1e에서 이 표에 결합한다(지금은 열도 호출도 없다).
+ * "동기 상태" 열(1e)은 표시된 쪽의 데이터셋 번호로 E1을 한 번 불러 결합한다(dataset은 superset을 읽지 않는다, 04 §3).
+ * 실패 사유(last_error)는 관리자에게만 서버가 채워 주며 목록에는 배지만 보이고 사유는 툴팁으로 둔다.
  */
 export function DatasetListPage() {
   const { state, workTeamId } = useMe();
@@ -49,6 +64,19 @@ export function DatasetListPage() {
       active = false;
     };
   }, [requestKey, teamId, offset]);
+
+  // 동기 상태: 표시된 쪽의 번호들로 한 번 읽는다. 못 읽어도 목록은 그대로 보여 주고 열에는 "확인 못함"을 둔다.
+  const pageIds = (result?.page?.items ?? []).map((dataset) => dataset.id).join(",");
+  const [sync, setSync] = useState<{ ids: string; map?: Map<number, SupersetDatasetStatus> } | null>(null);
+  useEffect(() => {
+    if (pageIds === "") return;
+    const controller = new AbortController();
+    listSupersetStatusFor(pageIds.split(",").map(Number), controller.signal)
+      .then((map) => !controller.signal.aborted && setSync({ ids: pageIds, map }))
+      .catch(() => !controller.signal.aborted && setSync({ ids: pageIds }));
+    return () => controller.abort();
+  }, [pageIds]);
+  const syncReady = sync !== null && sync.ids === pageIds;
 
   const me = state.status === "ready" ? state.me : null;
   const workMembership = me?.memberships.find((m) => m.team_id === workTeamId);
@@ -115,7 +143,7 @@ export function DatasetListPage() {
                   <th scope="col">날짜 단위</th>
                   <th scope="col">생성자</th>
                   <th scope="col">생성일</th>
-                  {/* 1e 연결 지점: GET /superset/datasets 응답을 dataset_id로 결합해 "동기 상태" 열을 여기에 추가한다. */}
+                  <th scope="col">동기 상태</th>
                 </tr>
               </thead>
               <tbody>
@@ -128,6 +156,9 @@ export function DatasetListPage() {
                     <td>{DATE_UNIT_LABELS[dataset.date_unit] ?? dataset.date_unit}</td>
                     <td>{dataset.created_by?.display_name ?? ""}</td>
                     <td>{formatDate(dataset.created_at)}</td>
+                    <td data-testid={`sync-${dataset.id}`}>
+                      <SyncCell status={syncReady ? (sync.map?.get(dataset.id) ?? null) : undefined} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

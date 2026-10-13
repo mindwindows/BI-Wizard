@@ -43,3 +43,25 @@ export function apiUrl(path: string, basePath: string = getConfig().basePath): s
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${basePath}${API_SEGMENT}${suffix}`;
 }
+
+/**
+ * Superset 하위 경로(supersetRoot)가 설정돼 있는지. 빈 값이면 임베드와 새 창 링크를 숨기고 안내한다.
+ * (포털과 Superset이 같은 origin을 쓰므로 Superset은 하위 경로에 있어야 한다.)
+ */
+export function hasSuperset(supersetRoot: string = getConfig().supersetRoot): boolean {
+  return supersetRoot !== "";
+}
+
+/**
+ * Embedded SDK의 supersetDomain. `${origin}${supersetRoot}` 형태이며 끝에 "/"를 붙이지 않는다.
+ * APP_PROXY_STRIP_PREFIX(true/false)는 브라우저→backend 경로만 바꾸고 Superset 경로는 접두를 유지하므로 값이 같다.
+ */
+export function supersetDomain(supersetRoot: string = getConfig().supersetRoot, origin: string = window.location.origin): string {
+  return `${origin}${supersetRoot}`;
+}
+
+/** Superset 새 창 링크. 경로 조립은 이 함수 한 곳에서 한다(path는 "/"로 시작하거나 비워 둔다). */
+export function supersetLink(path: string = "/", supersetRoot: string = getConfig().supersetRoot): string {
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  return `${supersetRoot}${suffix}`;
+}

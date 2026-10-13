@@ -73,9 +73,10 @@ describe("S2 데이터셋 목록 (B1)", () => {
     const { calls } = setup();
     await openList();
     const table = screen.getByRole("table", { name: "데이터셋 목록" });
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["이름", "팀", "날짜 단위", "생성자", "생성일"]);
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["이름", "팀", "날짜 단위", "생성자", "생성일", "동기 상태"]);
     const rows = within(table).getAllByRole("row").slice(1);
-    expect(rows.map((r) => within(r).getAllByRole("cell").map((c) => c.textContent))).toEqual([
+    // 여섯 번째 칸(동기 상태)은 별도 시험이 본다.
+    expect(rows.map((r) => within(r).getAllByRole("cell").slice(0, 5).map((c) => c.textContent))).toEqual([
       ["월별 매출", "영업", "월", "관리자 김", "2026-10-12"],
       ["일별 가동", "운영", "일", "입력자 박", "2026-09-01"],
     ]);
@@ -86,12 +87,21 @@ describe("S2 데이터셋 목록 (B1)", () => {
     expect(call.query.has("team_id")).toBe(false);
   });
 
-  it("동기 상태 열은 없고, 1e 전이라 /superset/datasets를 부르지 않는다", async () => {
-    const { calls } = setup();
+  it("동기 상태 열: 표시된 데이터셋 번호로 /superset/datasets를 한 번 읽어 결합한다(상세 시험은 status/sync.test.tsx)", async () => {
+    const { calls } = setup(MEMBER_ME, {
+      "GET /superset/datasets": () =>
+        page([
+          { dataset_id: 7, superset_name: "[영업] 월별 매출", sync_status: "registered", synced_at: null, last_error: null },
+          { dataset_id: 8, superset_name: "[운영] 일별 가동", sync_status: "pending", synced_at: null, last_error: null },
+        ]),
+    });
     await openList();
-    expect(screen.queryByRole("columnheader", { name: /동기/ })).toBeNull();
-    expect(screen.queryByText("준비 중")).toBeNull();
-    expect(calls.some((c) => c.path.startsWith("/superset"))).toBe(false);
+    expect(screen.getByRole("columnheader", { name: "동기 상태" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("sync-7").textContent).toBe("등록됨"));
+    expect(screen.getByTestId("sync-8").textContent).toBe("등록 대기");
+    const e1 = calls.filter((c) => c.path === "/superset/datasets");
+    expect(e1).toHaveLength(1);
+    expect(e1[0].query.get("dataset_ids")).toBe("7,8");
   });
 
   it("팀 필터를 고르면 team_id로 다시 읽고, '전체 팀'이면 team_id를 보내지 않는다", async () => {

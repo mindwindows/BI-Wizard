@@ -1,7 +1,8 @@
 import { useMe } from "../access/MeContext";
+import { SupersetSyncSection } from "./SupersetSyncSection";
 import { ViewsSection } from "./ViewsSection";
 
-/** S9 관리자 현황. 관리자만 쓴다(서버 권한이 최종 방어선). Superset 동기 구역은 단위 1e에서 이 자리에 채운다. */
+/** S9 관리자 현황. 관리자만 쓴다(서버 권한이 최종 방어선). Superset 동기 구역(1e)과 뷰 재생성 구역(1d)을 나란히 둔다. */
 export function AdminStatusPage() {
   const { state } = useMe();
   if (state.status !== "ready") return null;
@@ -18,8 +19,10 @@ export function AdminStatusPage() {
   return (
     <section data-testid="screen-S9" className="console">
       <h1>S9 관리자 현황</h1>
-      {/* 1e 연결 지점: Superset 동기 상태·다시 시도(GET /superset/datasets, POST /superset/sync) 구역을 이 위에 추가한다. */}
-      <ViewsSection />
+      <div className="status-grid">
+        <SupersetSyncSection />
+        <ViewsSection />
+      </div>
     </section>
   );
 }

@@ -28,6 +28,7 @@ const MESSAGES: Record<string, string> = {
   FORMULA_INVALID: "수식에 고칠 곳이 있어 저장하지 않았습니다. 표시된 위치의 안내를 확인해 주세요.",
   FORMULA_RUNTIME_ERROR: "수식을 계산할 수 없습니다. 수식을 확인하고 미리보기로 결과를 살펴봐 주세요.",
   PAYLOAD_TOO_LARGE: "보내는 데이터가 너무 큽니다. 줄여서 다시 시도해 주세요.",
+  GUEST_TOKEN_RATE_LIMITED: "요청이 너무 많습니다. 잠시 뒤 다시 시도해 주세요.",
   SUPERSET_REJECTED: "대시보드 서버가 요청을 거부했습니다. 관리자에게 문의해 주세요.",
   SUPERSET_UNAVAILABLE: "대시보드 서버에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요.",
   NETWORK_ERROR: "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
@@ -51,6 +52,7 @@ const FIELD_LABELS: Record<string, string> = {
   tag: "구분 태그",
   position: "위치",
   expected_version: "정의 버전",
+  embedded_uuid: "임베드 번호",
 };
 
 const FIELD_CODE_PHRASES: Record<string, string> = {
@@ -69,6 +71,7 @@ const EXISTS_BY_FIELD: Record<string, string> = {
   name: "같은 이름이 이미 있습니다.",
   login_id: "같은 로그인 ID의 사용자가 이미 있습니다.",
   display_name: "같은 이름의 열이 이미 있습니다.",
+  embedded_uuid: "이미 연결된 임베드 번호입니다. 목록에서 해제된 항목이 있으면 '다시 연결'을 쓰세요.",
 };
 
 /** 입력 검증 필드 코드(VALIDATION_ERROR details.fields[].code)의 쉬운 말. 모르는 코드는 undefined. */
@@ -136,7 +139,7 @@ export function describeApiError(error: unknown): string {
     const path = isRecord(error.details) && Array.isArray(error.details.path) ? error.details.path.filter((n): n is string => typeof n === "string") : [];
     return path.length > 0 ? `${MESSAGES.FORMULA_CIRCULAR} (순환 경로: ${path.join(" → ")})` : MESSAGES.FORMULA_CIRCULAR;
   }
-  if (error.code === "DEFINITION_BUSY" || error.code === "WRITE_BUSY" || error.code === "PREVIEW_BUSY") {
+  if (error.code === "DEFINITION_BUSY" || error.code === "WRITE_BUSY" || error.code === "PREVIEW_BUSY" || error.code === "GUEST_TOKEN_RATE_LIMITED") {
     const retry = isRecord(error.details) ? error.details.retry_after : undefined;
     return typeof retry === "number" && retry > 0 ? `${MESSAGES[error.code]} (약 ${Math.ceil(retry)}초 뒤)` : MESSAGES[error.code];
   }
