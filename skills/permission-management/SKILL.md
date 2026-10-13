@@ -36,7 +36,7 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 - A3 201 팀, A4 200 팀, A6 201 사용자(`memberships` 빈 목록), A7 200 사용자, A8 200 `{team_id, user_id, role}`, A9 204
 - 오류는 모두 `{"error": {"code", "message", "details", "request_id"}}`이고 `message`는 한국어다.
   - 409 `ALREADY_EXISTS` + `details.field`(`code`, `name`, `login_id`), 409 `LAST_ADMIN`(마지막 활성 관리자의 관리자 해제·비활성화 거부), 409 `TARGET_INACTIVE` + `details.field`(`team` 또는 `user`, 둘 다 비활성이면 `team`을 먼저 알린다), 404 `NOT_FOUND`(없는 팀·사용자·소속. 비활성 확인보다 먼저), 422 `VALIDATION_ERROR`(`details.fields[{field, code, message}]`. 깨진 JSON·잘못된 쿼리·경로 형식도 400이 아니라 이 코드다), 405 `METHOD_NOT_ALLOWED`, 503 `SERVICE_UNAVAILABLE`(DB 장애)
-- 저장 위치: `users`, `teams`, `team_members`(DB 권한은 6절). 팀 이름이 실제로 바뀌면 **커밋 뒤** 팀 단위 동기화를 요청한다(`DatasetSyncPort.request_team_sync`). 구현체는 FU-1e(Superset 가상 데이터셋 이름 갱신)이고 지금은 아무것도 하지 않는 기본 구현이며, 요청이 실패해도 응답은 그대로다(오류 클래스 이름만 로그).
+- 저장 위치: `users`, `teams`, `team_members`(DB 권한은 6절). 팀 이름이 실제로 바뀌면 **커밋 뒤** 팀 단위 동기화를 요청한다(`DatasetSyncPort.request_team_sync`). 구현체는 `backend/app/superset/worker.py`(Superset 가상 데이터셋 이름 갱신, `skills/dashboard-link`)이고 Superset 접속 설정이 없으면 아무것도 하지 않는 기본 구현이다. 요청 처리 중에는 Superset을 부르지 않으며(`pending` 표시와 대기열 투입뿐) 요청이 실패해도 응답은 그대로다(오류 클래스 이름만 로그).
 
 ## 5. 실행 방법
 ### 최초 관리자 만들기 (서버 명령, 비밀번호 없음)
@@ -180,4 +180,4 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - `dataset-definition`(FU-1b): 팀의 `definer` 역할로 데이터셋을 만들고(관리자도 그 팀 소속 `definer`여야 한다) 팀 이름·코드를 이 모듈의 읽기 service로만 읽는다. `/api/me`의 `memberships[].team_is_active`를 작업 팀 선택에 쓴다
 - `data-entry`(FU-1c): `입력(팀)` = 그 팀의 `entry` 또는 `definer`(관리자도 소속 역할이 있어야 한다)로 행 입력(C2~C4)을 판정하고, 행 조회(C1)는 인증된 활성 사용자 누구나 한다
 - `formula-column`(FU-1d): 수식 검사·미리보기·계산 열 만들기·고치기는 정의(팀) 권한, 수식 보기·오류 칸 점검은 인증된 모두, 뷰 점검·다시 시도는 관리자(05 §4). 이 Skill의 인증 스텁·시험 절차를 쓴다
-- `dashboard-link`(예정, FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고, 대시보드 연결·입장권 발급에 이 모듈의 신원·권한을 쓴다
+- `dashboard-link`(FU-1e): 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고(팀 단위, 그 팀의 데이터셋만), 대시보드 연결·입장권 발급(E1~E6, 권한 매트릭스에 포함)에 이 모듈의 신원·권한을 쓴다

@@ -29,6 +29,7 @@ class World:
     column_id: int = 0
     row_id: int = 0  # 권한 매트릭스용 기존 행
     formula_id: int = 0  # 권한 매트릭스용 기존 계산 열
+    dashboard_id: int = 0  # 권한 매트릭스용 연결된 대시보드(E5·E6)
 
 
 def build_world(db: Db) -> World:

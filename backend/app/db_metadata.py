@@ -2,7 +2,8 @@
 
 - `metadata`: `public` schema의 **정적 표**(팀, 사용자, 데이터셋 정의 등)만 등록한다.
   권한 관리 표(`users`, `teams`, `team_members`, revision 0003), 데이터셋·열 정의 표(0004),
-  수식 표(`formulas`, `formula_deps`, 0005)가 있다. 표를 추가하면
+  수식 표(`formulas`, `formula_deps`, 0005), Superset 등록 표(`superset_datasets`,
+  `superset_dashboards`, 0006)가 있다. 표를 추가하면
   revision(`backend/migrations/versions/`)과 함께 여기에 모델을 추가한다. 쓰기 책임은 소유
   모듈(04 §2-2)이 지고, 이 파일은 정의만 둔다(04 §2-1 core). 동적 객체(`bi_data` schema의
   `ds_<번호>` 표, `dv_<번호>`·`de_<번호>` 뷰)는 런타임 DDL 모듈이 만들며 이 `MetaData`에
@@ -33,6 +34,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    Uuid,
     false,
     func,
     true,
@@ -171,6 +173,41 @@ formula_deps = Table(
     Column("depends_on_column_id", Integer, ForeignKey("dataset_columns.id"), nullable=False),
     PrimaryKeyConstraint("column_id", "depends_on_column_id"),
     CheckConstraint("column_id <> depends_on_column_id", name="not_self"),
+)
+
+# --- Superset 등록 표(06 §2, revision 0006) ----
+# 동기 상태 열거. 값 추가는 CHECK 교체로 한다(06 §1).
+SYNC_STATUSES = ("pending", "registered", "failed")
+
+superset_datasets = Table(
+    "superset_datasets",
+    metadata,
+    Column("dataset_id", Integer, ForeignKey("datasets.id"), primary_key=True),
+    Column("superset_dataset_id", Integer, nullable=True),  # 등록 전 NULL
+    Column("display_name", Text, nullable=False),
+    Column("sync_status", Text, nullable=False, server_default="pending"),
+    Column("synced_at", DateTime(timezone=True), nullable=True),
+    Column("last_error", Text, nullable=True),  # 사유 요약만(SQL·비밀·응답 본문 금지)
+    CheckConstraint("sync_status IN ('pending', 'registered', 'failed')", name="sync_status"),
+)
+
+superset_dashboards = Table(
+    "superset_dashboards",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("name", Text, nullable=False),
+    # `uuid` 형은 값을 항상 소문자 정규형(하이픈 36자)으로 저장한다. CHECK는 한 번 더 두는
+    # 방어선이다.
+    Column("embedded_uuid", Uuid, nullable=False),
+    Column("is_active", Boolean, nullable=False, server_default=true()),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("embedded_uuid"),
+    # 정규식 연산자(~)와 ::text 캐스트는 PostgreSQL 전용이라 SQLite 시험용 create_all에서는 만들지
+    # 않는다(`ddl_if`). 실제 DB에서는 revision 0006이 같은 제약을 만든다.
+    CheckConstraint(
+        "embedded_uuid::text ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        name="embedded_uuid_format",
+    ).ddl_if(**_PG_ONLY),
 )
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).

@@ -228,6 +228,56 @@ def read_definition(session: Session, dataset_id: int) -> DefinitionView:
     )
 
 
+@dataclass(frozen=True)
+class SyncSource:
+    """Superset 동기화(superset 모듈)가 읽는 데이터셋 한 장면: 이름과 열 표시 이름뿐이다."""
+
+    dataset_id: int
+    team_id: int
+    team_name: str
+    name: str
+    # (열 번호, 표시 이름) — 원본·계산 열 모두
+    columns: tuple[tuple[int, str], ...]
+
+
+def read_sync_source(session: Session, dataset_id: int) -> SyncSource | None:
+    """Superset 동기화용: 팀 이름·데이터셋 이름·열 표시 이름을 잠금 없이 읽는다. 없으면 None."""
+    rows = repo.list_sync_names(session, dataset_ids=[dataset_id], team_id=None)
+    if not rows:
+        return None
+    row = rows[0]
+    return SyncSource(
+        dataset_id=int(row["id"]),
+        team_id=int(row["team_id"]),
+        team_name=row["team_name"],
+        name=row["name"],
+        columns=tuple(
+            (int(c["id"]), c["display_name"]) for c in repo.list_columns(session, dataset_id)
+        ),
+    )
+
+
+def list_sync_names(
+    session: Session, *, dataset_ids: list[int] | None = None, team_id: int | None = None
+) -> list[SyncSource]:
+    """Superset 동기 상태 목록(E1)용: 열 없이 이름만(팀 이름, 데이터셋 이름 순)."""
+    return [
+        SyncSource(
+            dataset_id=int(r["id"]),
+            team_id=int(r["team_id"]),
+            team_name=r["team_name"],
+            name=r["name"],
+            columns=(),
+        )
+        for r in repo.list_sync_names(session, dataset_ids=dataset_ids, team_id=team_id)
+    ]
+
+
+def list_team_dataset_ids(session: Session, team_id: int) -> list[int]:
+    """팀 이름이 바뀐 뒤 갱신할 데이터셋 번호(번호 오름차순)."""
+    return sorted(s.dataset_id for s in list_sync_names(session, team_id=team_id))
+
+
 def list_formula_columns(session: Session) -> list[RowMapping]:
     """오류 칸 점검(D7)용: 활성 데이터셋의 모든 계산 열(팀·데이터셋·열 순서)."""
     return repo.list_formula_columns(session)

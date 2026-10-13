@@ -321,6 +321,35 @@ def preview_busy() -> AppError:
     )
 
 
+def superset_unavailable() -> AppError:
+    """Superset 연결 불가·시간 초과·5xx(503). 내부 용어를 쓰지 않는다."""
+    return AppError(
+        ErrorCode.SUPERSET_UNAVAILABLE,
+        "대시보드 서비스에 연결할 수 없습니다. 잠시 후 다시 시도하세요.",
+        status_code=503,
+    )
+
+
+def superset_rejected() -> AppError:
+    """Superset이 요청을 받아들이지 않았다(인증·검증 거부, 502)."""
+    return AppError(
+        ErrorCode.SUPERSET_REJECTED,
+        "대시보드 서비스가 요청을 받아들이지 않았습니다. 관리자에게 문의하세요.",
+        status_code=502,
+    )
+
+
+def guest_token_rate_limited(retry_after: int) -> AppError:
+    """입장권 발급이 사용자별 한도를 넘었다(429, `Retry-After`)."""
+    return AppError(
+        ErrorCode.GUEST_TOKEN_RATE_LIMITED,
+        "요청이 너무 많습니다. 잠시 후 다시 시도하세요.",
+        status_code=429,
+        details={"retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 def last_admin() -> AppError:
     return AppError(
         ErrorCode.LAST_ADMIN,

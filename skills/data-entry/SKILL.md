@@ -248,6 +248,6 @@ curl -b jar -X POST -H 'content-type: application/json' \
 - `dataset-definition`: 열 타입·필수·범위 규칙·기준 날짜 열·날짜 단위의 정의. 행 쓰기가 같은 `datasets` 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다(`DEFINITION_BUSY`, `DATASET_HAS_ROWS`)
 - `permission-management`: 팀·소속·역할(`입력(팀)` 판정), 인증 스텁, 실제 DB 시험 방법
 - `formula-column`(FU-1d): 계산 열 값과 오류 칸을 `RowViewPort`(`FormulaRowView`)로 제공하고 이 Skill의 행 조회가 그것을 읽는다. 계산 열 키로 쓰기(C2~C4)는 `READ_ONLY`다
-- `dashboard-link`(예정, FU-1e): 입력된 행이 `dv_` 뷰를 거쳐 Superset 차트에 보인다
+- `dashboard-link`(FU-1e): 입력된 행이 `dv_` 뷰를 거쳐 Superset 차트에 보인다(뷰를 읽는 데이터셋이라 값 입력은 동기화를 요청하지 않고 정의가 바뀔 때만 요청한다)
 - `admin-cleanup`: 잘못 입력한 행·데이터셋의 수동 정리(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검, 실제 DB 시험 환경

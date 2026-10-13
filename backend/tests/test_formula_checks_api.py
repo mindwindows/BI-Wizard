@@ -539,9 +539,12 @@ def test_startup_failure_does_not_stop_the_app_and_is_reported_then_retried_with
         assert call("definer", "GET", "/api/checks/views").status_code == 403
         # 원인이 사라진 뒤 D10으로 다시 시도한다.
         spy.fail_for = set()
+        requested_before = list(sync.dataset_requests)
         retried = call("admin", "POST", "/api/checks/views/retry", json={})
         assert retried.status_code == 200
         assert retried.json() == {"rebuilt": 1, "views_failed_count": 0}
+        # 다시 만든 뷰는 Superset 열이 바뀌었을 수 있어 커밋 뒤 동기화를 요청한다.
+        assert sync.dataset_requests[len(requested_before) :] == [second]
         assert client.get("/api/health").json()["views_failed_count"] == 0
         assert call("admin", "GET", "/api/checks/views").json()["failed"] == []
         assert dataset_hash(db, second) != "stale"
@@ -555,16 +558,22 @@ def test_d10_retries_given_datasets_even_when_the_hash_is_equal_and_404s_unknown
     with start_app(db, stub_settings, sync) as client:
         call = make_caller(client)
         spy.calls.clear()
+        requested_before = len(sync.dataset_requests)
         response = call("admin", "POST", "/api/checks/views/retry", json={"dataset_ids": [first]})
         assert response.json() == {"rebuilt": 1, "views_failed_count": 0}
         assert sorted(spy.calls) == [("de", first), ("dv", first)]
+        assert sync.dataset_requests[requested_before:] == [first]
         none = call("admin", "POST", "/api/checks/views/retry", json={})
         assert none.json() == {"rebuilt": 0, "views_failed_count": 0}
+        assert sync.dataset_requests[requested_before:] == [
+            first
+        ]  # 다시 만든 것이 없으면 요청 없음
         spy.calls.clear()
         missing = call(
             "admin", "POST", "/api/checks/views/retry", json={"dataset_ids": [first, 999999]}
         )
         assert missing.status_code == 404 and spy.calls == []  # 아무것도 하기 전에 거부
+        assert sync.dataset_requests[requested_before:] == [first]
         bad = call("admin", "POST", "/api/checks/views/retry", json={"dataset_ids": "all"})
         assert bad.status_code == 422
     assert second

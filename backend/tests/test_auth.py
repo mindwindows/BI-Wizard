@@ -376,14 +376,22 @@ FORMULA_PATHS = {
     "/api/checks/views/retry",
 }
 
+SUPERSET_PATHS = {
+    "/api/superset/datasets",
+    "/api/superset/sync",
+    "/api/dashboards",
+    "/api/dashboards/{dashboard_id}",
+    "/api/dashboards/{dashboard_id}/guest-token",
+}
 
-def test_real_app_routes_are_public_health_plus_access_dataset_entry_and_formula(
+
+def test_real_app_routes_are_public_health_plus_access_dataset_entry_formula_and_superset(
     make_settings, sqlite_engine
 ):
-    """경로는 공개 2개와 A1~A9·B1~B6·C1~C4·D1~D10뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
+    """경로는 공개 2개와 A1~A9·B1~B6·C1~C4·D1~D10·E1~E6뿐이다. 스텁이 꺼져 있으면 /dev/*가 없다."""
     app = create_app(make_settings(), engine=sqlite_engine)
     assert set(app.openapi()["paths"]) == (
-        PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS | ENTRY_PATHS | FORMULA_PATHS
+        PUBLIC_PATHS | ACCESS_PATHS | DATASET_PATHS | ENTRY_PATHS | FORMULA_PATHS | SUPERSET_PATHS
     )
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []

@@ -1,6 +1,6 @@
 """정적 표 DB 권한·제약 시험(06 §2 매트릭스, 03b 3-6 BY4). 실제 PostgreSQL(tmpfs 시험 DB) 필요.
 
-0003·0004·0005 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
+0003~0006 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
 없음을 확인한다.
 권한 판정은 `has_table_privilege`/`has_column_privilege`로 전부 대조하고, 대표 동작은 실제로 실행해
 거부 코드(42501)와 제약 위반 코드(23xxx)를 확인한다.
@@ -21,6 +21,8 @@ from app.db_metadata import (
     datasets,
     formula_deps,
     formulas,
+    superset_dashboards,
+    superset_datasets,
     team_members,
     teams,
     users,
@@ -39,6 +41,8 @@ TABLES = {
     "dataset_columns": dataset_columns,
     "formulas": formulas,
     "formula_deps": formula_deps,
+    "superset_datasets": superset_datasets,
+    "superset_dashboards": superset_dashboards,
 }
 # bi_app의 표 단위 권한(has_table_privilege). UPDATE는 열 단위라 표 단위로는 없다.
 TABLE_PRIVILEGES = {
@@ -51,6 +55,9 @@ TABLE_PRIVILEGES = {
     # 0005: formulas는 DELETE 없음, formula_deps는 의존 목록을 다시 쓰므로 DELETE가 있다.
     "formulas": {"SELECT", "INSERT"},
     "formula_deps": {"SELECT", "INSERT", "DELETE"},
+    # 0006: 삭제는 FU-1에 없다(DELETE 없음). UPDATE는 열 단위다.
+    "superset_datasets": {"SELECT", "INSERT"},
+    "superset_dashboards": {"SELECT", "INSERT"},
 }
 ALL_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
 # bi_app이 UPDATE할 수 있는 열(06 §2). 나머지 열은 불변이다.
@@ -65,6 +72,15 @@ UPDATABLE = {
     # column_id는 불변(수식은 열에 붙박이). formula_deps는 행을 지우고 다시 넣는다(UPDATE 없음).
     "formulas": {"expression", "ast", "ast_hash"},
     "formula_deps": set(),
+    # dataset_id 불변, id·embedded_uuid·created_at 불변(포털 id와 Superset uuid는 짝이다).
+    "superset_datasets": {
+        "superset_dataset_id",
+        "display_name",
+        "sync_status",
+        "synced_at",
+        "last_error",
+    },
+    "superset_dashboards": {"name", "is_active"},
 }
 
 
@@ -123,6 +139,8 @@ def test_immutable_columns_are_exactly_the_ones_without_update_privilege():
     assert immutable["team_members"] == {"team_id", "user_id"}
     assert immutable["formulas"] == {"column_id"}
     assert immutable["formula_deps"] == {"column_id", "depends_on_column_id"}
+    assert immutable["superset_datasets"] == {"dataset_id"}
+    assert immutable["superset_dashboards"] == {"id", "embedded_uuid", "created_at"}
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -532,7 +550,14 @@ def test_formula_constraints(pg_owner_engine, pg_app_engine, clean_pg):
 
 
 def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
-    for table in ("datasets", "dataset_columns", "formulas", "formula_deps"):
+    for table in (
+        "datasets",
+        "dataset_columns",
+        "formulas",
+        "formula_deps",
+        "superset_datasets",
+        "superset_dashboards",
+    ):
         with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
             c.execute(sa.schema.DDL(f"TRUNCATE TABLE {table}"))
         assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
@@ -543,7 +568,15 @@ def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
 
 def test_bi_readonly_cannot_read_static_tables(pg_owner_engine, pg_readonly_engine, clean_pg):
     _prepare(pg_owner_engine)
-    for table in (users, teams, team_members, formulas, formula_deps):
+    for table in (
+        users,
+        teams,
+        team_members,
+        formulas,
+        formula_deps,
+        superset_datasets,
+        superset_dashboards,
+    ):
         with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
             c.execute(select(table))
         assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE, table.name
@@ -795,3 +828,142 @@ def _add_admin(owner: Engine, login_id: str) -> int:
             .values(login_id=login_id, display_name=login_id, is_admin=True)
             .returning(users.c.id)
         ).scalar_one()
+
+
+# --- 0006: Superset 등록 표 ----
+
+
+def _prepare_superset(owner: Engine) -> dict[str, int]:
+    """데이터셋 둘과 대시보드 하나, 첫 데이터셋의 동기 상태 한 줄을 만든다."""
+    ids = _prepare_datasets(owner)
+    with owner.begin() as c:
+        c.execute(
+            insert(superset_datasets).values(
+                dataset_id=ids["ds"], display_name="[T1] D1", sync_status="pending"
+            )
+        )
+        dash = c.execute(
+            insert(superset_dashboards)
+            .values(name="월간", embedded_uuid="11111111-2222-3333-4444-555555555555")
+            .returning(superset_dashboards.c.id)
+        ).scalar_one()
+    return {**ids, "dash": dash}
+
+
+DENIED_SUPERSET = [
+    pytest.param(
+        lambda i: update(superset_datasets).values(dataset_id=i["ds2"]),
+        id="superset_datasets.dataset_id",
+    ),
+    pytest.param(lambda i: delete(superset_datasets), id="superset_datasets.delete"),
+    pytest.param(
+        lambda i: update(superset_dashboards).values(
+            embedded_uuid="99999999-2222-3333-4444-555555555555"
+        ),
+        id="superset_dashboards.embedded_uuid",
+    ),
+    pytest.param(lambda i: update(superset_dashboards).values(id=999), id="superset_dashboards.id"),
+    pytest.param(
+        lambda i: update(superset_dashboards).values(created_at=func.now()),
+        id="superset_dashboards.created_at",
+    ),
+    pytest.param(lambda i: delete(superset_dashboards), id="superset_dashboards.delete"),
+]
+
+
+@pytest.mark.parametrize("make_statement", DENIED_SUPERSET)
+def test_bi_app_denied_superset_operations(
+    pg_owner_engine, pg_app_engine, clean_pg, make_statement
+):
+    ids = _prepare_superset(pg_owner_engine)
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(make_statement(ids))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+
+
+def test_bi_app_allowed_superset_operations(pg_owner_engine, pg_app_engine, clean_pg):
+    """업서트(`INSERT … ON CONFLICT DO UPDATE`)가 열 단위 UPDATE 권한으로 동작한다(pg8000)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    ids = _prepare_superset(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        for status in ("registered", "failed"):
+            statement = pg_insert(superset_datasets).values(
+                dataset_id=ids["ds2"], display_name="[T1] D2", sync_status="pending"
+            )
+            c.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[superset_datasets.c.dataset_id],
+                    set_={
+                        "display_name": statement.excluded.display_name,
+                        "sync_status": status,
+                        "superset_dataset_id": 7,
+                        "synced_at": func.now(),
+                        "last_error": None if status == "registered" else "UNAVAILABLE_CONNECT: x",
+                    },
+                )
+            )
+        c.execute(
+            update(superset_dashboards)
+            .where(superset_dashboards.c.id == ids["dash"])
+            .values(name="바뀐 이름", is_active=False)
+        )
+        assert c.execute(select(func.count()).select_from(superset_datasets)).scalar_one() == 2
+
+
+def test_superset_constraints(pg_owner_engine, pg_app_engine, clean_pg):
+    ids = _prepare_superset(pg_owner_engine)
+    # 같은 uuid: 유일
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(superset_dashboards).values(
+                name="중복", embedded_uuid="11111111-2222-3333-4444-555555555555"
+            )
+        )
+    assert sqlstate(error.value) == UNIQUE_VIOLATION
+    # 대문자로 넣어도 uuid 형이 같은 값(소문자 정규형)으로 저장하므로 소문자 값과 유일 위반이다
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(
+            insert(superset_dashboards).values(
+                name="대문자", embedded_uuid="AAAAAAAA-2222-3333-4444-555555555555"
+            )
+        )
+        c.execute(
+            insert(superset_dashboards).values(
+                name="대문자2", embedded_uuid="aaaaaaaa-2222-3333-4444-555555555555"
+            )
+        )
+    assert sqlstate(error.value) == UNIQUE_VIOLATION
+    with pg_app_engine.begin() as c:
+        c.execute(
+            insert(superset_dashboards).values(
+                name="대문자", embedded_uuid="BBBBBBBB-2222-3333-4444-555555555555"
+            )
+        )
+        texts = [
+            r[0] for r in c.execute(select(sa.cast(superset_dashboards.c.embedded_uuid, sa.Text)))
+        ]
+    assert "bbbbbbbb-2222-3333-4444-555555555555" in texts
+    assert all(t == t.lower() and len(t) == 36 for t in texts)
+    # sync_status는 CHECK
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(update(superset_datasets).values(sync_status="done"))
+    assert sqlstate(error.value) == CHECK_VIOLATION
+    assert "ck_superset_datasets_sync_status" in str(error.value.orig)
+    # 없는 데이터셋: 외래키
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(insert(superset_datasets).values(dataset_id=999999, display_name="x"))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    # 행 하나가 이미 있는 데이터셋: 기본키
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(insert(superset_datasets).values(dataset_id=ids["ds"], display_name="x"))
+    assert sqlstate(error.value) == UNIQUE_VIOLATION
+    # 기본값: 등록 대기
+    with pg_app_engine.begin() as c:
+        c.execute(insert(superset_datasets).values(dataset_id=ids["ds2"], display_name="[T1] D2"))
+        status = c.execute(
+            select(superset_datasets.c.sync_status).where(
+                superset_datasets.c.dataset_id == ids["ds2"]
+            )
+        ).scalar_one()
+    assert status == "pending"

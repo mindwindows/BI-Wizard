@@ -20,7 +20,7 @@ _SEGMENT_PATTERN = re.compile(r"[A-Za-z0-9._~-]+")
 
 # backend가 Superset에 접속하는 내부 주소. compose 서비스 이름 기반의 코드 상수다
 # (AP-12, 환경변수로 만들지 않는다). 실제 주소는 이 값 + Settings.superset_app_root다.
-# HTTP 호출 코드는 FU-1e에서 만든다.
+# HTTP 호출 코드는 `app/superset/`(FU-1e)다.
 SUPERSET_INTERNAL_URL = "http://superset:8088"
 
 # 인증 스텁(시험용 사용자로 접속자를 흉내 내는 임시 기능)을 켤 수 있는 APP_ENV. 이 목록 밖이면
@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     postgres_app_password: SecretStr | None = None
     postgres_owner_password: SecretStr | None = None
 
-    # Superset 접속 설정(EW-3, 사용은 FU-1e). 누락은 compose가 막는다
+    # Superset 접속 설정(EW-3, 사용은 `app/superset/`, FU-1e). 누락은 compose가 막는다
     # (backend의 다섯 값은 `${VAR:?}` 필수). Settings 자체는 값이 없어도 로드되고(None),
     # 필요한 쪽이 사용 시점에 없으면 실패한다(Superset 불가가 포털 시작을 막지 않는다, 08 §2-1).
     # 값이 있으면 엄격하게 검증한다: 경로는 빈 값·형식 오류 거부,

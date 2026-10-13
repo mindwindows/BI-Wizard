@@ -239,8 +239,22 @@ def get_views_status(session: SessionDep, status: StatusDep) -> ViewsStatusOut:
 
 @router.post("/checks/views/retry", dependencies=[Depends(require_admin)])
 def retry_views(
-    body: ViewsRetryBody, engine: EngineDep, hooks: HooksDep, status: StatusDep
+    body: ViewsRetryBody,
+    engine: EngineDep,
+    hooks: HooksDep,
+    status: StatusDep,
+    sync: SyncDep,
+    background: BackgroundTasks,
 ) -> ViewsRetryOut:
-    """D10: 실패한 뷰를 요청 안에서 끝까지 다시 만든다(해시가 같아도 다시 만든다)."""
+    """D10: 실패한 뷰를 요청 안에서 끝까지 다시 만든다(해시가 같아도 다시 만든다).
+
+    뷰가 다시 만들어진 데이터셋은 Superset 가상 데이터셋의 열이 바뀌었을 수 있으므로 커밋 뒤
+    동기화를 요청한다(성공한 것만, 실패 때는 요청하지 않는다).
+    """
+    targets = list(body.dataset_ids) if body.dataset_ids is not None else status.failed_ids()
     rebuilt = reconcile.retry(engine, hooks, status, body.dataset_ids)
+    still_failed = set(status.failed_ids())
+    for dataset_id in dict.fromkeys(targets):
+        if dataset_id not in still_failed:
+            background.add_task(run_dataset_sync_request, sync, dataset_id)
     return ViewsRetryOut(rebuilt=rebuilt, views_failed_count=status.failed_count)

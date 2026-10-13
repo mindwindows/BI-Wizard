@@ -26,6 +26,8 @@ from app.db_metadata import (
     formula_deps,
     formulas,
     metadata,
+    superset_dashboards,
+    superset_datasets,
     team_members,
     teams,
     users,
@@ -263,6 +265,8 @@ def drop_dynamic_tables(engine: Engine) -> None:
 def clear_static_tables(engine: Engine) -> None:
     drop_dynamic_tables(engine)
     with engine.begin() as conn:
+        conn.execute(delete(superset_datasets))
+        conn.execute(delete(superset_dashboards))
         conn.execute(update(datasets).values(base_date_column_id=None))  # 순환 FK 해제
         conn.execute(delete(formula_deps))
         conn.execute(delete(formulas))

@@ -1,5 +1,5 @@
 """권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
-A1~A9, B1~B6, C1~C4, D1~D10, DV1~DV3.
+A1~A9, B1~B6, C1~C4, D1~D10, E1~E6, DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
@@ -9,6 +9,7 @@ A1~A9, B1~B6, C1~C4, D1~D10, DV1~DV3.
 - 입력(enter): **그 데이터셋 팀의 입력자 또는 정의 담당자**. 관리자도 그 팀 소속이 아니면 거부.
 """
 
+import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -24,6 +25,8 @@ from app.db_metadata import (
     datasets,
     formula_deps,
     formulas,
+    superset_dashboards,
+    superset_datasets,
     team_members,
     teams,
     users,
@@ -279,6 +282,54 @@ ENDPOINTS: list[Endpoint] = [
         200,
         ADMIN,
     ),
+    (
+        "E1",
+        "GET",
+        "/api/superset/datasets",
+        lambda w: "/api/superset/datasets",
+        lambda w: None,
+        200,
+        READER,
+    ),
+    (
+        "E2",
+        "POST",
+        "/api/superset/sync",
+        lambda w: "/api/superset/sync",
+        lambda w: {"dataset_ids": [w.dataset_id]},
+        202,
+        ADMIN,
+    ),
+    ("E3", "GET", "/api/dashboards", lambda w: "/api/dashboards", lambda w: None, 200, READER),
+    (
+        "E4",
+        "POST",
+        "/api/dashboards",
+        lambda w: "/api/dashboards",
+        lambda w: {"name": "새 대시보드", "embedded_uuid": "aaaaaaaa-1111-2222-3333-444444444444"},
+        201,
+        ADMIN,
+    ),
+    (
+        "E5",
+        "PATCH",
+        "/api/dashboards/{dashboard_id}",
+        lambda w: f"/api/dashboards/{w.dashboard_id}",
+        lambda w: {"name": "바뀐 이름"},
+        200,
+        ADMIN,
+    ),
+    # 이 매트릭스의 앱에는 Superset 접속 설정이 없어 권한을 통과한 읽기 사용자는 503(연동 미설정)을
+    # 받는다. 실제 발급 200과 속도 제한은 test_superset_api.py가 가짜 Superset으로 확인한다.
+    (
+        "E6",
+        "POST",
+        "/api/dashboards/{dashboard_id}/guest-token",
+        lambda w: f"/api/dashboards/{w.dashboard_id}/guest-token",
+        lambda w: None,
+        503,
+        READER,
+    ),
 ]
 
 
@@ -297,8 +348,22 @@ def mworld(db: Db, world: World) -> World:
     formula_id = db.add_formula_column(
         dataset_id, "계산 열", ast, expression="[기존 열] + 1", position=1, deps=(column_id,)
     )
+    with db.writer.begin() as conn:  # E5·E6 대상: 연결된 대시보드 하나
+        dashboard_id = conn.execute(
+            sa.insert(superset_dashboards)
+            .values(
+                name="기존 대시보드",
+                embedded_uuid=uuid.UUID("11111111-2222-3333-4444-555555555555"),
+            )
+            .returning(superset_dashboards.c.id)
+        ).scalar_one()
     return replace(
-        world, dataset_id=dataset_id, column_id=column_id, row_id=1, formula_id=formula_id
+        world,
+        dataset_id=dataset_id,
+        column_id=column_id,
+        row_id=1,
+        formula_id=formula_id,
+        dashboard_id=dashboard_id,
     )
 
 
@@ -332,6 +397,8 @@ def _snapshot(db: Db):
         db.rows(dataset_columns, dataset_columns.c.id),
         db.rows(formulas, formulas.c.column_id),
         db.rows(formula_deps, formula_deps.c.column_id, formula_deps.c.depends_on_column_id),
+        db.rows(superset_datasets, superset_datasets.c.dataset_id),
+        db.rows(superset_dashboards, superset_dashboards.c.id),
         dynamic,
     )
 

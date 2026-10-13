@@ -35,6 +35,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 | D8 `GET /api/datasets/{id}/formula-errors` | `column_id?`, `limit`, `offset` |
 | D9 `GET /api/checks/views` | - |
 | D10 `POST /api/checks/views/retry` | `{dataset_ids?}` (생략 = 실패 전부) |
+- D10은 뷰를 다시 만든 데이터셋마다 커밋 뒤 Superset 동기화를 요청한다(`skills/dashboard-link`, 다시 만들지 못한 것은 요청하지 않는다).
 - 알 수 없는 필드는 422다(`extra=forbid`). 위치(`start`/`end`)는 **0부터 시작하는 코드포인트 번호이고 `end`는 포함하지 않는다**(자바스크립트 UTF-16 번호가 아니다: 이모지 같은 보충 평면 문자 뒤에서는 화면이 변환한다).
 
 ## 4. 출력
@@ -96,7 +97,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 #### S9 현황의 '뷰 재생성' 구역 (`/admin/status`, 관리자만)
 - 수식 계산에 쓰는 데이터 구조(뷰)를 만들지 못한 데이터셋을 보여 준다(`GET /api/checks/views`): `확인한 데이터셋 N개 중 실패 M개`, 실패 목록(데이터셋 / 사유 / 실패한 시각). 실패가 있어도 다른 기능은 동작한다(해당 데이터셋의 계산 열 값만 안 보일 수 있다).
 - **이 데이터셋 다시 시도** 또는 **실패한 항목 전부 다시 시도**(`POST /api/checks/views/retry`, 전부는 본문 `{}`)를 누르면 요청 안에서 끝까지 처리한 결과(`N개를 다시 만들었습니다. 아직 M개가 실패 상태입니다`)를 보이고 현황을 다시 읽는다. 다른 정의 변경과 겹치면 `DEFINITION_BUSY` 안내.
-- 사유는 서버가 준 사유 코드·요약 그대로 보인다. 실패 상세는 서버 메모리에만 있어 서버를 다시 시작하면 사라진다(07 §8). Superset 동기 구역은 단위 1e가 이 위에 추가한다.
+- 사유는 서버가 준 사유 코드·요약 그대로 보인다. 실패 상세는 서버 메모리에만 있어 서버를 다시 시작하면 사라진다(07 §8). Superset 동기 구역은 같은 화면(S9)에서 이 구역 옆에 있다(`skills/dashboard-link`).
 - **AI/개발자(HTTP, 개발·시험 스텁 신원)**: 쿠키 `bi_stub_login=<login_id>`(스텁 전용 `permission-management` 참조). 아래 `$B`는 `http://127.0.0.1:<FRONTEND_PORT>${APP_BASE_PATH}`(nginx 경유), 데이터셋 번호 `$D`.
   ```
   # D2 검사
@@ -226,4 +227,4 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 - `permission-management`: 수식 편집·미리보기는 정의(팀) 권한, 열람은 인증된 모두. PostgreSQL 시험 절차(8절)를 쓴다.
 - `local-environment`: `/api/health`의 `views`·`views_failed_count`, 시작 자가 점검(`standard_conforming_strings`), 마이그레이션 왕복.
 - `admin-cleanup`: 잘못 만든 계산 열·뷰를 관리자가 수동으로 정리하는 절차(`formulas`·`formula_deps`·`dv_`·`de_`).
-- `dashboard-link`(예정, FU-1e): `dv_<번호>` 뷰가 Superset 가상 데이터셋의 원천이다.
+- `dashboard-link`(FU-1e): `dv_<번호>` 뷰가 Superset 가상 데이터셋의 원천이다(고정 SQL `SELECT * FROM bi_data.dv_<번호>`). 계산 열이 추가·수정되어 커밋되면 같은 요청이 동기화를 요청하고, Superset 열 표시 이름에 계산 열 이름이 `c_<번호>`로 붙는다.

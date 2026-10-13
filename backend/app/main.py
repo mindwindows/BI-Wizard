@@ -36,6 +36,8 @@ from app.formula.router import router as formula_router
 from app.formula.rowview import FormulaRowView
 from app.formula.status import ViewStatus
 from app.health import router as health_router
+from app.superset.router import router as superset_router
+from app.superset.runtime import SupersetServices, build_superset_services
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,7 @@ PROTECTED_ROUTERS: tuple[APIRouter, ...] = (
     dataset_router,
     entry_router,
     formula_router,
+    superset_router,
 )
 DEV_ROUTERS: tuple[APIRouter, ...] = (stub_router,)
 
@@ -78,12 +81,17 @@ def create_app(
     dataset_sync: DatasetSyncPort | None = None,
     definition_hooks: DefinitionHooks | None = None,
     row_view: RowViewPort | None = None,
+    superset: SupersetServices | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     logging.basicConfig(level=settings.log_level)
     # 뷰 대조 결과(프로세스 메모리)와 정의 변경 훅 등록부. 훅을 직접 받지 않으면 formula 훅을
     # 등록하고 시작할 때 뷰를 대조한다(04 §3, 07 §8). 시험이 훅을 직접 넘기면 그 훅만 쓴다.
     view_status = ViewStatus()
+    # Superset 연동(동기화 작업 스레드·입장권 발급기·속도 제한기). 접속 설정 5개가 모두 있을 때만
+    # 만들고,
+    # 없으면 None이다(동기화 요청은 no-op, E6은 503). 시험은 모의 전송을 쓴 부품을 직접 넘긴다.
+    superset_services = superset if superset is not None else build_superset_services(settings)
     own_hooks = definition_hooks is None
     hooks = definition_hooks if definition_hooks is not None else DefinitionHooks()
     if own_hooks:
@@ -103,6 +111,11 @@ def create_app(
             # 활성 데이터셋마다 정의 해시를 대조해 다른 뷰만 다시 만든다. 실패해도 시작을 막지
             # 않는다.
             await run_in_threadpool(reconcile_all, app.state.engine, hooks, view_status)
+        if superset_services is not None:
+            # 작업 스레드를 띄울 뿐 기다리지 않는다: Superset이 멈춰 있어도 시작과 다른 API는
+            # 영향이 없다(P4). Superset 준비 대기와 시작 대조는 이 스레드 안에서 한다(08 §2-1).
+            superset_services.sync.bind(app.state.engine)
+            superset_services.sync.start()
         logger.info(
             "backend 시작: env=%s, 하위 경로=%r, 프록시가 접두를 떼는가=%s, 받는 API 접두=%s",
             settings.app_env,
@@ -115,6 +128,8 @@ def create_app(
         try:
             yield
         finally:
+            if superset_services is not None:
+                await run_in_threadpool(superset_services.stop)
             app.state.engine.dispose()
 
     docs_enabled = settings.app_debug
@@ -132,7 +147,10 @@ def create_app(
     app.state.identity_adapter = (
         build_stub_adapter(settings) if settings.auth_stub_enabled else None
     )
-    app.state.dataset_sync = dataset_sync or NoopDatasetSync()
+    app.state.superset = superset_services
+    app.state.dataset_sync = dataset_sync or (
+        superset_services.sync if superset_services is not None else NoopDatasetSync()
+    )
     app.state.definition_hooks = hooks
     app.state.view_status = view_status
     # 무거운 읽기(미리보기·오류 칸 조회·계산 열이 있는 행 조회)의 전역 동시 상한(07 §5).

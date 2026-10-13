@@ -62,7 +62,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - 공통 형태(05 §1):
   - Column `{id, display_name, type, kind, required, rules, tag, position}`
   - Dataset `{id, team_id, name, date_unit, base_date_column_id, status, def_version, created_by{id, display_name}, created_at}` (`created_at`은 `+09:00` ISO 8601)
-- B1 200 `{items[Dataset], total, limit, offset}` (동기 상태는 없다: Superset 동기 상태는 FU-1e의 `GET /api/superset/datasets`에서 화면이 결합한다).
+- B1 200 `{items[Dataset], total, limit, offset}` (동기 상태는 이 응답에 없다: Superset 동기 상태는 `GET /api/superset/datasets`(E1, `skills/dashboard-link`)에서 화면이 `dataset_id`로 결합한다).
 - B2 201, B4 200, B3 200: Dataset + `team{id, code, name}` + `columns[Column]`(순서: `position`, `id`) + `permissions{define, enter}`(내 권한. 관리자라도 소속이 없으면 둘 다 false).
 - B5 201, B6 200: `{column, def_version}` (새 정의 버전).
 - 오류(`{"error": {"code", "message", "details", "request_id"}}`, 한국어 `message`):
@@ -78,7 +78,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
   - `datasets`(`def_version`, 정의 해시 `def_hash`), `dataset_columns`(`public`, `bi_owner` 소유, 06 §2).
   - 원본 표 `bi_data.ds_<데이터셋 번호>`: `row_id`(bigint identity, PK)와 원본 열 `c_<열 번호>`(`text`→`text`, `number`→`numeric`, `date`→`date`, `boolean`→`boolean`, `choice`→`text`, 모두 NULL 허용 = 빈 칸은 미입력). 소유자는 `bi_app`, `bi_readonly`(Superset)는 `SELECT`만.
   - **기준 날짜 열**을 지정하면 그 열이 `NOT NULL`이 되고 CHECK `ck_ds_<번호>_period`(기간의 첫날: 월 단위면 1일, 연 단위면 1월 1일. `timestamp` 변환을 거쳐 세션 시간대와 무관)와 유일 인덱스 `ux_ds_<번호>_period`(같은 기간 하나)가 걸린다. 해제하거나 단위를 바꾸면 풀리고 다시 걸린다. 기준 날짜 열은 입력 때 필수로 취급한다(`required` 플래그 값은 그대로 두고 입력 단위가 `REQUIRED`로 판정, FU-1c).
-- 부수 효과: 정의가 **실제로 바뀌고 커밋된 뒤에만** `DatasetSyncPort.request_dataset_sync`를 백그라운드로 요청한다(Superset 가상 데이터셋 동기화, 구현은 FU-1e이고 지금은 아무것도 하지 않는 기본 구현). 요청이 실패해도 응답은 그대로다. 아무것도 바뀌지 않은 PATCH(같은 값)는 버전을 올리지 않고 동기화도 요청하지 않는다.
+- 부수 효과: 정의가 **실제로 바뀌고 커밋된 뒤에만** `DatasetSyncPort.request_dataset_sync`를 백그라운드로 요청한다(Superset 가상 데이터셋 동기화. 구현은 `backend/app/superset/worker.py`이고 Superset 접속 설정이 없으면 아무것도 하지 않는 기본 구현이다. 요청은 `pending` 표시와 대기열 투입뿐이라 Superset이 멈춰도 응답은 그대로다, `skills/dashboard-link`). 요청이 실패해도 응답은 그대로다. 아무것도 바뀌지 않은 PATCH(같은 값)는 버전을 올리지 않고 동기화도 요청하지 않는다.
 
 ### 정의 버전과 정의 변경 진입점 (동시 편집)
 - 정의를 바꾸는 모든 요청(B4~B6, D4·D5)은 한 함수(`backend/app/dataset/definition.py`)를 지난다: ① `lock_timeout 1초` ② `datasets` 행을 `FOR NO KEY UPDATE`로 잠금(읽기는 막지 않는다) ③ `expected_version` 확인 ④ 열 변경(정의 행 + 원본 표 DDL) ⑤ 정의 변경 훅(formula 모듈이 등록한다: 저장된 수식 전부를 현재 열 이름·태그로 다시 컴파일해 `formulas`·`formula_deps`를 쓰고 `dv_<번호>`·`de_<번호>` 뷰를 같은 트랜잭션에서 만든다. 수식이 깨지면 `FORMULA_INVALID`/`FORMULA_CIRCULAR`로 열 변경까지 전부 롤백) ⑥ `def_version + 1`과 `def_hash`(훅이 돌려준 뷰 정의 해시) 기록 후 커밋. 데이터셋 등록(B2)도 같은 훅을 불러 수식이 없어도 `dv_`(팀 열 포함)·`de_`를 만든다. 중간에 실패하면 모두 롤백된다(원본 표 DDL 포함).
@@ -95,7 +95,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 1. 상단 메뉴 "데이터셋"을 연다. 표에 이름·팀·날짜 단위(일·월·연)·생성자·생성일이 나온다(`GET /api/datasets`). 내 소속 팀의 데이터셋이 위에 오는 정렬은 서버가 하며 화면은 받은 순서 그대로 보여 준다. 이름을 누르면 작업공간(S4)이 열린다.
 2. "팀 필터"에서 팀을 고르면 그 팀만(`team_id`), "전체 팀"이면 전부 보인다. 50개씩 쪽 이동("이전"/"다음", `limit`/`offset`)이고 필터를 바꾸면 첫 쪽으로 돌아간다.
 3. "새 데이터셋" 버튼은 **상단 "작업 팀"에서 내가 정의 담당자(`definer`)이고 그 팀이 활성일 때만** 보인다. 아니면 "데이터셋은 작업 팀의 정의 담당자만 만들 수 있습니다." 안내가 나온다. 이것은 편의이며 최종 방어선은 서버 권한 검사다.
-4. 동기 상태(Superset) 열은 아직 없다(단위 1e에서 `GET /api/superset/datasets`를 결합해 추가). 지금은 그 API를 호출하지 않는다.
+4. 동기 상태(Superset) 열: 표시된 쪽의 `dataset_id`들로 `GET /api/superset/datasets`(E1)를 한 번 불러 "등록 대기 / 등록됨 / 등록 실패"를 결합한다(`skills/dashboard-link`). 실패 사유는 관리자에게만 보인다.
 5. 비어 있으면 "등록된 데이터셋이 없습니다", 읽기 실패는 쉬운 문구와 "다시 불러오기".
 
 #### S3 데이터셋 만들기 (`/datasets/new`)
@@ -224,6 +224,6 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
 - `data-entry`(FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
 - `formula-column`(FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `formulas`·`formula_deps`, `dv_`·`de_` 뷰, `def_hash`(뷰 정의 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
-- `dashboard-link`(예정, FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다
+- `dashboard-link`(FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다. 열 표시 이름은 Superset에서 `c_<번호>` 열의 이름이 되고(전체 열 한 번에 갱신), 이름 변경(B4)·열 추가(B5)·열 이름 변경(B6)도 같은 경로로 반영된다
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검 대응

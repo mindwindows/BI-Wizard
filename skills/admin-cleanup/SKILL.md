@@ -34,19 +34,19 @@ FU-1에는 열·수식·데이터셋을 지우거나 보관하는 수단이 없�
 2. 영향 범위를 센다.
    - 입력 데이터: `SELECT count(*) FROM bi_data.ds_<DS>;` (데이터셋 삭제면 이 행이 모두 사라진다. 필요하면 먼저 내보내 둔다.)
    - 연결된 수식 열: `SELECT column_id FROM formula_deps WHERE depends_on_column_id = <COL>;` 열을 지우려는데 결과가 있으면 **멈추고** 그 수식 열을 먼저 정리한다(순환·깨짐 방지). 이 확인을 건너뛰어도 `formula_deps`의 외래키가 `DELETE FROM dataset_columns`를 막는다(확인됨).
-   - Superset 등록(FU-1e 이후에만, 그 전에는 `superset_datasets` 표가 없어 건너뜀): `SELECT superset_dataset_id, display_name, sync_status FROM superset_datasets WHERE dataset_id = <DS>;`
+   - Superset 등록(`0006` 이후: `superset_datasets` 표가 있다. `skills/dashboard-link`): `SELECT superset_dataset_id, display_name, sync_status FROM superset_datasets WHERE dataset_id = <DS>;`
    - Superset 차트·대시보드: Superset 관리자 화면에서 그 데이터셋을 쓰는 차트·대시보드를 본다(API 사용 시 `GET /api/v1/dataset/<SS>/related_objects`, 필터 전용 대시보드는 누락될 수 있어 "N개 이상"으로 본다, 03c X-23).
 3. 영향을 요청자에게 알리고 **확정 답을 받는다.** 차트·대시보드는 포털이 대신 고치거나 지우지 않는다(`03b` 3-6). 필요하면 담당자가 먼저 정리한다.
 
 ### 5-2. 데이터셋 삭제 (순서 고정)
 **파괴적 명령입니다. 5-1의 확인을 받은 뒤에만 실행합니다.**
-1. **Superset 등록 정리(FU-1e 이후에만, 그 전에는 등록이 없어 건너뜀):** Superset 관리자 화면(또는 서비스 계정 API)에서 가상 데이터셋 `<SS>`를 삭제한다. 차트가 있어도 막히지 않고 차트는 "데이터 없음" 상태가 된다(03c X-23). 뷰를 먼저 지우면 refresh가 원인 없는 422가 되므로 Superset을 먼저 한다.
+1. **Superset 등록 정리(`0006` 이후):** Superset 관리자 화면(또는 서비스 계정 API)에서 가상 데이터셋 `<SS>`를 삭제한다. 차트가 있어도 막히지 않고 차트는 "데이터 없음" 상태가 된다(03c X-23). 뷰를 먼저 지우면 refresh가 원인 없는 422가 되므로 Superset을 먼저 한다.
 2. **포털 등록 표 + 동적 객체를 한 트랜잭션으로** (`bi_owner`로 접속한 하나의 `BEGIN … COMMIT`, 실패하면 `ROLLBACK`; DDL도 롤백된다, 03c X-1):
    - `UPDATE datasets SET base_date_column_id = NULL WHERE id = <DS>;` (기준 열 순환 FK 해제)
    - `DELETE FROM formula_deps WHERE column_id IN (SELECT id FROM dataset_columns WHERE dataset_id = <DS>);`
    - `DELETE FROM formulas WHERE column_id IN (SELECT id FROM dataset_columns WHERE dataset_id = <DS>);`
    - `DELETE FROM dataset_columns WHERE dataset_id = <DS>;`
-   - (FU-1e 이후에만) `DELETE FROM superset_datasets WHERE dataset_id = <DS>;`
+   - `DELETE FROM superset_datasets WHERE dataset_id = <DS>;` (`0006` 이후. 이 행을 먼저 지우지 않으면 `datasets` 삭제가 외래키로 막힌다. 포털 쪽 `bi_app`은 DELETE 권한이 없으므로 `bi_owner`로 한다)
    - `DROP VIEW IF EXISTS bi_data.de_<DS>; DROP VIEW IF EXISTS bi_data.dv_<DS>; DROP TABLE bi_data.ds_<DS>;` (`CASCADE`는 쓰지 않는다. 걸리는 객체가 있으면 원인을 확인한다. `ds_`를 지우면 그 표의 기간 인덱스·제약도 함께 사라진다. 뷰는 `ds_`에 의존하므로 반드시 먼저 지운다.)
    - `DELETE FROM datasets WHERE id = <DS>;`
    - 정적 표 `DELETE`는 `bi_owner`가 소유자라 가능하다. `bi_data`의 객체는 `bi_app`이 소유하지만 `bi_owner`는 schema 소유자라 `DROP`할 수 있다(03c X-14).
@@ -85,5 +85,5 @@ FU-1에는 열·수식·데이터셋을 지우거나 보관하는 수단이 없�
 ## 9. 연관 Skill
 - `dataset-definition`: 데이터셋·열 정의 기능과 이름 규칙(06)의 출처.
 - `formula-column`: 계산 열(`formulas`·`formula_deps`)과 뷰 `dv_`·`de_`의 정의, 시작 시 해시 대조와 D10 다시 시도.
-- `dashboard-link`: Superset 등록·동기 상태·다시 시도.
+- `dashboard-link`: Superset 등록·동기 상태·다시 시도, 대시보드 연결(`superset_dashboards`)과 임베드 해제 절차. 정리 중에는 작업 스레드가 지워진 데이터셋의 요청을 조용히 건너뛴다.
 - 정적 표 구조나 `bi_data` 이름 규칙이 바뀌면(FU-2 보관·삭제 정책 포함) 이 Skill도 함께 고친다.

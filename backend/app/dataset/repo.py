@@ -104,6 +104,27 @@ def list_datasets(
     return list(session.execute(stmt).mappings().all()), int(total)
 
 
+def list_sync_names(
+    session: Session, *, dataset_ids: Sequence[int] | None, team_id: int | None
+) -> list[RowMapping]:
+    """Superset 동기화가 읽는 이름 목록(팀 이름, 데이터셋 이름 순). 필터는 선택이다."""
+    stmt = (
+        select(
+            datasets.c.id,
+            datasets.c.team_id,
+            datasets.c.name,
+            teams.c.name.label("team_name"),
+        )
+        .join(teams, teams.c.id == datasets.c.team_id)
+        .order_by(by_name(teams.c.name), by_name(datasets.c.name), datasets.c.id)
+    )
+    if dataset_ids is not None:
+        stmt = stmt.where(datasets.c.id.in_(list(dataset_ids)))
+    if team_id is not None:
+        stmt = stmt.where(datasets.c.team_id == team_id)
+    return list(session.execute(stmt).mappings().all())
+
+
 def list_columns(session: Session, dataset_id: int) -> list[RowMapping]:
     stmt = (
         select(*_COLUMN_FIELDS)
