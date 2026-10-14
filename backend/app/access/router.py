@@ -24,7 +24,7 @@ from app.access.schemas import (
     UserOut,
     UserUpdate,
 )
-from app.auth import CurrentUserDep
+from app.auth import CurrentUser, CurrentUserDep
 from app.auth.permissions import require_admin
 from app.core.deps import get_session
 from app.core.pagination import LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, Page
@@ -34,6 +34,9 @@ router = APIRouter(tags=["access"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 AdminDep = Depends(require_admin)
+# 관리자 전용 쓰기는 행위자(감사 기록)가 필요해 의존성의 사용자를 받는다. 권한 검사는 의존성이라
+# 본문 검증보다 먼저 실행된다.
+AdminUser = Annotated[CurrentUser, Depends(require_admin)]
 LimitParam = Annotated[int, Query(ge=1, le=LIST_LIMIT_MAX)]
 OffsetParam = Annotated[int, Query(ge=0)]
 
@@ -77,17 +80,18 @@ def list_teams(
     return Page[TeamOut](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.post("/teams", status_code=201, dependencies=[AdminDep])
-def create_team(body: TeamCreate, session: SessionDep) -> TeamOut:
+@router.post("/teams", status_code=201)
+def create_team(body: TeamCreate, session: SessionDep, admin: AdminUser) -> TeamOut:
     """A3: 팀 만들기(코드는 불변)."""
-    return TeamOut(**service.create_team(session, code=body.code, name=body.name))
+    return TeamOut(**service.create_team(session, admin, code=body.code, name=body.name))
 
 
-@router.patch("/teams/{team_id}", dependencies=[AdminDep])
+@router.patch("/teams/{team_id}")
 def update_team(
     team_id: int,
     body: TeamUpdate,
     session: SessionDep,
+    admin: AdminUser,
     sync: SyncDep,
     background: BackgroundTasks,
 ) -> TeamOut:
@@ -95,6 +99,7 @@ def update_team(
     sent = body.model_fields_set
     change = service.update_team(
         session,
+        admin,
         team_id,
         name=body.name if "name" in sent else None,
         is_active=body.is_active if "is_active" in sent else None,
@@ -120,12 +125,13 @@ def list_users(
     return Page[UserOut](items=items, total=total, limit=limit, offset=offset)
 
 
-@router.post("/users", status_code=201, dependencies=[AdminDep])
-def create_user(body: UserCreate, session: SessionDep) -> UserOut:
+@router.post("/users", status_code=201)
+def create_user(body: UserCreate, session: SessionDep, admin: AdminUser) -> UserOut:
     """A6: 사용자 사전 등록."""
     return UserOut(
         **service.create_user(
             session,
+            admin,
             login_id=body.login_id,
             display_name=body.display_name,
             is_admin=body.is_admin,
@@ -133,13 +139,14 @@ def create_user(body: UserCreate, session: SessionDep) -> UserOut:
     )
 
 
-@router.patch("/users/{user_id}", dependencies=[AdminDep])
-def update_user(user_id: int, body: UserUpdate, session: SessionDep) -> UserOut:
+@router.patch("/users/{user_id}")
+def update_user(user_id: int, body: UserUpdate, session: SessionDep, admin: AdminUser) -> UserOut:
     """A7: 표시 이름·관리자·활성 변경. 마지막 활성 관리자는 해제·비활성할 수 없다."""
     sent = body.model_fields_set
     return UserOut(
         **service.update_user(
             session,
+            admin,
             user_id,
             display_name=body.display_name if "display_name" in sent else None,
             is_admin=body.is_admin if "is_admin" in sent else None,
@@ -148,14 +155,16 @@ def update_user(user_id: int, body: UserUpdate, session: SessionDep) -> UserOut:
     )
 
 
-@router.put("/teams/{team_id}/members/{user_id}", dependencies=[AdminDep])
-def put_member(team_id: int, user_id: int, body: MemberRoleIn, session: SessionDep) -> MemberOut:
+@router.put("/teams/{team_id}/members/{user_id}")
+def put_member(
+    team_id: int, user_id: int, body: MemberRoleIn, session: SessionDep, admin: AdminUser
+) -> MemberOut:
     """A8: 소속 추가 또는 역할 변경."""
-    return MemberOut(**service.set_member(session, team_id, user_id, body.role))
+    return MemberOut(**service.set_member(session, admin, team_id, user_id, body.role))
 
 
-@router.delete("/teams/{team_id}/members/{user_id}", status_code=204, dependencies=[AdminDep])
-def delete_member(team_id: int, user_id: int, session: SessionDep) -> Response:
+@router.delete("/teams/{team_id}/members/{user_id}", status_code=204)
+def delete_member(team_id: int, user_id: int, session: SessionDep, admin: AdminUser) -> Response:
     """A9: 소속 해제."""
-    service.remove_member(session, team_id, user_id)
+    service.remove_member(session, admin, team_id, user_id)
     return Response(status_code=204)

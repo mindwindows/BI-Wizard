@@ -5,7 +5,10 @@
   사용자 SQL이 없다: 변환기가 SQLAlchemy 표현식으로 만든다. 실제 방어선은 이 구조이고 읽기 전용
   지정은 이중 장치다(07 §5, X-2).
 - 계산 열 만들기(D4)·고치기(D5)는 dataset의 정의 변경 진입점 안에서 한다: 잠금 -> 버전 확인 -> 수식
-  컴파일 -> 열 행 추가/형 갱신(dataset service) -> **훅**(수식·의존·뷰, `hook.py`) -> `def_hash`.
+  컴파일 -> 열 행 추가/형 갱신(dataset service) -> **훅**(수식·의존·뷰, `hook.py`) -> `def_hash`
+  -> 감사 기록. 감사 기록은 이 모듈이 직접 부르지 않고 진입점에 `AuditSpec`(행위 서술)만 넘긴다
+  (04 §5-1: 한 호출 = 한 건, 같은 수식·같은 결과 형으로 다시 저장하면 0건). 수식 원문·열 이름으로
+  풀어 쓴 텍스트는 기록하지 않고 열 번호와 `ast_hash`만 남긴다.
 - DB 예외는 사용자에게 `FORMULA_RUNTIME_ERROR`로만 정규화하고 클래스 이름·SQLSTATE만 로그에 남긴다
   (SQL·상수·입력 값 금지).
 """
@@ -24,6 +27,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app import ddl
+from app.auth.models import CurrentUser
 from app.core.db_errors import sqlstate
 from app.core.errors import (
     formula_invalid,
@@ -291,6 +295,7 @@ def create_formula_column(
     hooks: DefinitionHooks,
     dataset_id: int,
     *,
+    actor: CurrentUser,
     expected_version: int,
     display_name: str,
     expression: str,
@@ -315,10 +320,29 @@ def create_formula_column(
             position=position,
         )
         session.info[PENDING_KEY] = PendingFormula(column_id, expression, result)
-        return True, {"column_id": column_id}
+        return True, {
+            "column_id": column_id,
+            "dataset_name": ctx.defn.name,
+            "result_type": result.result_type,
+            "ast_hash": result.ast_hash,
+        }
+
+    def describe(result: dict[str, Any], version: int) -> tuple[str, dict[str, Any]]:
+        return result["dataset_name"], {
+            "column_id": result["column_id"],
+            "column_name": display_name,
+            "result_type": result["result_type"],
+            "ast_hash": result["ast_hash"],
+            "def_version": version,
+        }
 
     outcome = dataset_definition.apply_definition_change(
-        session, hooks, dataset_id, expected_version=expected_version, change=change
+        session,
+        hooks,
+        dataset_id,
+        expected_version=expected_version,
+        change=change,
+        audit_spec=dataset_definition.AuditSpec(actor, "formula_column.add", describe),
     )
     return FormulaSaved(outcome.result["column_id"], outcome.def_version)
 
@@ -329,6 +353,7 @@ def update_formula(
     dataset_id: int,
     column_id: int,
     *,
+    actor: CurrentUser,
     expected_version: int,
     expression: str,
 ) -> FormulaSaved:
@@ -345,10 +370,33 @@ def update_formula(
         if stored is not None and stored.ast_hash == result.ast_hash and not type_changed:
             return False, {"changed": False}  # 같은 수식: 버전을 올리지 않는다
         session.info[PENDING_KEY] = PendingFormula(column_id, expression, result)
-        return True, {"type_changed": type_changed}
+        return True, {
+            "type_changed": type_changed,
+            "dataset_name": ctx.defn.name,
+            "column_name": column.name,
+            "result_type": result.result_type,
+            "ast_hash_from": stored.ast_hash if stored is not None else None,
+            "ast_hash": result.ast_hash,
+        }
+
+    def describe(result: dict[str, Any], version: int) -> tuple[str, dict[str, Any]]:
+        return result["dataset_name"], {
+            "column_id": column_id,
+            "column_name": result["column_name"],
+            "result_type": result["result_type"],
+            "result_type_changed": result["type_changed"],
+            "ast_hash_from": result["ast_hash_from"],
+            "ast_hash": result["ast_hash"],
+            "def_version": version,
+        }
 
     outcome = dataset_definition.apply_definition_change(
-        session, hooks, dataset_id, expected_version=expected_version, change=change
+        session,
+        hooks,
+        dataset_id,
+        expected_version=expected_version,
+        change=change,
+        audit_spec=dataset_definition.AuditSpec(actor, "formula_column.update", describe),
     )
     return FormulaSaved(
         column_id, outcome.def_version, bool(outcome.result.get("type_changed", False))

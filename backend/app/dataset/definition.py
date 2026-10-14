@@ -10,8 +10,12 @@
 5. 정의 변경 훅(`core.ports.DefinitionHooks`): formula 모듈이 등록해 수식·의존·뷰를 같은
    트랜잭션에서 만들고 뷰 정의 해시를 돌려준다. 등록된 훅이 없으면 no-op이다.
 6. `def_version + 1`과 `def_hash`(훅이 돌려준 뷰 정의 해시, 없으면 구조 해시 `hashing.py`)를
-   기록하고 커밋한다.
-중간에 실패하면(훅 포함) 전부 롤백된다(동적 DDL도 같은 트랜잭션이다).
+   기록한다.
+7. 감사 기록(FU-2a, 04 §5-1): 호출한 쪽이 넘긴 `AuditSpec`으로 `audit.record`를 **정확히 한 번**
+   부르고 커밋한다. 바뀐 것이 없으면(`changed=False`) 기록도 없다. 버전을 올리는 호출(`bump=True`)은
+   `AuditSpec`이 **필수**다(감사 없는 정의 변경 경로가 생기는 것을 막는다, fail-closed). formula 훅·
+   repo·내부 helper는 `audit`을 부르지 않는다.
+중간에 실패하면(훅·감사 INSERT 포함) 전부 롤백된다(동적 DDL도 같은 트랜잭션이다).
 
 락 대기 초과(`55P03`)·교착(`40P01`)은 503 `DEFINITION_BUSY`(재시도 가능)다. 시작 시 재생성·재시도
 (05 D10)는 `expected_version=None`, `bump=False`로 같은 함수를 쓴다(정의는 그대로이고 버전은 올리지
@@ -29,6 +33,7 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.core.db_errors import constraint_name, is_lock_conflict
 from app.core.errors import (
     AppError,
@@ -64,6 +69,19 @@ _SQLITE_UNIQUE_HINTS = {
         "uq_dataset_columns_dataset_id_display_name"
     ),
 }
+
+
+@dataclass(frozen=True)
+class AuditSpec:
+    """정의 변경 한 건의 감사 서술(04 §5-1 "행위 서술"): 행위자, 행위 이름, `details` 만드는 함수.
+
+    `build(result, new_version)`은 `change`가 돌려준 값과 변경 뒤 `def_version`을 받아
+    (`target_name`, `details`)를 돌려준다. `details`는 `audit.actions`의 허용 키와 같아야 한다.
+    """
+
+    actor: audit.Actor
+    action: str
+    build: Callable[[dict[str, Any], int], tuple[str, dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -111,12 +129,15 @@ def apply_definition_change(
     change: Callable[[RowMapping], tuple[bool, dict[str, Any]]],
     bump: bool = True,
     lock_timeout: str = DEFINITION_LOCK_TIMEOUT,
+    audit_spec: AuditSpec | None = None,
 ) -> DefinitionOutcome:
-    """잠금 → 버전 확인 → 열 변경 → 훅 → `def_hash` 기록 → 커밋.
+    """잠금 → 버전 확인 → 열 변경 → 훅 → `def_hash` 기록 → 감사 기록 → 커밋.
 
-    `change(locked)`는 (바뀌었는가, 응답에 쓸 값)을 돌려준다. 바뀌지 않았으면 훅·버전·해시를
+    `change(locked)`는 (바뀌었는가, 응답에 쓸 값)을 돌려준다. 바뀌지 않았으면 훅·버전·해시·감사를
     건드리지 않고 롤백(잠금 해제)한다. 업무 오류(`AppError`)는 롤백하고 그대로 올린다.
     """
+    if bump and audit_spec is None:
+        raise audit.AuditRecordError("감사 서술(audit_spec) 없이 정의 버전을 올릴 수 없다")
     try:
         set_lock_timeout(session, lock_timeout)
         locked = repo.lock_dataset(session, dataset_id)
@@ -141,6 +162,16 @@ def apply_definition_change(
                 "def_hash": view_hash or structure_hash(repo.list_columns(session, dataset_id)),
             },
         )
+        if audit_spec is not None:
+            target_name, details = audit_spec.build(result, new_version)
+            audit.record(
+                session,
+                actor=audit_spec.actor,
+                action=audit_spec.action,
+                target_id=dataset_id,
+                target_name=target_name,
+                details=details,
+            )
         session.commit()
         return DefinitionOutcome(True, new_version, result)
     except AppError:

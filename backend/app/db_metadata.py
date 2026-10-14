@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -35,6 +36,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    column,
     false,
     func,
     true,
@@ -208,6 +210,86 @@ superset_dashboards = Table(
         "embedded_uuid::text ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
         name="embedded_uuid_format",
     ).ddl_if(**_PG_ONLY),
+)
+
+# --- 감사 기록 표(06 §2-1, revision 0007) ----
+# 행위 목록의 원본은 04 §5-1이다. 새 행위는 값 한 줄 + 이 CHECK 교체(새 revision) + `app/audit`의
+# 허용 키 표 한 줄 + 시험이다. `app/audit/actions.py`가 같은 15개 이름을 쓰는지 시험이 대조한다.
+AUDIT_ACTIONS = (
+    "dataset.create",
+    "dataset.update",
+    "column.add",
+    "column.update",
+    "formula_column.add",
+    "formula_column.update",
+    "team.create",
+    "team.update",
+    "member.set",
+    "member.remove",
+    "user.create",
+    "user.update",
+    "user.bootstrap_admin",
+    "dashboard.create",
+    "dashboard.update",
+)
+AUDIT_TARGET_TYPES = ("team", "user", "dataset", "dashboard")
+AUDIT_ACTOR_SOURCES = ("user", "cli")
+# 감사 `details`의 크기 안전망(바이트). 앱 규칙은 허용 키·길이 상한으로 이보다 훨씬 작게 지킨다.
+AUDIT_DETAILS_MAX_BYTES = 4000
+
+audit_log = Table(
+    "audit_log",
+    metadata,
+    # 행이 계속 쌓이는 유일한 표라 bigint. identity라 INSERT 권한만으로 번호가 붙는다
+    # (시퀀스 GRANT 없음).
+    Column("id", BigInteger, Identity(), primary_key=True),
+    Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    # 사용자 번호만 둔다(표시 이름은 조회 때 users에서 읽는다). 서버 명령(cli)이면 NULL.
+    Column("actor_user_id", Integer, ForeignKey("users.id"), nullable=True),
+    Column("actor_source", Text, nullable=False),
+    Column("action", Text, nullable=False),
+    Column("target_type", Text, nullable=False),
+    # 여러 표를 가리키므로 외래키가 없다.
+    Column("target_id", BigInteger, nullable=False),
+    Column(
+        "details",
+        JSON().with_variant(JSONB(), "postgresql"),
+        nullable=False,
+        server_default="{}",  # DEFAULT '{}' (빈 객체)
+    ),
+    CheckConstraint(column("action").in_(AUDIT_ACTIONS), name="action"),
+    CheckConstraint(column("target_type").in_(AUDIT_TARGET_TYPES), name="target_type"),
+    CheckConstraint(column("actor_source").in_(AUDIT_ACTOR_SOURCES), name="actor_source"),
+    CheckConstraint(
+        "(actor_source = 'user' AND actor_user_id IS NOT NULL) "
+        "OR (actor_source = 'cli' AND actor_user_id IS NULL)",
+        name="actor_consistency",
+    ),
+    # jsonb 함수·`::text` 캐스트는 PostgreSQL 전용이라 SQLite 시험용 create_all에서는 만들지 않는다
+    # (`ddl_if`). 실제 DB에서는 revision 0007이 같은 제약을 만든다.
+    CheckConstraint("jsonb_typeof(details) = 'object'", name="details_object").ddl_if(**_PG_ONLY),
+    # 4000은 AUDIT_DETAILS_MAX_BYTES와 같다(시험이 대조한다). SQL에 변수를 넣지 않으려고
+    # 리터럴로 쓴다.
+    CheckConstraint("octet_length(details::text) <= 4000", name="details_size").ddl_if(**_PG_ONLY),
+)
+# 인덱스 3개(06 §2-1): 기간·기본 정렬, 행위자 필터, 대상 필터. `action` 필터는 인덱스 없이 건다.
+Index(
+    "ix_audit_log_occurred_at_id",
+    audit_log.c.occurred_at.desc(),
+    audit_log.c.id.desc(),
+)
+Index(
+    "ix_audit_log_actor_user_id_occurred_at_id",
+    audit_log.c.actor_user_id,
+    audit_log.c.occurred_at.desc(),
+    audit_log.c.id.desc(),
+)
+Index(
+    "ix_audit_log_target_type_target_id_occurred_at_id",
+    audit_log.c.target_type,
+    audit_log.c.target_id,
+    audit_log.c.occurred_at.desc(),
+    audit_log.c.id.desc(),
 )
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).

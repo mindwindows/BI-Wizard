@@ -123,8 +123,11 @@ def list_dashboards(
     return list(session.execute(stmt).mappings().all()), int(total)
 
 
-def get_dashboard(session: Session, dashboard_id: int) -> RowMapping | None:
+def get_dashboard(session: Session, dashboard_id: int, *, lock: bool = False) -> RowMapping | None:
+    """`lock`이면 행을 `FOR NO KEY UPDATE`로 잠가 읽는다(변경 판정·감사 기록의 쓰기 전 값)."""
     stmt = select(superset_dashboards).where(superset_dashboards.c.id == dashboard_id)
+    if lock:
+        stmt = stmt.with_for_update(key_share=True)
     return session.execute(stmt).mappings().first()
 
 

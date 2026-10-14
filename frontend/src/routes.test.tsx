@@ -25,6 +25,7 @@ const DEEP_LINKS: Array<[string, string]> = [
   ["/dashboards", "screen-S7"],
   ["/admin/dashboards", "screen-S8"],
   ["/admin/status", "screen-S9"],
+  ["/admin/audit", "screen-S10"],
 ];
 
 describe("routerBasename", () => {

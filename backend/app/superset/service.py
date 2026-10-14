@@ -1,5 +1,10 @@
 """Superset 등록·대시보드 연결·입장권 발급 로직(05 §2-5 E1~E6). 트랜잭션은 여기서 명시적으로
-한다."""
+한다.
+
+감사 기록(FU-2a, 04 §5-1): 대시보드 연결 등록(E4)·변경(E5)만 쓰기 함수 끝(커밋 앞)에서 한 번
+기록한다. 값이 같은 E5는 쓰지도 기록하지도 않는다(0건). 입장권 발급(E6)·동기 상태 변경은 기록하지
+않는다(03b 29-1 ②).
+"""
 
 from __future__ import annotations
 
@@ -9,9 +14,11 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.auth.models import CurrentUser
 from app.auth.permissions import is_admin
 from app.core.errors import (
+    AppError,
     FieldErrorCode,
     already_exists,
     forbidden,
@@ -116,37 +123,80 @@ def list_dashboards(
     return [_dashboard_dict(r) for r in rows], total
 
 
-def create_dashboard(session: Session, *, name: str, embedded_uuid: str) -> dict[str, Any]:
+def create_dashboard(
+    session: Session, actor: CurrentUser, *, name: str, embedded_uuid: str
+) -> dict[str, Any]:
     """E4: 대시보드 등록. 같은 번호는 409 `ALREADY_EXISTS`(`details.field=embedded_uuid`)."""
     value = uuid.UUID(embedded_uuid)
     if repo.find_dashboard_by_uuid(session, value) is not None:
         raise already_exists("embedded_uuid", _DUPLICATE_UUID)
     try:
         row = repo.insert_dashboard(session, name=name, embedded_uuid=value)
+        # uuid는 E3가 모두에게 공개하는 값이라 기록해도 된다(04 §5-1).
+        audit.record(
+            session,
+            actor=actor,
+            action="dashboard.create",
+            target_id=row["id"],
+            target_name=row["name"],
+            details={"embedded_uuid": str(row["embedded_uuid"])},
+        )
         session.commit()
     except IntegrityError:
         session.rollback()
         if repo.find_dashboard_by_uuid(session, value) is not None:
             raise already_exists("embedded_uuid", _DUPLICATE_UUID) from None
         raise
+    except BaseException:
+        session.rollback()
+        raise
     return _dashboard_dict(row)
 
 
 def update_dashboard(
-    session: Session, dashboard_id: int, *, name: str | None, is_active: bool | None
+    session: Session,
+    actor: CurrentUser,
+    dashboard_id: int,
+    *,
+    name: str | None,
+    is_active: bool | None,
 ) -> dict[str, Any]:
-    """E5: 이름·활성 변경(uuid 불변). 둘 다 없으면 422, 없는 대상은 404."""
-    values: dict[str, Any] = {}
+    """E5: 이름·활성 변경(uuid 불변). 둘 다 없으면 422, 없는 대상은 404.
+
+    행을 잠가 쓰기 전 값을 읽고, 값이 같은 항목은 쓰지 않는다(전부 같으면 UPDATE도 감사 기록도
+    없다). `is_active`가 `true`→`false`면 화면이 "연결 해제"로 읽는다.
+    """
+    wanted: dict[str, Any] = {}
     if name is not None:
-        values["name"] = name
+        wanted["name"] = name
     if is_active is not None:
-        values["is_active"] = is_active
-    if not values:
+        wanted["is_active"] = is_active
+    if not wanted:
         raise validation_failed([("body", FieldErrorCode.REQUIRED)])
-    if repo.get_dashboard(session, dashboard_id) is None:
-        raise not_found()
-    row = repo.update_dashboard(session, dashboard_id, values)
-    session.commit()
+    try:
+        current = repo.get_dashboard(session, dashboard_id, lock=True)
+        if current is None:
+            session.rollback()
+            raise not_found()
+        values = {k: v for k, v in wanted.items() if current[k] != v}
+        if not values:
+            session.rollback()  # 바뀐 것이 없다: 쓰지도 기록하지도 않는다(잠금 해제)
+            return _dashboard_dict(current)
+        row = repo.update_dashboard(session, dashboard_id, values)
+        audit.record(
+            session,
+            actor=actor,
+            action="dashboard.update",
+            target_id=dashboard_id,
+            target_name=row["name"],
+            details={"changes": {k: {"from": current[k], "to": v} for k, v in values.items()}},
+        )
+        session.commit()
+    except AppError:
+        raise
+    except BaseException:
+        session.rollback()
+        raise
     return _dashboard_dict(row)
 
 

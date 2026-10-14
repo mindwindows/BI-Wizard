@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
-from app.auth import CurrentUserDep
+from app.auth import CurrentUser, CurrentUserDep
 from app.auth.permissions import require_admin
 from app.core.deps import get_session
 from app.core.errors import FieldErrorCode, validation_failed
@@ -40,6 +40,8 @@ router = APIRouter(tags=["superset"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 AdminDep = Depends(require_admin)
+# E4·E5는 행위자(감사 기록)가 필요해 의존성의 사용자를 받는다. 권한 검사는 본문 검증보다 먼저다.
+AdminUser = Annotated[CurrentUser, Depends(require_admin)]
 LimitParam = Annotated[int, Query(ge=1, le=LIST_LIMIT_MAX)]
 OffsetParam = Annotated[int, Query(ge=0)]
 # E1 데이터셋 번호 필터 상한(쿼리 길이 보호).
@@ -141,21 +143,24 @@ def list_dashboards(
     )
 
 
-@router.post("/dashboards", status_code=201, dependencies=[AdminDep])
-def create_dashboard(body: DashboardCreate, session: SessionDep) -> DashboardOut:
+@router.post("/dashboards", status_code=201)
+def create_dashboard(body: DashboardCreate, session: SessionDep, admin: AdminUser) -> DashboardOut:
     """E4: 대시보드 등록(관리자). uuid는 앞뒤 공백을 지우고 소문자로 바꿔 저장한다."""
     return DashboardOut(
-        **service.create_dashboard(session, name=body.name, embedded_uuid=body.embedded_uuid)
+        **service.create_dashboard(session, admin, name=body.name, embedded_uuid=body.embedded_uuid)
     )
 
 
-@router.patch("/dashboards/{dashboard_id}", dependencies=[AdminDep])
-def update_dashboard(dashboard_id: int, body: DashboardUpdate, session: SessionDep) -> DashboardOut:
+@router.patch("/dashboards/{dashboard_id}")
+def update_dashboard(
+    dashboard_id: int, body: DashboardUpdate, session: SessionDep, admin: AdminUser
+) -> DashboardOut:
     """E5: 이름·활성 변경(관리자). uuid는 바꿀 수 없다."""
     sent = body.model_fields_set
     return DashboardOut(
         **service.update_dashboard(
             session,
+            admin,
             dashboard_id,
             name=body.name if "name" in sent else None,
             is_active=body.is_active if "is_active" in sent else None,

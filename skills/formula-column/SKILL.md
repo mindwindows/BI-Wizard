@@ -225,6 +225,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 - `dataset-definition`: 계산 열(`kind=formula`)의 정의·태그(`SUMTAG`)·표시 이름을 소유한다. 열 이름 변경은 AST가 열 번호 참조라 수식에 영향이 없다. 정의 변경 진입점(`definition.py`)이 이 모듈의 훅을 부르고 태그 변경의 순환을 재검사한다.
 - `data-entry`: 행 조회가 계산 열 값과 오류 칸을 `RowViewPort`로 받는다. 원본 열 값의 NFC 정규화와 글자 규칙이 이 엔진의 상수 규칙과 같은 방향이다. 계산 열 키로 쓰면 `READ_ONLY`다.
 - `permission-management`: 수식 편집·미리보기는 정의(팀) 권한, 열람은 인증된 모두. PostgreSQL 시험 절차(8절)를 쓴다.
+- `permission-management`(FU-2a 감사 기록 조회): 계산 열 만들기·고치기(D4·D5)는 감사 기록(`formula_column.add`·`formula_column.update`)이 한 건 남는다(같은 수식·같은 결과 형으로 다시 저장하면 없음). **수식 원문은 기록되지 않고** 열 번호와 `ast_hash`만 남는다. 미리보기·검사·시작 시 뷰 재생성은 기록되지 않는다.
 - `local-environment`: `/api/health`의 `views`·`views_failed_count`, 시작 자가 점검(`standard_conforming_strings`), 마이그레이션 왕복.
 - `admin-cleanup`: 잘못 만든 계산 열·뷰를 관리자가 수동으로 정리하는 절차(`formulas`·`formula_deps`·`dv_`·`de_`).
 - `dashboard-link`(FU-1e): `dv_<번호>` 뷰가 Superset 가상 데이터셋의 원천이다(고정 SQL `SELECT * FROM bi_data.dv_<번호>`). 계산 열이 추가·수정되어 커밋되면 같은 요청이 동기화를 요청하고, Superset 열 표시 이름에 계산 열 이름이 `c_<번호>`로 붙는다.

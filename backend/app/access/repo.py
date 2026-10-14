@@ -239,10 +239,44 @@ def set_member_role(session: Session, team_id: int, user_id: int, role: str) -> 
     return role
 
 
-def delete_member(session: Session, team_id: int, user_id: int) -> bool:
-    deleted = session.execute(
+def insert_member(session: Session, team_id: int, user_id: int, role: str) -> None:
+    """새 소속을 추가한다. 이미 있으면(동시에 추가한 경쟁) 유일 위반(IntegrityError)이다."""
+    session.execute(insert(team_members).values(team_id=team_id, user_id=user_id, role=role))
+
+
+def update_member_role(session: Session, team_id: int, user_id: int, role: str) -> bool:
+    """있는 소속의 역할을 바꾼다. 바꾼 행이 있으면 True.
+
+    호출한 쪽이 `get_member_role(lock=True)`로 행을 잠가 읽은 뒤에 부르므로 그 사이에 행이 바뀌지
+    않는다(쓰기 전 값이 감사 `role_from`과 같다).
+    """
+    where = (team_members.c.team_id == team_id) & (team_members.c.user_id == user_id)
+    updated = session.execute(
+        update(team_members).where(where).values(role=role).returning(team_members.c.role)
+    ).first()
+    return updated is not None
+
+
+def get_member_role(
+    session: Session, team_id: int, user_id: int, *, lock: bool = False
+) -> str | None:
+    """소속의 현재 역할(없으면 None). `lock`이면 행을 `FOR NO KEY UPDATE`로 잠가 읽는다.
+
+    역할 변경의 쓰기 전 값(감사 `role_from`)을 경쟁 없이 읽으려는 것이다. `role` 열의 UPDATE
+    권한만으로 실행된다.
+    """
+    stmt = select(team_members.c.role).where(
+        (team_members.c.team_id == team_id) & (team_members.c.user_id == user_id)
+    )
+    if lock:
+        stmt = stmt.with_for_update(key_share=True)
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def delete_member(session: Session, team_id: int, user_id: int) -> str | None:
+    """소속을 지우고 지운 소속의 역할을 돌려준다(없었으면 None)."""
+    return session.execute(
         delete(team_members)
         .where((team_members.c.team_id == team_id) & (team_members.c.user_id == user_id))
-        .returning(team_members.c.user_id)
-    ).first()
-    return deleted is not None
+        .returning(team_members.c.role)
+    ).scalar_one_or_none()

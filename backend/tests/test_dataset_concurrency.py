@@ -91,6 +91,15 @@ def blocking_hooks(entered: threading.Event, release: threading.Event, wait: flo
     return hooks
 
 
+def creator_of(session: Session, dataset: int) -> CurrentUser:
+    """데이터셋을 만든 사용자를 행위자로 쓴다(감사 기록의 행위자 FK가 실제 사용자여야 한다)."""
+    user_id = session.execute(
+        sa.select(datasets.c.created_by).where(datasets.c.id == dataset)
+    ).scalar_one()
+    session.rollback()  # 읽기 트랜잭션을 닫아 이어지는 정의 변경이 처음부터 시작하게 한다
+    return CurrentUser(id=user_id, display_name="정의 담당자", is_active=True, is_admin=False)
+
+
 def add_column_call(engine: Engine, dataset: int, name: str, hooks: DefinitionHooks, version=1):
     def call():
         with Session(engine) as session:
@@ -98,6 +107,7 @@ def add_column_call(engine: Engine, dataset: int, name: str, hooks: DefinitionHo
                 session,
                 hooks,
                 dataset,
+                actor=creator_of(session, dataset),
                 expected_version=version,
                 display_name=name,
                 column_type="text",
@@ -344,6 +354,7 @@ def test_rename_in_progress_makes_fk_child_inserts_wait_until_commit(pg, dataset
                 session,
                 blocking_hooks(entered, release, wait=15),
                 dataset_id,
+                actor=creator_of(session, dataset_id),
                 expected_version=1,
                 name="바뀐 이름",
                 date_unit=None,

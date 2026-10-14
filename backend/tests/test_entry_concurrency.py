@@ -23,6 +23,7 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.auth.models import CurrentUser
 from app.core.db_errors import is_lock_conflict, sqlstate
 from app.core.errors import AppError
 from app.core.ports import DefinitionHooks, PlainRowView
@@ -58,6 +59,11 @@ class Fx:
     user: int
 
 
+def actor_of(user_id: int) -> CurrentUser:
+    """정의 변경의 감사 기록 행위자(실제 사용자 번호여야 한다)."""
+    return CurrentUser(id=user_id, display_name="입력자", is_active=True, is_admin=False)
+
+
 def make(pg: Db, *, base: bool = True, unit: str = "month") -> Fx:
     user = pg.add_user("entry", "입력자")
     team = pg.add_team("team_a", "A팀")
@@ -73,6 +79,7 @@ def make(pg: Db, *, base: bool = True, unit: str = "month") -> Fx:
                 session,
                 DefinitionHooks(),
                 dataset,
+                actor=actor_of(user),
                 expected_version=1,
                 name=None,
                 date_unit=None,
@@ -547,6 +554,7 @@ def test_setting_the_base_column_after_a_racing_insert_is_dataset_has_rows(pg, h
                 session,
                 DefinitionHooks(),
                 fx.id,
+                actor=actor_of(fx.user),
                 expected_version=1,
                 name=None,
                 date_unit=None,
@@ -580,6 +588,7 @@ def test_changing_the_date_unit_after_a_racing_insert_is_dataset_has_rows(pg, ho
                 session,
                 DefinitionHooks(),
                 fx.id,
+                actor=actor_of(fx.user),
                 expected_version=current_version(pg, fx),
                 name=None,
                 date_unit="day",

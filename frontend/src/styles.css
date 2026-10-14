@@ -1132,3 +1132,21 @@ button.link {
   gap: 12px;
   align-items: start;
 }
+
+/* ---- S10 감사 기록(FU-2a): 필터 줄은 줄바꿈 허용, 표는 가로 스크롤 영역 안에서 짧은 칸은 한 줄 ---- */
+.audit-filters {
+  flex-wrap: wrap;
+}
+
+.audit-table th,
+.audit-table td {
+  white-space: nowrap;
+}
+
+.audit-table td.audit-target,
+.audit-table td.audit-summary {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  min-width: 220px;
+}

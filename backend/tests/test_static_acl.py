@@ -1,7 +1,8 @@
 """정적 표 DB 권한·제약 시험(06 §2 매트릭스, 03b 3-6 BY4). 실제 PostgreSQL(tmpfs 시험 DB) 필요.
 
-0003~0006 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
-없음을 확인한다.
+0003~0007 적용 뒤 `bi_app`이 허용된 동작만 할 수 있고 `bi_readonly`가 정적 표를 읽을 수
+없음을 확인한다. `audit_log`(0007)는 `bi_app`이 읽기와 추가만 하고(UPDATE·DELETE·TRUNCATE 거부,
+시퀀스 권한 없이 INSERT 성공) `bi_readonly`는 읽을 수 없다(03b 29-1 ④).
 권한 판정은 `has_table_privilege`/`has_column_privilege`로 전부 대조하고, 대표 동작은 실제로 실행해
 거부 코드(42501)와 제약 위반 코드(23xxx)를 확인한다.
 """
@@ -15,8 +16,10 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.access import repo, service
+from app.auth.models import CurrentUser
 from app.core.errors import AppError
 from app.db_metadata import (
+    audit_log,
     dataset_columns,
     datasets,
     formula_deps,
@@ -29,6 +32,7 @@ from app.db_metadata import (
 )
 
 INSUFFICIENT_PRIVILEGE = "42501"
+READ_ONLY_TRANSACTION = "25006"
 CHECK_VIOLATION = "23514"
 UNIQUE_VIOLATION = "23505"
 FOREIGN_KEY_VIOLATION = "23503"
@@ -43,6 +47,7 @@ TABLES = {
     "formula_deps": formula_deps,
     "superset_datasets": superset_datasets,
     "superset_dashboards": superset_dashboards,
+    "audit_log": audit_log,
 }
 # bi_app의 표 단위 권한(has_table_privilege). UPDATE는 열 단위라 표 단위로는 없다.
 TABLE_PRIVILEGES = {
@@ -58,6 +63,8 @@ TABLE_PRIVILEGES = {
     # 0006: 삭제는 FU-1에 없다(DELETE 없음). UPDATE는 열 단위다.
     "superset_datasets": {"SELECT", "INSERT"},
     "superset_dashboards": {"SELECT", "INSERT"},
+    # 0007: 읽기와 추가만(UPDATE·DELETE·TRUNCATE 없음, 열 단위 UPDATE도 없다).
+    "audit_log": {"SELECT", "INSERT"},
 }
 ALL_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
 # bi_app이 UPDATE할 수 있는 열(06 §2). 나머지 열은 불변이다.
@@ -81,6 +88,7 @@ UPDATABLE = {
         "last_error",
     },
     "superset_dashboards": {"name", "is_active"},
+    "audit_log": set(),
 }
 
 
@@ -141,6 +149,7 @@ def test_immutable_columns_are_exactly_the_ones_without_update_privilege():
     assert immutable["formula_deps"] == {"column_id", "depends_on_column_id"}
     assert immutable["superset_datasets"] == {"dataset_id"}
     assert immutable["superset_dashboards"] == {"id", "embedded_uuid", "created_at"}
+    assert immutable["audit_log"] == all_columns["audit_log"]  # 추가 전용: 어느 열도 고칠 수 없다
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -557,6 +566,7 @@ def test_bi_app_cannot_truncate_or_alter_static_tables(pg_app_engine, clean_pg):
         "formula_deps",
         "superset_datasets",
         "superset_dashboards",
+        "audit_log",
     ):
         with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
             c.execute(sa.schema.DDL(f"TRUNCATE TABLE {table}"))
@@ -576,6 +586,7 @@ def test_bi_readonly_cannot_read_static_tables(pg_owner_engine, pg_readonly_engi
         formula_deps,
         superset_datasets,
         superset_dashboards,
+        audit_log,
     ):
         with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
             c.execute(select(table))
@@ -744,8 +755,11 @@ def test_not_null_defaults(pg_app_engine, clean_pg):
 def _last_admin_code(engine: Engine, user_id: int, **changes) -> str:
     with Session(engine) as session:
         try:
+            # 행위자는 대상 본인으로 둔다(감사 기록의 행위자 FK가 실제 사용자여야 한다).
+            actor = CurrentUser(id=user_id, display_name="a", is_active=True, is_admin=True)
             service.update_user(
                 session,
+                actor,
                 user_id,
                 display_name=None,
                 is_admin=changes.get("is_admin"),
@@ -817,6 +831,7 @@ def test_concurrent_demotions_never_leave_zero_admins_and_do_not_deadlock(
         assert sorted(results) == sorted(["OK"] * (count - 1) + ["LAST_ADMIN"]), results
         assert _active_admin_count(pg_app_engine) == 1
         with pg_owner_engine.begin() as c:
+            c.execute(delete(audit_log))  # 행위자 외래키가 users를 가리킨다
             c.execute(delete(team_members))
             c.execute(delete(users))
 
@@ -967,3 +982,228 @@ def test_superset_constraints(pg_owner_engine, pg_app_engine, clean_pg):
             )
         ).scalar_one()
     assert status == "pending"
+
+
+# --- 0007: 감사 기록 표 (읽기·추가만, 03b 29-1 ④, 06 §2-1) ----
+
+
+def _audit_row(**values):
+    base = dict(
+        actor_source="cli",
+        action="user.bootstrap_admin",
+        target_type="user",
+        target_id=1,
+        details={"target_name": "x", "is_admin": True},
+    )
+    return insert(audit_log).values(**{**base, **values})
+
+
+def test_bi_app_can_select_and_insert_audit_rows_without_any_sequence_grant(
+    pg_owner_engine, pg_app_engine, clean_pg
+):
+    """identity 열이라 시퀀스 권한 없이 INSERT가 성공한다(06 §2-1 "시퀀스 권한" 확인 항목).
+
+    bigint여도 같다. 실패하면 시퀀스 권한을 임의로 주지 않고 멈추고 보고해야 한다.
+    """
+    ids = _prepare(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        first = c.execute(
+            _audit_row(
+                actor_source="user",
+                actor_user_id=ids["user"],
+                action="team.create",
+                target_type="team",
+                target_id=ids["team"],
+                details={"target_name": "T1", "code": "t1"},
+            ).returning(audit_log.c.id, audit_log.c.occurred_at, audit_log.c.details)
+        ).one()
+        second = c.execute(_audit_row().returning(audit_log.c.id)).scalar_one()
+        assert second > first.id
+        assert first.occurred_at is not None and first.details["code"] == "t1"
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 2
+    with pg_owner_engine.connect() as c:
+        has_sequence_grant = c.execute(
+            sa.text(
+                "SELECT has_sequence_privilege('bi_app', 'audit_log_id_seq', 'USAGE')"
+                " OR has_sequence_privilege('bi_app', 'audit_log_id_seq', 'UPDATE')"
+            )
+        ).scalar_one()
+        id_type = c.execute(
+            select(sa.cast(sa.column("data_type"), sa.Text))
+            .select_from(sa.table("columns", schema="information_schema"))
+            .where(sa.column("table_name") == "audit_log", sa.column("column_name") == "id")
+        ).scalar_one()
+    assert has_sequence_grant is False  # 시퀀스 권한을 따로 주지 않았다
+    assert id_type == "bigint"
+
+
+DENIED_AUDIT = [
+    pytest.param(lambda i: update(audit_log).values(details={"target_name": "y"}), id="update"),
+    pytest.param(lambda i: update(audit_log).values(action="team.update"), id="update.action"),
+    pytest.param(lambda i: update(audit_log).values(id=999), id="update.id"),
+    pytest.param(lambda i: delete(audit_log), id="delete"),
+    pytest.param(lambda i: delete(audit_log).where(audit_log.c.id == i["row"]), id="delete.one"),
+]
+
+
+@pytest.mark.parametrize("make_statement", DENIED_AUDIT)
+def test_bi_app_cannot_update_or_delete_audit_rows(
+    pg_owner_engine, pg_app_engine, clean_pg, make_statement
+):
+    with pg_owner_engine.begin() as c:
+        row = c.execute(_audit_row().returning(audit_log.c.id)).scalar_one()
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(make_statement({"row": row}))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+    with pg_owner_engine.connect() as c:  # 아무것도 바뀌지 않았다
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 1
+
+
+def test_bi_app_cannot_truncate_or_alter_the_audit_table(pg_owner_engine, pg_app_engine, clean_pg):
+    with pg_owner_engine.begin() as c:
+        c.execute(_audit_row())
+    for statement in (
+        "TRUNCATE TABLE audit_log",
+        "ALTER TABLE audit_log DISABLE TRIGGER ALL",
+        "DROP TABLE audit_log",
+        "CREATE INDEX ix_evil ON audit_log (action)",
+    ):
+        with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+            c.execute(sa.schema.DDL(statement))
+        assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE, statement
+    with pg_owner_engine.connect() as c:
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 1
+
+
+def test_bi_readonly_cannot_read_or_write_audit_rows(pg_owner_engine, pg_readonly_engine, clean_pg):
+    with pg_owner_engine.begin() as c:
+        c.execute(_audit_row())
+    with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
+        c.execute(select(audit_log))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+    # 쓰기는 권한이 없는 데다 이 계정의 세션이 읽기 전용이라 둘 중 어느 쪽으로든 거부된다.
+    for statement in (_audit_row(), update(audit_log).values(target_id=2), delete(audit_log)):
+        with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
+            c.execute(statement)
+        assert sqlstate(error.value) in {INSUFFICIENT_PRIVILEGE, READ_ONLY_TRANSACTION}
+    # 열 하나만 읽어도 거부된다(열 단위 권한도 없다).
+    with pytest.raises(DBAPIError) as error, pg_readonly_engine.connect() as c:
+        c.execute(select(audit_log.c.id))
+    assert sqlstate(error.value) == INSUFFICIENT_PRIVILEGE
+
+
+OVERHEAD = len('{"k": ""}')  # jsonb::text가 {"k": ""}를 쓰는 모양의 길이(구분자 뒤 공백 포함)
+
+CHECK_CASES = [
+    pytest.param(dict(action="dataset.delete"), "ck_audit_log_action", id="action"),
+    pytest.param(dict(target_type="table"), "ck_audit_log_target_type", id="target_type"),
+    # 허용 밖 actor_source는 actor_consistency도 어긴다(PostgreSQL은 이름 순으로 먼저 보고한다).
+    pytest.param(
+        dict(actor_source="system"),
+        "ck_audit_log_actor_consistency",
+        id="actor_source",
+    ),
+    pytest.param(
+        dict(actor_source="user", actor_user_id=None),
+        "ck_audit_log_actor_consistency",
+        id="user-null",
+    ),
+    pytest.param(
+        dict(actor_source="cli", actor_user_id="@user"),
+        "ck_audit_log_actor_consistency",
+        id="cli-id",
+    ),
+    pytest.param(dict(details=[1, 2]), "ck_audit_log_details_object", id="details-array"),
+    pytest.param(dict(details="text"), "ck_audit_log_details_object", id="details-string"),
+    pytest.param(
+        dict(details={"target_name": "가" * 2000}), "ck_audit_log_details_size", id="details-size"
+    ),
+]
+
+
+@pytest.mark.parametrize(("values", "constraint"), CHECK_CASES)
+def test_audit_check_constraints_reject_bad_rows(
+    pg_owner_engine, pg_app_engine, clean_pg, values, constraint
+):
+    ids = _prepare(pg_owner_engine)
+    values = {k: (ids["user"] if v == "@user" else v) for k, v in values.items()}
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(_audit_row(**values))
+    assert sqlstate(error.value) == CHECK_VIOLATION and constraint in str(error.value.orig)
+
+
+def test_audit_check_constraints_accept_the_boundary_and_every_action(
+    pg_owner_engine, pg_app_engine, clean_pg
+):
+    from app.audit.actions import ACTIONS
+
+    ids = _prepare(pg_owner_engine)
+    with pg_app_engine.begin() as c:
+        for action, spec in ACTIONS.items():
+            c.execute(
+                _audit_row(
+                    action=action,
+                    target_type=spec.target_type,
+                    actor_source="user",
+                    actor_user_id=ids["user"],
+                )
+            )
+        # 직렬화(jsonb::text) 정확히 4000바이트는 통과하고 4001바이트는 details_size가 거부한다.
+        c.execute(_audit_row(details={"k": "x" * (4000 - OVERHEAD)}))
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(_audit_row(details={"k": "x" * (4000 - OVERHEAD + 1)}))
+    assert sqlstate(error.value) == CHECK_VIOLATION and "details_size" in str(error.value.orig)
+    with pg_owner_engine.connect() as c:
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 16
+
+
+def test_audit_actor_must_exist_and_target_id_has_no_foreign_key(
+    pg_owner_engine, pg_app_engine, clean_pg
+):
+    with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+        c.execute(_audit_row(actor_source="user", actor_user_id=999999))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+    assert "fk_audit_log_actor_user_id_users" in str(error.value.orig)
+    # 대상은 여러 표를 가리키므로 존재하지 않는 번호도 받는다(외래키 없음)
+    with pg_app_engine.begin() as c:
+        c.execute(_audit_row(target_id=2**62))
+    # 행위자 사용자는 삭제 경로가 없어도 소유자가 지우려 하면 외래키가 막는다
+    ids = _prepare(pg_owner_engine)
+    with pg_owner_engine.begin() as c:
+        c.execute(_audit_row(actor_source="user", actor_user_id=ids["user"]))
+    with pytest.raises(DBAPIError) as error, pg_owner_engine.begin() as c:
+        c.execute(delete(team_members))
+        c.execute(delete(users))
+    assert sqlstate(error.value) == FOREIGN_KEY_VIOLATION
+
+
+def test_audit_table_has_exactly_the_six_named_checks_and_three_indexes(pg_owner_engine, clean_pg):
+    with pg_owner_engine.connect() as c:
+        checks = {
+            r[0]
+            for r in c.execute(
+                select(sa.column("conname"))
+                .select_from(sa.table("pg_constraint", schema="pg_catalog"))
+                .where(
+                    sa.column("conrelid") == sa.func.to_regclass("audit_log"),
+                    sa.column("contype") == "c",
+                )
+            )
+        }
+        indexes = {i["name"] for i in sa.inspect(c).get_indexes("audit_log")}
+    assert checks == {
+        f"ck_audit_log_{n}"
+        for n in (
+            "action",
+            "target_type",
+            "actor_source",
+            "actor_consistency",
+            "details_object",
+            "details_size",
+        )
+    }
+    assert indexes == {
+        "ix_audit_log_occurred_at_id",
+        "ix_audit_log_actor_user_id_occurred_at_id",
+        "ix_audit_log_target_type_target_id_occurred_at_id",
+    }

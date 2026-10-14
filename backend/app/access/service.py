@@ -6,6 +6,10 @@
   (`repo.lock_target_and_active_admins`).
 - 팀 이름 변경 뒤 동기화 요청은 이 모듈이 하지 않고 호출한 쪽(router)이 **커밋 뒤**
   `DatasetSyncPort`로 부른다. 여기서는 이름이 바뀌었는지만 알려 준다.
+- 감사 기록(FU-2a, 04 §5-1): 쓰기 함수 끝(커밋 **앞**)에서 `audit.record`를 정확히 한 번 부른다.
+  실제로 바뀐 것이 있을 때만 부르고(값이 같으면 0건) 실패·롤백이면 기록도 없다(같은 트랜잭션).
+  호출 인자가 아니라 DB에 쓰기 전 값과의 비교로 변경 여부를 판정한다. `seed_stub_data`(개발·시험
+  전용)는 기록하지 않는다.
 """
 
 from __future__ import annotations
@@ -16,8 +20,18 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app import audit
 from app.access import repo
-from app.core.errors import already_exists, last_admin, not_found, target_inactive
+from app.audit import CLI_ACTOR
+from app.auth import CurrentUser
+from app.core.errors import (
+    AppError,
+    already_exists,
+    last_admin,
+    not_found,
+    service_unavailable,
+    target_inactive,
+)
 
 _TEAM_MESSAGES = {
     "code": "이미 사용 중인 팀 코드입니다.",
@@ -44,12 +58,20 @@ def list_teams(session: Session, limit: int, offset: int) -> tuple[list[dict[str
     return [dict(r) for r in rows], total
 
 
-def create_team(session: Session, *, code: str, name: str) -> dict[str, Any]:
+def create_team(session: Session, actor: CurrentUser, *, code: str, name: str) -> dict[str, Any]:
     conflict = repo.find_team_conflict(session, code=code, name=name)
     if conflict:
         raise _team_conflict(conflict)
     try:
         team = repo.insert_team(session, code=code, name=name)
+        audit.record(
+            session,
+            actor=actor,
+            action="team.create",
+            target_id=team["id"],
+            target_name=team["name"],
+            details={"code": team["code"]},
+        )
         session.commit()
     except IntegrityError:
         session.rollback()
@@ -57,11 +79,19 @@ def create_team(session: Session, *, code: str, name: str) -> dict[str, Any]:
         if conflict:
             raise _team_conflict(conflict) from None
         raise
+    except BaseException:
+        session.rollback()
+        raise
     return dict(team)
 
 
 def update_team(
-    session: Session, team_id: int, *, name: str | None, is_active: bool | None
+    session: Session,
+    actor: CurrentUser,
+    team_id: int,
+    *,
+    name: str | None,
+    is_active: bool | None,
 ) -> TeamChange:
     team = repo.get_team(session, team_id, lock=True)
     if team is None:
@@ -79,12 +109,23 @@ def update_team(
         return TeamChange(dict(team), name_changed=False)
     try:
         updated = repo.update_team(session, team_id, values)
+        audit.record(
+            session,
+            actor=actor,
+            action="team.update",
+            target_id=team_id,
+            target_name=updated["name"],
+            details={"changes": {k: {"from": team[k], "to": v} for k, v in values.items()}},
+        )
         session.commit()
     except IntegrityError:
         session.rollback()
         conflict = repo.find_team_conflict(session, name=name, exclude_id=team_id)
         if conflict:
             raise _team_conflict(conflict) from None
+        raise
+    except BaseException:
+        session.rollback()
         raise
     return TeamChange(dict(updated), name_changed="name" in values)
 
@@ -113,7 +154,7 @@ def list_users(
 
 
 def create_user(
-    session: Session, *, login_id: str, display_name: str, is_admin: bool
+    session: Session, actor: CurrentUser, *, login_id: str, display_name: str, is_admin: bool
 ) -> dict[str, Any]:
     if repo.find_user_conflict(session, login_id):
         raise already_exists("login_id", _LOGIN_ID_MESSAGE)
@@ -121,17 +162,30 @@ def create_user(
         row = repo.insert_user(
             session, login_id=login_id, display_name=display_name, is_admin=is_admin
         )
+        # `login_id`는 기록하지 않는다(06 §2-1 ③). 표시 이름만 `target_name`으로 남는다.
+        audit.record(
+            session,
+            actor=actor,
+            action="user.create",
+            target_id=row["id"],
+            target_name=row["display_name"],
+            details={"is_admin": bool(row["is_admin"])},
+        )
         session.commit()
     except IntegrityError:
         session.rollback()
         if repo.find_user_conflict(session, login_id):
             raise already_exists("login_id", _LOGIN_ID_MESSAGE) from None
         raise
+    except BaseException:
+        session.rollback()
+        raise
     return {**dict(row), "memberships": []}
 
 
 def update_user(
     session: Session,
+    actor: CurrentUser,
     user_id: int,
     *,
     display_name: str | None,
@@ -157,8 +211,28 @@ def update_user(
     if new_active != target["is_active"]:
         values["is_active"] = new_active
     if values:
-        row = repo.update_user(session, user_id, values)
-        session.commit()
+        try:
+            row = repo.update_user(session, user_id, values)
+            # 표시 이름 값은 `target_name`에만 남고 `changes`에는 불리언만 있다(06 §2-1 ③).
+            audit.record(
+                session,
+                actor=actor,
+                action="user.update",
+                target_id=user_id,
+                target_name=row["display_name"],
+                details={
+                    "changes": {
+                        k: {"from": bool(target[k]), "to": bool(v)}
+                        for k, v in values.items()
+                        if k != "display_name"
+                    },
+                    "display_name_changed": "display_name" in values,
+                },
+            )
+            session.commit()
+        except BaseException:
+            session.rollback()
+            raise
     else:
         session.rollback()
         row = target
@@ -172,7 +246,9 @@ def _single_with_memberships(session: Session, row: Any) -> dict[str, Any]:
 # --- team_members ----
 
 
-def set_member(session: Session, team_id: int, user_id: int, role: str) -> dict[str, Any]:
+def set_member(
+    session: Session, actor: CurrentUser, team_id: int, user_id: int, role: str
+) -> dict[str, Any]:
     team = repo.get_team(session, team_id)
     user = repo.get_user(session, user_id)
     if team is None or user is None:
@@ -182,23 +258,68 @@ def set_member(session: Session, team_id: int, user_id: int, role: str) -> dict[
         raise target_inactive("team")
     if not user["is_active"]:
         raise target_inactive("user")
+    result = {"team_id": team_id, "user_id": user_id, "role": role}
+    # 같은 소속을 동시에 추가한 경쟁(IntegrityError)이면 상대가 이미 넣었으니 한 번 더 시도해 역할만
+    # 바꾼다. 두 번째 시도는 상대가 넣은 값을 쓰기 전 값으로 다시 읽으므로 **실제로 일어난 전이**를
+    # 한 건만 기록한다(지는 쪽이 같은 전이를 두 번 기록하지 않는다).
+    for attempt in (1, 2):
+        try:
+            # 쓰기 전 값을 잠가 읽는다: 같은 소속을 동시에 바꾸는 요청이 서로의 전이를 기록한다.
+            role_from = repo.get_member_role(session, team_id, user_id, lock=True)
+            if role_from == role:
+                session.rollback()  # 이미 같은 역할: 바뀐 것이 없다(감사 0건, 잠금 해제)
+                return result
+            # 쓰기는 읽은 값에서 정한다: 소속이 없었으면 INSERT만(그 사이 상대가 넣었으면 유일
+            # 위반으로 재시도), 있었으면 잠근 그 행의 UPDATE만. 읽은 뒤 바뀐 값을 덮어쓰지 않는다.
+            if role_from is None:
+                repo.insert_member(session, team_id, user_id, role)
+            elif not repo.update_member_role(session, team_id, user_id, role):
+                session.rollback()  # 읽은 뒤 소속이 사라졌다(행을 잠갔으니 보통 없는 일)
+                continue
+            audit.record(
+                session,
+                actor=actor,
+                action="member.set",
+                target_id=team_id,
+                target_name=team["name"],
+                details={"user_id": user_id, "role": role, "role_from": role_from},
+            )
+            session.commit()
+            return result
+        except IntegrityError:
+            session.rollback()
+            if attempt == 2:
+                raise
+        except BaseException:
+            session.rollback()
+            raise
+    raise service_unavailable()  # 소속이 계속 바뀌어 두 번 다 판정하지 못했다(다시 시도하면 된다)
+
+
+def remove_member(session: Session, actor: CurrentUser, team_id: int, user_id: int) -> None:
     try:
-        repo.set_member_role(session, team_id, user_id, role)
+        role_from = repo.delete_member(session, team_id, user_id)
+        if role_from is None:
+            session.rollback()
+            raise not_found()
+        team = repo.get_team(session, team_id)
+        if team is None:  # FK가 보장하므로 일어나지 않는다.
+            session.rollback()
+            raise not_found()
+        audit.record(
+            session,
+            actor=actor,
+            action="member.remove",
+            target_id=team_id,
+            target_name=team["name"],
+            details={"user_id": user_id, "role_from": role_from},
+        )
         session.commit()
-    except IntegrityError:
-        # 같은 소속을 동시에 추가한 경쟁: 상대가 이미 넣었으니 역할만 바꾼다.
+    except AppError:
+        raise
+    except BaseException:
         session.rollback()
-        repo.set_member_role(session, team_id, user_id, role)
-        session.commit()
-    return {"team_id": team_id, "user_id": user_id, "role": role}
-
-
-def remove_member(session: Session, team_id: int, user_id: int) -> None:
-    deleted = repo.delete_member(session, team_id, user_id)
-    if not deleted:
-        session.rollback()
-        raise not_found()
-    session.commit()
+        raise
 
 
 # --- 서버 명령(app/cli.py)용 ----
@@ -212,12 +333,24 @@ def create_first_admin(session: Session, *, login_id: str, display_name: str) ->
     """최초 관리자 생성. 새로 만들었으면 True, 이미 활성 관리자라 바꿀 것이 없으면 False(멱등).
 
     같은 로그인 ID가 일반 사용자이거나 비활성이면 `UserExistsError`: 명령 한 줄이 기존 계정의 권한을
-    조용히 올리지 않게 한다(관리자 화면 또는 다른 관리자가 바꾼다).
+    조용히 올리지 않게 한다(관리자 화면 또는 다른 관리자가 바꾼다). 행위자는 서버 명령(`CLI_ACTOR`,
+    행위자 번호 없음)이고 새로 만든 경우만 `user.bootstrap_admin`을 한 건 남긴다. 동시에 만든 쪽에
+    지면(IntegrityError) 다시 읽어 판정하며 같은 전이를 두 번 기록하지 않는다.
     """
     existing = repo.find_user_by_login_id(session, login_id)
     if existing is None:
         try:
-            repo.insert_user(session, login_id=login_id, display_name=display_name, is_admin=True)
+            row = repo.insert_user(
+                session, login_id=login_id, display_name=display_name, is_admin=True
+            )
+            audit.record(
+                session,
+                actor=CLI_ACTOR,
+                action="user.bootstrap_admin",
+                target_id=row["id"],
+                target_name=row["display_name"],
+                details={"is_admin": True},
+            )
             session.commit()
             return True
         except IntegrityError:
@@ -225,6 +358,9 @@ def create_first_admin(session: Session, *, login_id: str, display_name: str) ->
             existing = repo.find_user_by_login_id(session, login_id)
             if existing is None:
                 raise
+        except BaseException:
+            session.rollback()
+            raise
     if existing["is_admin"] and existing["is_active"]:
         return False
     raise UserExistsError(login_id)

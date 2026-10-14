@@ -23,7 +23,10 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # 동적 객체(`bi_data` schema의 ds_*, dv_*, de_*)는 마이그레이션 대상이 아니므로
 # test_migrations_do_not_manage_bi_data_objects가 막는다.
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
-# 여기에 기록한다.
+# 여기에 기록한다. **확인이 아직 없는 항목**은 `DROP_PENDING_PREFIX`로 시작하는 문구로 기록하며
+# 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 지금은 대기 항목이 없고(0007은
+# 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이 생기는 것을 막는다.
+DROP_PENDING_PREFIX = "사용자 확인 대기("
 DROP_APPROVED: dict[str, str] = {
     # 0003 downgrade()의 op.drop_table 3개(team_members, teams, users)는 06 §6의 표 역순 삭제다.
     # 새 승인이 아니라 기존 D2 규칙의 적용이며, Gate ③ 06 §6 승인(2026-10-11)과
@@ -58,6 +61,13 @@ DROP_APPROVED: dict[str, str] = {
         "DROP 확인: 사용자 승인 (2026-10-11 Gate ③ 06 §6 승인, 2026-10-12 FU-1 계획 승인 "
         "03b 15-2, 1e 착수 승인 03b 21-3·23, 06 §6 downgrade 표 삭제: superset_dashboards, "
         "superset_datasets. 정적 표 대상, 동적 객체 아님)"
+    ),
+    # 0007 downgrade()의 op.drop_table 1개(audit_log). 03b 29-1 ④의 "DROP 없음"은 upgrade() 기준으로
+    # 읽었고, downgrade()의 DROP은 사용자가 2026-10-14에 승인했다(03b 29-3).
+    "20261013_0007_audit_log.py": (
+        "DROP 확인: 사용자 승인 (2026-10-14, 03b 29-3 답: 0007 downgrade()의 "
+        "op.drop_table(audit_log) 1개. 정적 표 대상, 동적 객체 아님. downgrade는 감사 기록 전체를 "
+        "지우므로 운영에서는 하지 않고 실행 전 백업 필수)"
     ),
 }
 
@@ -158,16 +168,32 @@ def _drop_findings(tree: ast.Module) -> list[str]:
     return findings
 
 
+def _drop_findings_in(function: ast.FunctionDef) -> list[str]:
+    """함수 하나 안의 DROP(op.drop_*, SQL 문자열의 DROP)."""
+    findings = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call) and _call_name(node).startswith("drop_"):
+            findings.append(f"{_call_name(node)}(), 줄 {node.lineno}")
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and DROP_SQL.search(node.value)
+        ):
+            findings.append(f"SQL 문자열의 DROP, 줄 {node.lineno}")
+    return findings
+
+
 def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0006"]
+    assert heads == ["0007"]
 
 
 def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     script = ScriptDirectory.from_config(_alembic_config())
     assert [r.revision for r in script.walk_revisions()] == [
+        "0007",
         "0006",
         "0005",
         "0004",
@@ -181,6 +207,7 @@ def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     assert script.get_revision("0004").down_revision == "0003"
     assert script.get_revision("0005").down_revision == "0004"
     assert script.get_revision("0006").down_revision == "0005"
+    assert script.get_revision("0007").down_revision == "0006"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -217,15 +244,47 @@ def test_fixed_sql_detector(source, allowed):
     assert _is_fixed_sql(call.args[0]) is allowed
 
 
+def _is_approved(note: str) -> bool:
+    return "DROP 확인: 사용자 승인" in note
+
+
+def _is_pending(note: str) -> bool:
+    """확인 대기 표시. 승인 문구가 섞여 있으면 대기가 아니다(승인으로 오인되는 기록을 막는다)."""
+    return note.startswith(DROP_PENDING_PREFIX) and "사용자 승인" not in note
+
+
 def test_drop_requires_recorded_user_approval():
-    """D2: DROP(op.drop_*, SQL DROP)이 있으면 사용자 확인 기록(DROP_APPROVED)이 있어야 한다."""
+    """D2: DROP(op.drop_*, SQL DROP)이 있으면 사용자 확인 기록(DROP_APPROVED)이 있어야 한다.
+
+    기록은 승인("DROP 확인: 사용자 승인") 또는 명시적 확인 대기("사용자 확인 대기(")다. 기록이 아예
+    없거나 어느 쪽도 아니면 실패한다.
+    """
     for path in _revision_files():
         findings = _drop_findings(_parse(path))
         if findings:
             approval = DROP_APPROVED.get(path.name, "")
-            assert "사용자 승인" in approval, (
+            assert _is_approved(approval) or _is_pending(approval), (
                 f"{path.name}: DROP 발견({'; '.join(findings)}). 사용자 확인 기록이 필요하다."
             )
+
+
+def test_no_pending_drop_confirmations():
+    """확인 대기 DROP은 없다. 0007(03b 29-3)은 2026-10-14에 승인됐다.
+
+    새 대기 항목이 조용히 생기지 않게 하고(대기 문구는 이 시험을 깨뜨린다), 모든 DROP 기록이
+    승인 문구인지 확인한다.
+    """
+    pending = {name for name, note in DROP_APPROVED.items() if _is_pending(note)}
+    assert pending == set()
+    assert all(_is_approved(note) for note in DROP_APPROVED.values()), "승인이 아닌 DROP 기록"
+    assert "2026-10-14" in DROP_APPROVED["20261013_0007_audit_log.py"]
+
+
+def test_0007_drop_is_only_in_downgrade_never_in_upgrade():
+    """0007은 upgrade()에 DROP이 없다(새 표와 인덱스만 추가, 03b 29-1 ④). DROP은 downgrade뿐."""
+    tree = _parse(next(p for p in _revision_files() if "_0007_" in p.name))
+    assert _drop_findings_in(_function(tree, "upgrade")) == []
+    assert _drop_findings_in(_function(tree, "downgrade")) != []
 
 
 def test_drop_detector_flags_drop_calls_and_sql():
@@ -405,8 +464,27 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
         upgrade_sql
     )
     assert "CONSTRAINT uq_superset_dashboards_embedded_uuid UNIQUE (embedded_uuid)" in upgrade_sql
+    # 0007: 감사 기록 표, CHECK 6개, 인덱스 3개, 읽기·추가만 주는 GRANT 한 줄.
+    assert "CREATE TABLE audit_log (" in upgrade_sql
+    assert "id BIGINT GENERATED BY DEFAULT AS IDENTITY" in upgrade_sql
+    for check in (
+        "action",
+        "target_type",
+        "actor_source",
+        "actor_consistency",
+        "details_object",
+        "details_size",
+    ):
+        assert f"CONSTRAINT ck_audit_log_{check} CHECK" in upgrade_sql
+    assert "CREATE INDEX ix_audit_log_occurred_at_id ON audit_log (occurred_at DESC, id DESC)" in (
+        upgrade_sql
+    )
+    assert "GRANT SELECT, INSERT ON audit_log TO bi_app" in upgrade_sql
     command.downgrade(config, "head:base", sql=True)
     downgrade_sql = capsys.readouterr().out
+    assert downgrade_sql.index("DROP TABLE audit_log") < downgrade_sql.index(
+        "DROP TABLE superset_dashboards"
+    )
     assert downgrade_sql.index("DROP TABLE superset_dashboards") < downgrade_sql.index(
         "DROP TABLE superset_datasets"
     )
@@ -496,6 +574,10 @@ def _superset_revision() -> Path:
     return next(p for p in _revision_files() if "_0006_" in p.name)
 
 
+def _audit_revision() -> Path:
+    return next(p for p in _revision_files() if "_0007_" in p.name)
+
+
 def test_revisions_create_exactly_the_static_metadata_tables():
     """revision들이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
     from app.db_metadata import metadata
@@ -507,6 +589,7 @@ def test_revisions_create_exactly_the_static_metadata_tables():
             _dataset_revision(),
             _formula_revision(),
             _superset_revision(),
+            _audit_revision(),
         )
         for n in ast.walk(_function(_parse(path), "upgrade"))
         if isinstance(n, ast.Call) and _call_name(n) == "create_table"
@@ -591,6 +674,101 @@ def test_superset_revision_has_real_downgrade_and_minimal_grants():
     ]
 
 
+def _constraint_sql(table_name: str, name: str) -> str:
+    """정적 MetaData가 만드는 CHECK의 SQL 식(공백 한 칸으로 정리)."""
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    from app.db_metadata import metadata
+
+    ddl = str(CreateTable(metadata.tables[table_name]).compile(dialect=postgresql.dialect()))
+    match = re.search(rf"CONSTRAINT {name} CHECK \((.*)\)(?:,|\n)", ddl)
+    assert match, name
+    return " ".join(match.group(1).split())
+
+
+def test_audit_revision_has_real_downgrade_minimal_grant_and_no_upgrade_drop():
+    """0007: 읽기·추가 GRANT 한 줄(시퀀스·열 단위·PUBLIC·bi_readonly 없음), upgrade에 DROP 없음."""
+    tree = _parse(_audit_revision())
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    grants = _execute_args(_audit_revision(), "upgrade")
+    assert grants == ["GRANT SELECT, INSERT ON audit_log TO bi_app"]
+    joined = " ".join(grants).upper()
+    for forbidden in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "ALL", "PUBLIC"):
+        assert forbidden not in joined.replace(",", " ").split(), forbidden
+    assert "BI_READONLY" not in joined and "SEQUENCE" not in joined and "(" not in joined
+    assert _drop_findings_in(_function(tree, "upgrade")) == []
+    downgrade_calls = [
+        (_call_name(n), n.args[0].value if n.args and isinstance(n.args[0], ast.Constant) else None)
+        for n in ast.walk(_function(tree, "downgrade"))
+        if isinstance(n, ast.Call)
+    ]
+    assert downgrade_calls == [("drop_table", "audit_log")]
+    # 인덱스 3개와 CHECK 6개를 만든다.
+    upgrade_calls = [
+        _call_name(n) for n in ast.walk(_function(tree, "upgrade")) if isinstance(n, ast.Call)
+    ]
+    assert upgrade_calls.count("create_table") == 1
+    assert upgrade_calls.count("create_index") == 3
+    assert upgrade_calls.count("CheckConstraint") == 6
+
+
+def test_audit_revision_checks_match_static_metadata_and_audit_actions():
+    """revision의 CHECK 문장은 정적 MetaData와 같고, 행위 목록은 `audit.actions`와 같다."""
+    from app.audit.actions import ACTIONS
+    from app.db_metadata import (
+        AUDIT_ACTIONS,
+        AUDIT_ACTOR_SOURCES,
+        AUDIT_DETAILS_MAX_BYTES,
+        AUDIT_TARGET_TYPES,
+    )
+
+    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(AUDIT_ACTIONS) == 15
+    assert {spec.target_type for spec in ACTIONS.values()} <= set(AUDIT_TARGET_TYPES)
+    assert set(AUDIT_TARGET_TYPES) == {spec.target_type for spec in ACTIONS.values()}
+    assert AUDIT_ACTOR_SOURCES == ("user", "cli")
+    tree = _parse(_audit_revision())
+    in_revision: dict[str, str] = {}
+    for node in ast.walk(_function(tree, "upgrade")):
+        if isinstance(node, ast.Call) and _call_name(node) == "CheckConstraint":
+            sql = ast.literal_eval(node.args[0]) if isinstance(node.args[0], ast.Constant) else None
+            if sql is None:  # 문자열 이어 붙이기(암묵 연결은 Constant 하나로 합쳐진다)
+                raise AssertionError("CHECK는 보간 없는 문자열 상수여야 한다")
+            name_call = next(k.value for k in node.keywords if k.arg == "name")
+            in_revision[name_call.args[0].value] = " ".join(sql.split())
+    assert set(in_revision) == {
+        f"ck_audit_log_{n}"
+        for n in (
+            "action",
+            "target_type",
+            "actor_source",
+            "actor_consistency",
+            "details_object",
+            "details_size",
+        )
+    }
+    for full_name, sql in in_revision.items():
+        assert sql == _constraint_sql("audit_log", full_name), full_name
+    assert f"<= {AUDIT_DETAILS_MAX_BYTES}" in in_revision["ck_audit_log_details_size"]
+
+
+def test_audit_indexes_match_between_metadata_and_revision():
+    from app.db_metadata import audit_log
+
+    names = {i.name for i in audit_log.indexes}
+    assert names == {
+        "ix_audit_log_occurred_at_id",
+        "ix_audit_log_actor_user_id_occurred_at_id",
+        "ix_audit_log_target_type_target_id_occurred_at_id",
+    }
+    source = _audit_revision().read_text(encoding="utf-8")
+    for name in names:
+        assert f'"{name}"' in source
+    # 이름 길이는 PostgreSQL 식별자 한도(63바이트) 안이다.
+    assert all(len(n.encode()) <= 63 for n in names)
+
+
 def test_static_metadata_constraint_names_follow_convention():
     """제약 이름 규칙(NAMING_CONVENTION): CHECK는 이름 있는 제약, FK·PK·UNIQUE·인덱스 이름 확정."""
     from sqlalchemy.dialects import postgresql
@@ -612,7 +790,12 @@ def test_static_metadata_constraint_names_follow_convention():
     assert "CONSTRAINT fk_team_members_team_id_teams FOREIGN KEY" in ddl["team_members"]
     assert "CONSTRAINT fk_team_members_user_id_users FOREIGN KEY" in ddl["team_members"]
     index_names = {i.name for t in metadata.tables.values() for i in t.indexes}
-    assert index_names == {"ix_team_members_user_id"}
+    assert index_names == {
+        "ix_team_members_user_id",
+        "ix_audit_log_occurred_at_id",
+        "ix_audit_log_actor_user_id_occurred_at_id",
+        "ix_audit_log_target_type_target_id_occurred_at_id",
+    }
     # 0004 표: 열거는 text + 이름 있는 CHECK, 이름 유일 범위는 팀(데이터셋 이름)·데이터셋(열 이름).
     assert "CONSTRAINT uq_datasets_team_id_name UNIQUE (team_id, name)" in ddl["datasets"]
     assert "CONSTRAINT ck_datasets_date_unit CHECK" in ddl["datasets"]
@@ -650,6 +833,14 @@ def test_static_metadata_constraint_names_follow_convention():
     assert "CONSTRAINT uq_superset_dashboards_embedded_uuid UNIQUE (embedded_uuid)" in dash_ddl
     assert "CONSTRAINT ck_superset_dashboards_embedded_uuid_format CHECK" in dash_ddl
     assert "embedded_uuid UUID NOT NULL" in dash_ddl
+    # 0007 표: 감사 기록은 추가만 하는 표(bigint identity), 행위자는 users 외래키, 대상은 FK 없음.
+    audit_ddl = ddl["audit_log"]
+    assert "id BIGINT GENERATED BY DEFAULT AS IDENTITY" in audit_ddl
+    assert "CONSTRAINT pk_audit_log PRIMARY KEY (id)" in audit_ddl
+    assert "CONSTRAINT fk_audit_log_actor_user_id_users FOREIGN KEY(actor_user_id)" in audit_ddl
+    assert audit_ddl.count("FOREIGN KEY") == 1  # target_id는 여러 표를 가리키므로 외래키 없음
+    assert "details JSONB DEFAULT '{}' NOT NULL" in audit_ddl
+    assert "target_id BIGINT NOT NULL" in audit_ddl
 
 
 def test_team_code_check_matches_python_pattern():
