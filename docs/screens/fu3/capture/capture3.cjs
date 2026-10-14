@@ -44,9 +44,13 @@ const dumps = [], made = [], notes = [];
   const page = await ctx.newPage();
   page.on('pageerror', (e) => notes.push('pageerror: ' + String(e).slice(0, 200)));
 
+  // 항목 목록은 이름 가나다순이라 첫 항목은 '가스요금_A팀'이다. 전기요금_A팀을 눌러 고른다.
+  const pickElec = async () => { await page.getByRole('button', { name: '전기요금_A팀' }).click(); };
+
   // 1) 관리자: 목록과 값 표
   await login(IDS.admin);
   await open(page, '/reference-values');
+  await pickElec();
   await page.getByRole('table', { name: '전기요금_A팀 연도별 값' }).waitFor();
   await shot(page, 'fu3-s11-list');
 
@@ -57,6 +61,7 @@ const dumps = [], made = [], notes = [];
 
   // 3) 정정 확인창: 2026년 값 -> 13.00, 영향 데이터셋 목록(R6)이 보이는 상태. 확인(정정하기)은 누르지 않는다.
   await open(page, '/reference-values');
+  await pickElec();
   await page.getByRole('button', { name: '2026년 값 정정' }).click();
   await page.getByLabel('2026년 새 값').fill('13.00');
   await page.getByRole('button', { name: '정정 확인' }).click();
@@ -69,7 +74,7 @@ const dumps = [], made = [], notes = [];
   await login('stub-definer');
   await open(page, `/datasets/${IDS.dataset_id}`);
   await page.getByRole('button', { name: '계산 열 추가' }).first().click();
-  const box = page.getByLabel('수식');
+  const box = page.getByRole('textbox', { name: '수식' });
   await box.click();
   await box.pressSequentially('[사용량] * REF("');
   await page.getByRole('listbox', { name: '자동완성 후보' }).waitFor();
@@ -88,8 +93,26 @@ const dumps = [], made = [], notes = [];
   // 7) 비관리자(입력자): 목록과 값은 보이고 추가·정정 UI는 없다
   await login(IDS.member);
   await open(page, '/reference-values');
+  await pickElec();
   await page.getByRole('table', { name: '전기요금_A팀 연도별 값' }).waitFor();
   await shot(page, 'fu3-s11-nonadmin-readonly');
+
+  // 8) 감사 기록: 대상 종류 '기준값' (항목 만들기·연도 값 추가·정정 A→B)
+  await login(IDS.admin);
+  await open(page, '/admin/audit');
+  await page.getByLabel('대상 종류').selectOption('reference');
+  await page.getByRole('button', { name: '조회' }).click();
+  await page.getByRole('table', { name: '감사 기록' }).waitFor();
+  await shot(page, 'fu3-audit-reference-rows');
+
+  // 9) 기준 날짜 열 해제 시 BASE_DATE_IN_USE (행이 없는 데이터셋이어야 이 단계까지 온다)
+  await login('stub-definer');
+  await open(page, `/datasets/${IDS.empty_dataset_id}`);
+  await page.getByRole('button', { name: '데이터셋 설정' }).click();
+  await page.getByRole('form', { name: '데이터셋 설정' }).getByLabel('기준 날짜 열').selectOption('');
+  await page.getByRole('form', { name: '데이터셋 설정' }).getByRole('button', { name: '저장' }).click();
+  await page.getByText('REF를 쓰는 수식이 있어 기준 날짜 열을 해제할 수 없습니다').waitFor();
+  await shot(page, 'fu3-basedate-in-use');
 
   // 비밀값 대조
   let found = 0;

@@ -43,11 +43,20 @@ def must(result, expected=(200, 201, 204)):
 
 ADMIN, DEFINER, ENTRY = "stub-admin", "stub-definer", "stub-entry"
 
-# 1) 기준값 항목과 연도 값(관리자)
-elec = must(call(ADMIN, "POST", "/reference-items", {"name": "전기요금_A팀", "description": "A팀 사무실의 연도별 전기요금 단가"}))
-must(call(ADMIN, "POST", f"/reference-items/{elec['id']}/values", {"year": 2025, "value": "11.00"}))
-must(call(ADMIN, "POST", f"/reference-items/{elec['id']}/values", {"year": 2026, "value": "12.50"}))
-fx = must(call(ADMIN, "POST", "/reference-items", {"name": "환율"}))
+# 1) 기준값 항목과 연도 값(관리자). 전기요금_A팀은 2027년 값을 일부러 비운다(E4 칸).
+elec = must(call(ADMIN, "POST", "/reference-items", {"name": "전기요금_A팀", "description": "A팀 사무실의 연도별 전기요금 단가(원/kWh)"}))
+for year, value in ((2024, "10.00"), (2025, "11.00"), (2026, "12.50")):
+    must(call(ADMIN, "POST", f"/reference-items/{elec['id']}/values", {"year": year, "value": value}))
+gas = must(call(ADMIN, "POST", "/reference-items", {"name": "가스요금_A팀", "description": "A팀 가스 단가(원/MJ)"}))
+for year, value in ((2024, "21.30"), (2025, "22.10"), (2026, "23.40")):
+    must(call(ADMIN, "POST", f"/reference-items/{gas['id']}/values", {"year": year, "value": value}))
+fx = must(call(ADMIN, "POST", "/reference-items", {"name": "환율", "description": "연평균 원/달러"}))
+for year, value in ((2025, "1364.50"), (2026, "1402.25")):
+    must(call(ADMIN, "POST", f"/reference-items/{fx['id']}/values", {"year": year, "value": value}))
+# 감사 기록에 정정 행이 남도록 2025년 값을 한 번 정정한다(이전 11.00 -> 11.20). 화면 장면은 2026년 값을 쓴다.
+first = must(call(ADMIN, "GET", f"/reference-items/{elec['id']}/values"))["items"]
+v2025 = next(v for v in first if v["year"] == 2025)
+must(call(ADMIN, "PATCH", f"/reference-items/{elec['id']}/values/{v2025['id']}", {"value": "11.20"}))
 
 # 2) 데이터셋: stub-definer의 팀 번호는 /me에서 얻는다.
 me = must(call(DEFINER, "GET", "/me"))
@@ -70,10 +79,21 @@ version = ds["def_version"]
 saved = must(call(DEFINER, "POST", f"/datasets/{ds['id']}/formulas", {"expected_version": version, "display_name": "전기요금", "expression": '[사용량] * REF("전기요금_A팀")'}))
 version = saved["def_version"]
 formula_column_id = saved["column"]["id"]
-for day in ("2026-01-01", "2027-01-01"):
+for day in ("2026-01-01", "2026-02-01", "2027-01-01"):
     saved = must(call(ENTRY, "POST", f"/datasets/{ds['id']}/rows", {"expected_version": version, "cells": {str(base_col["id"]): day, str(usage_col["id"]): "100"}}))
     version = saved["def_version"]
 
+# 3) 행이 없는 데이터셋(기준 날짜 열 해제 시 BASE_DATE_IN_USE 장면용): REF 계산 열이 있고 행은 0개
+ds2 = must(call(DEFINER, "POST", "/datasets", {"team_id": team_id, "name": "신규 전력(행 없음)", "date_unit": "month"}))
+v2 = ds2["def_version"]
+c = must(call(DEFINER, "POST", f"/datasets/{ds2['id']}/columns", {"expected_version": v2, "display_name": "기준일", "type": "date", "required": True}))
+v2 = c["def_version"]
+d = must(call(DEFINER, "POST", f"/datasets/{ds2['id']}/columns", {"expected_version": v2, "display_name": "사용량", "type": "number"}))
+v2 = d["def_version"]
+d2 = must(call(DEFINER, "PATCH", f"/datasets/{ds2['id']}", {"expected_version": v2, "base_date_column_id": c["column"]["id"]}))
+v2 = d2["def_version"]
+must(call(DEFINER, "POST", f"/datasets/{ds2['id']}/formulas", {"expected_version": v2, "display_name": "가스요금", "expression": '[사용량] * REF("가스요금_A팀")'}))
+
 with open(OUT, "w", encoding="utf8") as handle:
-    json.dump({"admin": ADMIN, "member": ENTRY, "elec_id": elec["id"], "fx_id": fx["id"], "dataset_id": ds["id"], "formula_column_id": formula_column_id}, handle, ensure_ascii=False)
+    json.dump({"admin": ADMIN, "member": ENTRY, "elec_id": elec["id"], "fx_id": fx["id"], "gas_id": gas["id"], "dataset_id": ds["id"], "empty_dataset_id": ds2["id"], "empty_dataset_name": "신규 전력(행 없음)", "formula_column_id": formula_column_id}, handle, ensure_ascii=False)
 print("시드 완료", OUT)
