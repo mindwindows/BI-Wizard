@@ -217,7 +217,7 @@ superset_dashboards = Table(
 
 # --- 감사 기록 표(06 §2-1, revision 0007) ----
 # 행위 목록의 원본은 04 §5-1이다. 새 행위는 값 한 줄 + 이 CHECK 교체(새 revision) + `app/audit`의
-# 허용 키 표 한 줄 + 시험이다. `app/audit/actions.py`가 같은 17개 이름을 쓰는지 시험이 대조한다.
+# 허용 키 표 한 줄 + 시험이다. `app/audit/actions.py`가 같은 20개 이름을 쓰는지 시험이 대조한다.
 AUDIT_ACTIONS = (
     "dataset.create",
     "dataset.update",

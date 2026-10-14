@@ -84,7 +84,7 @@ curl "$BASE/reference-items/1/usage"            # R6(관리자): 이 항목을 �
 - `formula-column`: `REF` 함수·E4·C0 코드(`REF_UNKNOWN`·`BASE_DATE_REQUIRED`)·뷰 게이트(10절).
 - `dataset-definition`: 기준 날짜 열, `BASE_DATE_IN_USE`.
 - `permission-management`: 관리자 판정, 감사 행위 20개·대상 `reference`, 실제 PostgreSQL 시험 절차.
-- `data-entry`: 입력 그리드가 계산 열의 E4를 오류 칸으로 보인다.
+- `data-entry`: 입력 그리드가 계산 열의 E4를 "기준값 없음"(주황 점선)으로 구별 표시한다.
 - `dashboard-link`: 차트는 `dv_` 뷰를 읽으므로 정정이 차트 값에 반영된다.
 - `admin-cleanup`: 기준값 수동 정리(감사 기록에 남지 않음).
 - `local-environment`: `0009` 마이그레이션 왕복.

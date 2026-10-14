@@ -36,6 +36,8 @@ NAMES = [
     "요금\ud800A",  # 서로게이트
     "요금\u00a0A",  # 줄 바꿈 없는 공백(Zs)은 서식 문자가 아니다
     "😀 요금",
+    "요금\ue000A",  # Co: 수식 상수는 허용하고 항목 이름은 거부한다
+    "요금\u0378A",  # Cn
 ]
 
 
@@ -46,7 +48,29 @@ def test_item_name_rules_are_at_least_as_strict_as_the_formula_text_constant_rul
     if constant_problem:
         assert rules.name_has_forbidden_chars(name), repr(name)
     if rules.name_has_forbidden_chars(name) and not constant_problem:
-        assert any(ch in name for ch in '[]"'), repr(name)  # 더 엄격한 곳은 대괄호·따옴표뿐
+        # 더 엄격한 곳은 대괄호·따옴표와 사용 영역(Co)·미지정(Cn) 문자뿐이다(아래 시험이 명시한다)
+        assert any(ch in name for ch in '[]"') or any(
+            unicodedata.category(ch) in {"Co", "Cn"} for ch in name
+        ), repr(name)
+
+
+@pytest.mark.parametrize(
+    ("name", "why"),
+    [
+        ("요금\ue000A", "Co(사용자 영역)"),
+        ("요금\u0378A", "Cn(미지정 코드 포인트)"),
+        ("요금[A]", "대괄호(수식 문법이 이름을 다시 읽는 데 필요)"),
+        ('요금"A"', "따옴표(같은 이유)"),
+    ],
+)
+def test_reference_is_stricter_than_the_formula_constant_rules_for_these_characters(name, why):
+    """reference 이름 규칙이 수식 글자 상수 규칙보다 **더 엄격한** 곳을 명시한다.
+
+    수식 상수는 이 글자를 허용하지만(`text_constant_problem`이 None) 항목 이름으로는 거부한다.
+    반대(수식 상수는 거부하는데 이름은 허용)는 위 시험이 막는다.
+    """
+    assert text_constant_problem(normalize_text_constant(name)) is None, why
+    assert rules.name_has_forbidden_chars(name), why
 
 
 NUMBERS = [

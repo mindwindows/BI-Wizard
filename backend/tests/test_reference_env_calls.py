@@ -57,7 +57,9 @@ def test_every_compile_call_in_the_formula_package_passes_env():
     for path in sorted(FORMULA.glob("*.py")):
         for name, node in calls_of(path):
             where = f"{path.name} 줄 {node.lineno}: {name}()"
-            assert not node.args[2:] or name == "compile_all", f"{where}: 위치 인수로 env를 넘기지 않는다"
+            assert not node.args[2:] or name == "compile_all", (
+                f"{where}: 위치 인수로 env를 넘기지 않는다"
+            )
             for keyword in node.keywords:
                 assert keyword.arg is not None, f"{where}: **kwargs로 env를 숨기지 않는다"
             env = [k for k in node.keywords if k.arg == "env"]
@@ -67,7 +69,7 @@ def test_every_compile_call_in_the_formula_package_passes_env():
                 f"{where}: env=None 상수는 REF를 막는 우회다"
             )
             seen[path.name] = seen.get(path.name, 0) + 1
-    # 07 §3-2의 호출 지점이 모두 실제로 있다(정확한 횟수는 단정하지 않는다: 지점이 늘어도 위 검사가 지킨다)
+    # 07 §3-2의 호출 지점이 실제로 있다(정확한 횟수는 단정하지 않는다: 늘어도 위 검사가 지킨다)
     for needed in ("service.py", "hook.py", "reconcile.py", "views.py", "api.py"):
         assert seen.get(needed, 0) >= 1, f"{needed}에 컴파일 호출이 없다(호출 지점이 사라졌다)"
     assert seen["service.py"] >= 4  # check·preview·save·view_formula

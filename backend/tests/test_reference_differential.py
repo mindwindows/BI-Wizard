@@ -235,7 +235,7 @@ def test_reference_bundle_preview_view_and_python_oracle_agree(ctx: Ctx, db: Db)
     seed_reference_items(db, ctx.uid("admin"))
     bundle = Bundle(ctx, db)
     formula_count = datasets = formulas_total = 0
-    first: tuple[int, dict[int, Formula], list[Row], str] | None = None
+    firsts: dict[str, tuple[int, dict[int, Formula], list[Row]]] = {}  # 단위마다 첫 데이터셋
     for unit in ("day", "month", "year"):
         for shift in range(DATASETS_PER_UNIT):
             dataset_id, _cols = bundle.build(unit, shift)
@@ -248,32 +248,39 @@ def test_reference_bundle_preview_view_and_python_oracle_agree(ctx: Ctx, db: Db)
             datasets += 1
             formulas_total += len(saved)
             formula_count = len(saved)
-            if first is None:
-                first = (dataset_id, saved, rows, unit)
-    assert first is not None
+            firsts.setdefault(unit, (dataset_id, saved, rows))
+    assert set(firsts) == {"day", "month", "year"}
     cells_before = bundle.stats["cells"]
 
-    # --- 정정·추가 뒤(뷰 재생성 없이) 같은 비교 ----
-    dataset_id, saved, rows, _unit = first
-    defs_before = (view_def(db, dataset_id), view_def(db, dataset_id, "de"))
+    # --- 정정·추가 뒤(뷰 재생성 없이) 같은 비교: 일·월·연 데이터셋 각각 ----
     from tests.formula_api_helpers import dataset_hash
 
-    hash_before = dataset_hash(db, dataset_id)
+    before = {
+        unit: (
+            (view_def(db, ds_id), view_def(db, ds_id, "de")),
+            dataset_hash(db, ds_id),
+        )
+        for unit, (ds_id, _saved, _rows) in firsts.items()
+    }
     admin = CurrentUser(
         id=ctx.uid("admin"), display_name="관리자", is_admin=True, is_active=True, memberships=()
     )
     updated = {name: dict(per_year) for name, per_year in ITEMS.items()}
-    item_id = next(r["id"] for r in item_rows(db) if r["name"] == "단가")
-    value_row = next(r for r in value_rows(db) if r["item_id"] == item_id and r["year"] == 2024)
-    with Session(db.engine) as session:
-        reference_service.update_value(session, admin, item_id, value_row["id"], value="20.5")
+    ids = {r["name"]: r["id"] for r in item_rows(db)}
+    value_row = next(r for r in value_rows(db) if r["item_id"] == ids["단가"] and r["year"] == 2024)
+    with Session(db.engine) as session:  # 정정 1건
+        reference_service.update_value(session, admin, ids["단가"], value_row["id"], value="20.5")
     updated["단가"][2024] = "20.5"
-    with Session(db.engine) as session:
-        reference_service.add_value(session, admin, item_id, year=2027, value="7")
+    with Session(db.engine) as session:  # 연도 추가 1건: 2027년 행이 E4에서 값으로 바뀐다
+        reference_service.add_value(session, admin, ids["단가"], year=2027, value="7")
     updated["단가"][2027] = "7"
-    bundle.compare(dataset_id, saved, rows, updated)
-    assert (view_def(db, dataset_id), view_def(db, dataset_id, "de")) == defs_before
-    assert dataset_hash(db, dataset_id) == hash_before  # 정정·추가는 뷰 정의를 바꾸지 않는다
+    with Session(db.engine) as session:  # 다른 항목의 없던 연도 추가: 2025년 행이 E4에서 값으로
+        reference_service.add_value(session, admin, ids["공제"], year=2025, value="3.5")
+    updated["공제"][2025] = "3.5"
+    for unit, (ds_id, saved_ds, rows_ds) in firsts.items():
+        bundle.compare(ds_id, saved_ds, rows_ds, updated)
+        assert (view_def(db, ds_id), view_def(db, ds_id, "de")) == before[unit][0], unit
+        assert dataset_hash(db, ds_id) == before[unit][1], unit  # 뷰 정의가 그대로다
 
     # --- C0 거부 사례: 모든 수식이 거부되고 코드가 기대와 같다 ----
     rejected: dict[str, str] = {}

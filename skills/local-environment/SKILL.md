@@ -212,7 +212,7 @@ docker compose --profile test rm -f postgres-test     # 테스트 DB 컨테이�
   - `GET ${SUPERSET_APP_ROOT}/health` — Superset (`OK`)
   - 공통: 모든 `/api` 응답에 `X-Request-ID` 헤더가 붙는다. 이 두 health 경로만 인증 없이 열려 있고, 그 밖의 `/api` 경로는 `current_user`를 거쳐 신원 어댑터가 없으면 401 `UNAUTHENTICATED`이고, 사용자 조회 중 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다(로그아웃과 구분하며 접근은 닫혀 있다)(신원 방식은 미결정 8번이라 어댑터는 `AUTH_STUB_ENABLED=true`일 때만 스텁이 연결된다). 요청 처리 중 DB 연결 실패·끊김·풀 고갈과 **긴 잠금 아래 pg8000 소켓 시간 초과(`connect_args timeout` 5초; SQLAlchemy가 감싸지 않는 `TimeoutError`·`ConnectionError`·pg8000 `InterfaceError` 포함)도 503 `SERVICE_UNAVAILABLE`**이며 로그에는 예외 클래스 이름과 `request_id`만 남는다. 오류는 `{"error": {"code", "message", "details", "request_id"}}` 형식이고 `request_id`는 헤더와 같다. 장애 때 이 id로 `docker compose logs backend`를 찾는다.
 - command: `scripts\*.bat`, `docker compose …`, `alembic …`(migrate 서비스 안)
-- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`과 정적 표 `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`·`superset_datasets`·`superset_dashboards`·`audit_log`, schema `bi_data`에 동적 객체), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
+- DB: 앱 DB(`POSTGRES_DB`: `public`에 `alembic_version`과 정적 표 `users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`formulas`·`formula_deps`·`superset_datasets`·`superset_dashboards`·`audit_log`·`reference_items`·`reference_values`, schema `bi_data`에 동적 객체), 메타 DB `superset`, 역할 `bi_owner`/`bi_app`/`bi_readonly`/`superset_meta`
 
 ## 7. 실패 시 확인 방법
 | 증상 | 원인 | 확인과 해결 |

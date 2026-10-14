@@ -15,7 +15,8 @@
 - 기간 규칙(기준 날짜 열): `NOT NULL` + CHECK(기간 첫날) + 유일 인덱스. CHECK 식의 단위 글자는 고정
   집합(`day`·`month`·`year`)에서만 온다.
 - 뷰(`dv_`·`de_`)는 `create_view`/`drop_view`로만 만든다. 만들기 전에 뷰 정의(SELECT)를 허용
-  목록 규칙으로 확인한다(자기 `ds_<번호>` 한 표만 읽음, `text()`·`literal_column` 없음, 허용 목록
+  목록 규칙으로 확인한다(뷰는 자기 `ds_<번호>` 한 표를 읽고, 0009부터 `REF` 서브쿼리 안에서만
+  `public.reference_values` 한 표를 읽는다. `text()`·`literal_column` 없음, 허용 목록
   `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음, 바인드 값은 숫자·글자·참거짓·날짜뿐이며 글자는 NUL·
   역슬래시·제어·서식 문자가 없어야 한다(formula 렌더러의 1차 방어와 별개인 방어 중복)).
   **서브쿼리는 `REF`의 한 가지 모양만 통과한다**(FU-3, 03b 32-3 안 B): 호출자가 넘긴
