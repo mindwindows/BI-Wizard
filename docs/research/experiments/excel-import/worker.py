@@ -10,6 +10,7 @@ mode
   scan_formula  : data_only=False로 훑으며 수식 셀(data_type 'f') 개수 세기(수식 감지 비용)
   e2e_months    : 월 = 열 -> 월 = 행 전치 + 셀 검증 end-to-end (인수 item_cap=100|0, year=2026)
   e2e_table     : 월 = 행 표를 그대로 읽어 행마다 검증(전치 없음)
+  e2e_stream    : 모든 칸을 숫자로 변환·검증하는 최악 시나리오(keep=1 전량 보관 / keep=0 배치 처리 뒤 버림)
 환경변수 OPENPYXL_DEFUSEDXML=False 로 defusedxml 자동 사용을 끌 수 있다(openpyxl 기능).
 최대 RSS는 resource.getrusage(RUSAGE_SELF).ru_maxrss(KiB). 기준 RSS는 import 직후 값이다.
 """
@@ -101,6 +102,17 @@ def check_rules(d):
     return None
 
 
+def nonempty(row):
+    """행의 값이 있는 칸 수와 마지막 값이 있는 열 번호(1부터). iter_rows(max_col=N)는 N칸으로 채워 돌려주므로
+    셀 수·열 수는 길이가 아니라 값이 있는 칸으로 센다."""
+    n = last = 0
+    for k, v in enumerate(row, start=1):
+        if v is not None:
+            n += 1
+            last = k
+    return n, last
+
+
 def run_scan(wb, out):
     ws = wb[wb.sheetnames[0]]
     rows = cells = 0
@@ -111,16 +123,17 @@ def run_scan(wb, out):
         if rows > MAX_ROWS:
             stop = "행 상한 초과"
             break
-        if len(row) > MAX_COLS and row[MAX_COLS] is not None:
+        n, last = nonempty(row)
+        if last > MAX_COLS:
             stop = "열 상한 초과"
             break
-        n = len(row)
         cells += n
         if cells > MAX_CELLS:
             stop = "셀 상한 초과"
             break
         for v in row:
-            types[type(v).__name__] += 1
+            if v is not None:
+                types[type(v).__name__] += 1
     out.update(rows=rows, cells=cells, stop=stop, types=dict(types))
 
 
@@ -163,11 +176,18 @@ def run_e2e_months(path, opt, out):
     items = []  # (표시 이름, 행 번호)
     values = {}  # (item index) -> {period: Decimal}
     rows_seen = 0
+    cells_total = 0
     t = time.perf_counter()
     for r_idx, row in enumerate(ws.iter_rows(max_row=MAX_ROWS + 1, max_col=MAX_COLS + 1, values_only=True), start=1):
         rows_seen = r_idx
         if r_idx > MAX_ROWS:
             raise Limit("행 상한 초과")
+        n_ne, last_col = nonempty(row)
+        cells_total += n_ne
+        if last_col > MAX_COLS:
+            raise Limit("열 상한 초과")
+        if cells_total > MAX_CELLS:
+            raise Limit("셀 상한 초과")
         if header_row is None:
             if r_idx > 30:
                 raise Limit("머리글 행을 찾지 못함(상단 30행)")
@@ -221,7 +241,7 @@ def run_e2e_months(path, opt, out):
     out["t_transpose"] = round(time.perf_counter() - t, 3)
     out.update(
         header_row=header_row, rows_scanned=rows_seen, items=len(items), periods=len(periods), dup_periods=dup,
-        out_rows=len(out_rows), out_cells=len(out_rows) * len(items), errors_total=err_total,
+        cells_nonempty=cells_total, out_rows=len(out_rows), out_cells=len(out_rows) * len(items), errors_total=err_total,
         errors_listed=len(errors), truncated=err_total > len(errors), warnings=dict(warn), year=year_hint,
     )
 
@@ -233,12 +253,17 @@ def run_e2e_table(path, opt, out):
     rows_out, errors, err_total = [], [], 0
     seen_periods = Counter()
     ncols = 0
+    cells_total = 0
     for r_idx, row in enumerate(ws.iter_rows(max_row=MAX_ROWS + 2, max_col=MAX_COLS + 1, values_only=True), start=1):
         if r_idx == 1:
             ncols = len(row)
             continue
         if r_idx > MAX_ROWS + 1:
             raise Limit("행 상한 초과")
+        n_ne, last_col = nonempty(row)
+        cells_total += n_ne
+        if last_col > MAX_COLS or cells_total > MAX_CELLS:
+            raise Limit("열 또는 셀 상한 초과")
         d0 = row[0]
         period, why = headers.parse_period_header(d0)
         if period is None:
@@ -258,8 +283,46 @@ def run_e2e_table(path, opt, out):
         seen_periods[(rec[1], period)] += 1
         rows_out.append(tuple(rec))
     wb.close()
-    out.update(rows=len(rows_out), ncols=ncols, errors_total=err_total, errors_listed=len(errors),
+    out.update(rows=len(rows_out), ncols=ncols, cells_nonempty=cells_total, errors_total=err_total, errors_listed=len(errors),
                dup_keys=sum(1 for v in seen_periods.values() if v > 1))
+
+
+def run_e2e_stream(path, opt, out):
+    """모든 칸을 숫자로 변환·검증하는 최악 시나리오. keep=1이면 결과 전부를 메모리에 모으고(전량 보관),
+    keep=0이면 batch=1000행씩 처리 뒤 버린다(DB 적재를 흉내 낸 스트리밍)."""
+    keep = opt.get("keep", "0") == "1"
+    batch_n = int(opt.get("batch", "1000"))
+    wb = open_ro(path)
+    ws = wb[wb.sheetnames[0]]
+    kept, batch, cells_total, err_total, rows = [], [], 0, 0, 0
+    for r_idx, row in enumerate(ws.iter_rows(max_row=MAX_ROWS + 1, max_col=MAX_COLS + 1, values_only=True), start=1):
+        if r_idx == 1:
+            continue
+        if r_idx > MAX_ROWS + 1:
+            raise Limit("행 상한 초과")
+        n_ne, last_col = nonempty(row)
+        cells_total += n_ne
+        if last_col > MAX_COLS:
+            raise Limit("열 상한 초과")
+        if cells_total > MAX_CELLS + MAX_COLS:  # 머리글 한 줄만큼 여유(시료가 2,000,100칸)
+            raise Limit("셀 상한 초과")
+        rec = []
+        for k, v in enumerate(row[:MAX_COLS]):
+            d, err, _ = to_number(v)
+            if err or (d is not None and check_rules(d)):
+                err_total += 1
+                continue
+            rec.append(d)
+        rows += 1
+        batch.append(tuple(rec))
+        if len(batch) >= batch_n:
+            if keep:
+                kept.extend(batch)
+            batch = []
+    if keep:
+        kept.extend(batch)
+    wb.close()
+    out.update(rows=rows, cells_nonempty=cells_total, errors_total=err_total, keep=keep, batch=batch_n)
 
 
 def main():
@@ -301,6 +364,8 @@ def main():
                 if not r.ok:
                     raise Limit("사전 검사 거부: " + ",".join(r.codes))
             run_e2e_months(path, opt, out)
+        elif mode == "e2e_stream":
+            run_e2e_stream(path, opt, out)
         elif mode == "e2e_table":
             run_e2e_table(path, opt, out)
         else:

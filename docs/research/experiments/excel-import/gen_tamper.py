@@ -154,7 +154,7 @@ def sheets_declared_5000(p):
 
 # --- XML 공격 ---
 LAUGH = (
-    b'<!DOCTYPE lolz [<!ENTITY lol "lol">'
+    b'<!DOCTYPE lolz [<!ENTITY lol0 "lol">'
     + b"".join(b'<!ENTITY lol%d "%s">' % (k, b"&lol%d;" % (k - 1) * 10) for k in range(1, 10))
     + b"]>"
 )

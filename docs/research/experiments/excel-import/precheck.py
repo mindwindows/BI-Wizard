@@ -30,6 +30,7 @@ class Limits:
     max_entry_unc: int = 100 * 1024 * 1024  # 항목 하나의 해제 크기
     max_entries: int = 1000
     max_sheets: int = 30
+    max_nodim_sheet_unc: int = 20 * 1024 * 1024  # <dimension> 없는 시트는 열 때 전부 파싱되므로 해제 크기를 더 낮게 제한
     max_small_xml: int = 2 * 1024 * 1024  # [Content_Types].xml, workbook.xml
     reject_external_links: bool = True  # 정책 선택: 거부(true) 또는 경고만(false)
 
@@ -163,6 +164,13 @@ def _check_zip(zf: zipfile.ZipFile, f: Findings, lim: Limits) -> None:
                 break
             if DTD_RE.search(head):
                 f.add("DTD", "허용되지 않는 XML 선언(DTD)이 있습니다.")
+                break
+            if (
+                i.filename.startswith("xl/worksheets/sheet")
+                and b"<dimension" not in head
+                and i.file_size > lim.max_nodim_sheet_unc
+            ):
+                f.add("NO_DIMENSION_BIG", "시트 정보가 비정상입니다(범위 정보 없이 큰 시트).")
                 break
     ct = zf.getinfo("[Content_Types].xml")
     wb = zf.getinfo("xl/workbook.xml")

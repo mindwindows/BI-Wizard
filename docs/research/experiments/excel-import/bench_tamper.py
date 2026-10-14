@@ -1,4 +1,4 @@
-"""사전 검사를 건너뛰고(= openpyxl만으로) 변조 파일을 열었을 때의 동작 측정. 사용: python bench_tamper.py <tamper폴더> <결과.jsonl> <site폴더>
+"""사전 검사를 건너뛰고(= openpyxl만으로) 변조 파일을 열었을 때의 동작 측정. 사용: python bench_tamper.py <tamper폴더> <결과.jsonl> <site폴더> [이름 ...]
 
 항상 docker(--memory=1g --memory-swap=1g, 120초 timeout)에서 실행한다: 폭탄이 호스트 메모리를 쓰지 않게 하고 OOM kill(종료 코드 137)을 관찰하기 위해서다.
 같은 파일을 사전 검사(precheck.py)가 거부하는지는 run_precheck.py 표를 본다.
@@ -36,6 +36,8 @@ def run(folder, site, name, defused):
 def main():
     folder, out, site = sys.argv[1:4]
     names = sorted(f[:-5] for f in os.listdir(folder) if f.endswith(".xlsx") and not f.startswith("_"))
+    if sys.argv[4:]:  # 이름을 주면 그 파일만
+        names = [n for n in names if n in sys.argv[4:]]
     with open(out, "a") as fh:
         for name in names:
             for defused in ([True, False] if name in XML_ATTACKS else [True]):

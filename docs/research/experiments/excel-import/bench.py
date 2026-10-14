@@ -47,7 +47,6 @@ MATRIX = [
     ("worst_sst.xlsx", "scan_ro", [], {}),
     ("worst_sst.xlsx", "scan_ro", [], {"OPENPYXL_DEFUSEDXML": "False"}),
     ("worst_sst.xlsx", "open_normal", [], {}),
-    ("worst_sst.xlsx", "e2e_months", ["item_cap=100"], {}),
 ]
 
 

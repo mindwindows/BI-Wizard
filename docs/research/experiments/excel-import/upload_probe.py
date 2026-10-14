@@ -4,9 +4,10 @@
 시나리오마다 uvicorn 서버를 새로 띄워 서버 프로세스의 최대 RSS(/proc/self/status VmHWM)를 읽는다.
 - up_5mb      : 4.9 MiB 파일을 멀티파트로(UploadFile). SpooledTemporaryFile이 디스크로 넘어갔는지(_rolled) 확인
 - raw_5mb     : 같은 파일을 application/octet-stream 본문으로, request.stream()을 상한 검사하며 BytesIO에 모음
-- raw_6mb_cl  : 6 MiB 본문 + Content-Length -> 읽기 전에 413
+- raw_7mb_cl  : 7 MiB 본문 + Content-Length -> 읽기 전에 413 (상한 5 MiB + 여유 1 MiB 초과)
 - raw_chunked : 길이를 모르는 청크 전송 64 MiB -> 상한(5 MiB + 1 MiB 여유)에서 중단하고 413
 - up_64mb     : 멀티파트 64 MiB. 앱에는 상한 검사가 없다(프록시 몫임을 보이기 위한 대조)
+- + RequestBodyLimitMiddleware: starlette.middleware.body_limit(상한 + 1MiB)을 켠 뒤 64 MiB / 5 MiB 멀티파트
 """
 
 import os
@@ -25,6 +26,9 @@ from fastapi.responses import JSONResponse
 import io
 app = FastAPI()
 LIMIT = 5 * 1024 * 1024
+if os.environ.get("MW") == "1":  # Starlette 내장 본문 상한 미들웨어(상한 + 1MiB 여유)
+    from starlette.middleware.body_limit import RequestBodyLimitMiddleware
+    app.add_middleware(RequestBodyLimitMiddleware, max_body_size=LIMIT + 1048576)
 
 def hwm():
     for line in open("/proc/self/status"):
@@ -54,11 +58,11 @@ def get_hwm():
 '''
 
 
-def start(work):
+def start(work, extra_env=None):
     path = os.path.join(work, "probe_server.py")
     with open(path, "w") as fh:
         fh.write(SERVER)
-    env = {**os.environ, "TMPDIR": work, "PYTHONPATH": work}
+    env = {**os.environ, "TMPDIR": work, "PYTHONPATH": work, **(extra_env or {})}
     p = subprocess.Popen([sys.executable, "-m", "uvicorn", "probe_server:app", "--port", str(PORT), "--log-level", "warning"],
                          env=env, cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(50):
@@ -78,8 +82,8 @@ def chunks(total, size=65536):
         sent += n
 
 
-def scenario(work, name, fn):
-    p = start(work)
+def scenario(work, name, fn, extra_env=None):
+    p = start(work, extra_env)
     try:
         base = httpx.get(f"http://127.0.0.1:{PORT}/hwm").json()["vmhwm_mb"]
         t0 = time.perf_counter()
@@ -106,9 +110,11 @@ def main():
     print("| --- | --- | --- | --- | --- |")
     scenario(work, "up_5mb (멀티파트 UploadFile)", lambda b: httpx.post(b + "/up", files={"file": ("x.xlsx", open(sample, "rb"), "application/octet-stream")}, timeout=60))
     scenario(work, "raw_5mb (octet-stream, 스트리밍 BytesIO)", lambda b: httpx.post(b + "/raw", content=open(sample, "rb").read(), headers={"content-type": "application/octet-stream"}, timeout=60))
-    scenario(work, "raw_6mb_cl (6MiB, Content-Length 있음)", lambda b: httpx.post(b + "/raw", content=os.urandom(6 * 1048576), timeout=60))
+    scenario(work, "raw_7mb_cl (7MiB, Content-Length 있음 -> 읽기 전에 거부)", lambda b: httpx.post(b + "/raw", content=os.urandom(7 * 1048576), timeout=60))
     scenario(work, "raw_chunked (64MiB, 길이 모름)", lambda b: httpx.post(b + "/raw", content=chunks(64 * 1048576), timeout=60))
     scenario(work, "up_64mb (멀티파트 64MiB, 앱 상한 없음)", lambda b: httpx.post(b + "/up", files={"file": ("x.xlsx", chunks_to_bytes(64), "application/octet-stream")}, timeout=120))
+    scenario(work, "up_64mb + RequestBodyLimitMiddleware(6MiB)", lambda b: httpx.post(b + "/up", files={"file": ("x.xlsx", chunks_to_bytes(64), "application/octet-stream")}, timeout=120), {"MW": "1"})
+    scenario(work, "up_5mb + RequestBodyLimitMiddleware(6MiB)", lambda b: httpx.post(b + "/up", files={"file": ("x.xlsx", open(sample, "rb"), "application/octet-stream")}, timeout=60), {"MW": "1"})
 
 
 def chunks_to_bytes(mib):
