@@ -1,6 +1,6 @@
 # 04. 모듈 경계·기능↔Skill 대응·기능 단위 순서 (FU-1 범위)
 
-**상태: 승인(2026-10-11, 03b 6절)** — architect. 05~08 초안의 부록 A 변경 제안과 문서 간 불일치를 통합했다. **EW-1·EW-3·EW-4 구현 결과 반영(2026-10-12, EW-5): 사실(상태·이름·개수)만 갱신했고 승인된 결정은 바꾸지 않았다.** **FU-2a(감사 로그) 계약 반영(2026-10-13, `03b` 29-1 범위): `audit` 모듈(§2-1·§3), 화면 S10(§4), 감사 기록 규칙·행위 목록(§5-1), Skill 대응(§6), 순서(§7), 부록 A. 행 보관·데이터셋 보관은 FU-2b로 미뤘다.**
+**상태: 승인(2026-10-11, 03b 6절)** — architect. 05~08 초안의 부록 A 변경 제안과 문서 간 불일치를 통합했다. **EW-1·EW-3·EW-4 구현 결과 반영(2026-10-12, EW-5): 사실(상태·이름·개수)만 갱신했고 승인된 결정은 바꾸지 않았다.** **FU-2a(감사 로그) 계약 반영(2026-10-13, `03b` 29-1 범위): `audit` 모듈(§2-1·§3), 화면 S10(§4), 감사 기록 규칙·행위 목록(§5-1), Skill 대응(§6), 순서(§7), 부록 A. 행 보관·데이터셋 보관은 FU-2b로 미뤘다.** **FU-2b(데이터셋 보관·복구) 계약 반영(2026-10-14, `03b` 30-1 범위): `dataset` 모듈 책임(§2-2)·정의 변경 진입점 규칙(§5), 화면 S2·S4·S10(§4), 감사 행위 17개(§5-1), Skill 대응(§6), 순서(§7), 부록 A. 행·열·수식 보관과 영구 삭제는 후속이다.**
 - Gate ③ MODULARIZE. 의존 결정: 브리프 5절 2·3·6·7·8(스텁 전제)·9·10·11번(`docs/gate-status.md`), 범위 `03b` 5절(FU-1), 승인 `03b` 6절, 실험 `03c`. 원문은 `03b n-n`·`03c X-n` 참조로만 건다.
 - [제안]·[미답] 표지는 `03b` 6-2에 따라 모두 승인된 것으로 읽는다(남은 [승인 필요]·AP는 `03b` 6-3 기준).
 - 표지: **[미답]** 사용자가 답하지 않아 기본값으로 쓴 곳 / **[제안]** 문서 작성자가 낸 안(모음은 §9-2) / **해소(03c A-27)** 열 표시 이름 갱신 확인됨(조건부 가능, 08 §2-3).
@@ -26,7 +26,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 모듈 | 책임 | 소유 정적 표 | 소유 동적 객체 | 외부 의존(허용) | 확장점 |
 | --- | --- | --- | --- | --- | --- |
 | `access` | 팀·사용자·소속(역할) 관리, 비활성화, 최초 관리자 서버 명령, `/api/me`, 팀 이름 변경 뒤 팀 단위 동기화 요청 | `users` `teams` `team_members`(쓰기) | - | core(포트), auth, audit | 데이터셋별 예외 권한(후속) |
-| `dataset` | 데이터셋·열 정의(타입, 필수·범위, 기준 날짜 열, 날짜 단위, 열 구분 태그), 정의 버전, 등록 + 원본 표 생성을 한 트랜잭션, **정의 변경 진입점**(§5) | `datasets` `dataset_columns` | `ds_<번호>` (ddl 경유) | core, auth, ddl, audit | 열 타입 등록, 검증 규칙 등록, 정의 변경 훅 호출 |
+| `dataset` | 데이터셋·열 정의(타입, 필수·범위, 기준 날짜 열, 날짜 단위, 열 구분 태그), 정의 버전, 등록 + 원본 표 생성을 한 트랜잭션, **정의 변경 진입점**(§5), **데이터셋 보관·복구**(FU-2b: `status` 한 칸 전환, 정의·표·뷰·버전은 그대로, §5) | `datasets` `dataset_columns` | `ds_<번호>` (ddl 경유) | core, auth, ddl, audit | 열 타입 등록, 검증 규칙 등록, 정의 변경 훅 호출 |
 | `entry` | 한 기간 = 한 행 입력: 행 조회(계산 열 값·오류는 `RowViewPort`로 받음), 칸 단위 값 비교 갱신, 붙여넣기 일괄(충돌 시 전부 취소), 서버 재검증 | 없음 | `ds_<번호>` 행 읽기·쓰기(DDL 아님) | core(포트 포함), auth, dataset(정의 읽기) | 행·열 전환 보기를 나중에 추가할 수 있게 저장 형식 고정 |
 | `formula` | 수식 파싱·정적 검사·순환 검사, `dv_` 뷰(와 오류 판정 뷰) 생성·시작 시 재생성(정의 해시), 미리보기, 수식 보기, 오류 칸·뷰 재생성 점검 | `formulas` `formula_deps` | `dv_<번호>`, `de_<번호>` (ddl 경유) | core, auth, dataset(정의 읽기·정의 변경 진입점 호출), ddl | 함수 사전, 리터럴 렌더러 접점 한 곳, `RowViewPort` 구현 |
 | `superset` | 서비스 계정으로 가상 데이터셋 등록·열 새로고침, 동기 상태, 대시보드 연결(관리자), 입장권 발급, 임베딩 | `superset_datasets` `superset_dashboards` | 없음(Superset 쪽 역할·계정은 `superset-init`) | core, auth, dataset(읽기), ddl(이름 규칙만), audit(대시보드 연결 기록만), `httpx` → Superset | `DatasetSyncPort` 구현 |
@@ -49,19 +49,22 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 화면 | 영역 개요 | Skill |
 | --- | --- | --- |
 | S1 포털 셸·접근 안내(B) | 상단 Navigation, 작업 팀 선택(여러 팀 소속), 미등록 사용자에게 "접근 권한이 없습니다". 개발 빌드 한정 스텁 신원 전환기 | permission-management |
-| S2 데이터셋 목록(B) | 이름·팀·날짜 단위·생성자·생성일, 동기 상태(`GET /superset/datasets`에서 받아 화면이 결합), 소속 팀 데이터셋 상단 정렬(`03b` 2-4), "새 데이터셋"(정의 담당자) | dataset-definition |
+| S2 데이터셋 목록(B) | 이름·팀·날짜 단위·생성자·생성일, 동기 상태(`GET /superset/datasets`에서 받아 화면이 결합), 소속 팀 데이터셋 상단 정렬(`03b` 2-4), "새 데이터셋"(정의 담당자). **FU-2b:** ① 보기 선택 "사용 중 / 보관됨 / 전체"(기본 "사용 중", B1 `status=active\|archived\|all`), ② `status=archived` 행에 "보관" 배지, ③ 그 팀의 정의 담당자에게만 행마다 "보관"(사용 중 행)·"복구"(보관 행) 버튼, 누르면 **이름 입력 없는 단순 확인창**: 보관 확인창 문구 = "보관하면 이 데이터셋의 정의와 입력이 잠기고 기본 목록에서 숨겨집니다. 복구하면 다시 고칠 수 있습니다. **보관해도 Superset과 읽기 전용 뷰로는 계속 보이며, 데이터를 감추려면 영구 삭제가 따로 필요합니다(아직 없음).**" 복구 확인창은 한 줄 확인. 관리자라도 그 팀 정의 담당자가 아니면 버튼 없음(403 시 "정의 담당자만 할 수 있습니다"). ④ 이름 충돌(B2·B4 409)은 서버 메시지("보관된 데이터셋과 같은 이름" 덧붙음)를 그대로 보인다 | dataset-definition |
 | S3 데이터셋 만들기(B 폼) | 팀·이름·날짜 단위 입력 후 작업공간으로 이동. 열은 작업공간에서 추가 | dataset-definition |
-| S4 작업공간(C) | 중앙 입력 그리드, 우측 Inspector(열 기본·검증·수식), 수식 편집기(열 이름 칩·자동완성·쉬운 말 오류·미리보기 행), 계산 열 표시와 수식 보기(열람자 읽기 전용), 오류 칸 구별 표시 | data-entry, formula-column, dataset-definition |
+| S4 작업공간(C) | 중앙 입력 그리드, 우측 Inspector(열 기본·검증·수식), 수식 편집기(열 이름 칩·자동완성·쉬운 말 오류·미리보기 행), 계산 열 표시와 수식 보기(열람자 읽기 전용), 오류 칸 구별 표시. **FU-2b:** 데이터셋 `status`가 `archived`면 작업공간 위에 읽기 전용 배너("보관된 데이터셋입니다. 복구하기 전에는 고칠 수 없습니다", 정의 담당자에게는 "복구" 버튼), 입력 그리드·붙여넣기·행 추가·Inspector 편집·열 추가·수식 패널의 저장/만들기를 비활성(열람·수식 보기·미리보기·검사는 허용). 보관 중 저장 요청이 409 `DATASET_ARCHIVED`로 돌아오면(다른 사람이 방금 보관) 같은 배너로 바꾸고 편집 상태를 닫는다 | data-entry, formula-column, dataset-definition |
 | S5 점검(B) | 계산 오류 칸 목록(데이터셋·열·기간) | formula-column |
 | S6 권한 관리(B, 관리자) | 팀×사용자 격자, 팀 만들기·소속·역할·비활성화, 저장 전 변경 요약 확인창 | permission-management |
 | S7 대시보드 목록·보기 | 연결된 대시보드 목록, 선택 시 Embedded iframe, "차트 만들기" 새 창 링크와 작성자 안내문(지원 차트 6가지 목록, 차트에 시간 필터 필요, 팀 열; 08 §5) | dashboard-link |
 | S8 대시보드 연결 관리(B, 관리자) | 대시보드 이름과 embedded uuid 수동 등록·해제 | dashboard-link |
 | S9 관리자 현황(B, 관리자) | Superset 동기 상태·다시 시도(`superset` 모듈 API) + 뷰 재생성 실패·다시 시도(`/checks/views`, `formula` 모듈 API, `/health` 본문과 같은 정보). 화면·Skill은 `dashboard-link` | dashboard-link |
-| S10 감사 기록 목록(B, 관리자, FU-2a) | 읽기 전용 표(일시·행위자·행위·대상·요약, 최신순, 50건 단위 페이지, F1). **필터 줄:** 기간(시작일·종료일 날짜 선택, 둘 다 선택 사항), 행위자(사용자 선택, A5 목록으로 채움), 대상 종류(팀·사용자·데이터셋·대시보드)와 대상 번호(대상 종류를 고른 뒤에만 입력 가능), 행위(한국어 이름, §5-1 표 15개). "조회" 누르면 첫 페이지, "필터 지우기" 제공. **요약**은 `details`를 쉬운 말로 풀어 쓴다(예: "이름 '가'→'나'", "역할 입력자→정의 담당자", "연결 해제"). 서버 `details`에 없는 정보는 보이지 않으며 행 값·수식 원문은 어디에도 없다. **빈 상태:** 필터가 없으면 "아직 기록이 없습니다", 필터가 있으면 "조건에 맞는 기록이 없습니다" + 필터 지우기. **비관리자:** 상단 메뉴에 항목이 없고, 주소로 직접 열면 403을 받아 "관리자만 볼 수 있습니다" 안내(목록·필터를 그리지 않음). 오류: 503이면 "잠시 후 다시 시도" + 재시도 버튼. 수정·삭제·내보내기 버튼 없음. 스크린샷 `fu2a-{화면}-{상태}.png`(목록, 필터, 빈 상태, 비관리자 거부, `03b` 29-2) | permission-management |
+| S10 감사 기록 목록(B, 관리자, FU-2a) | 읽기 전용 표(일시·행위자·행위·대상·요약, 최신순, 50건 단위 페이지, F1). **필터 줄:** 기간(시작일·종료일 날짜 선택, 둘 다 선택 사항), 행위자(사용자 선택, A5 목록으로 채움), 대상 종류(팀·사용자·데이터셋·대시보드)와 대상 번호(대상 종류를 고른 뒤에만 입력 가능), 행위(한국어 이름, §5-1 표 17개). "조회" 누르면 첫 페이지, "필터 지우기" 제공. **요약**은 `details`를 쉬운 말로 풀어 쓴다(예: "이름 '가'→'나'", "역할 입력자→정의 담당자", "연결 해제"; FU-2b: `dataset.archive` = "데이터셋 보관", `dataset.restore` = "데이터셋 복구"로 대상 이름과 함께 보인다). 서버 `details`에 없는 정보는 보이지 않으며 행 값·수식 원문은 어디에도 없다. **빈 상태:** 필터가 없으면 "아직 기록이 없습니다", 필터가 있으면 "조건에 맞는 기록이 없습니다" + 필터 지우기. **비관리자:** 상단 메뉴에 항목이 없고, 주소로 직접 열면 403을 받아 "관리자만 볼 수 있습니다" 안내(목록·필터를 그리지 않음). 오류: 503이면 "잠시 후 다시 시도" + 재시도 버튼. 수정·삭제·내보내기 버튼 없음. 스크린샷 `fu2a-{화면}-{상태}.png`(목록, 필터, 빈 상태, 비관리자 거부, `03b` 29-2) | permission-management |
+
+- FU-2b 스크린샷(`03b` 30-2, 1920×1080) `fu2b-{화면}-{상태}.png`: S2 보기 필터·배지, 보관 확인창, 보관 중 읽기 전용 배너, 이름 충돌 안내, 복구.
 
 ## 5. 모듈 간 규칙·확장점
 - 층 규칙: router는 service만, service는 자기 repo와 다른 모듈의 service 함수만 호출한다. 다른 모듈 표의 쓰기는 소유 모듈의 service 함수로만 한다. SQL(SQLAlchemy 표현식)은 repo와 `ddl`에만 둔다.
 - 정의 변경 진입점(dataset service, 06 §3-5): 순서 고정 = `datasets` 행 잠금 → `def_version` 확인 → 열 변경(원본 열·계산 열 INSERT, 계산 열 결과 형 `type` 갱신) → 정의 변경 훅 → `def_hash` 기록. formula가 직접 쓰는 것은 훅 안의 `formulas`·`formula_deps`와 `ddl` 뷰뿐이고, `dataset_columns`·`def_version`·`def_hash`는 진입점 함수가 쓴다(그래서 훅은 새 열 `id`가 있는 상태에서 불린다). 시작 시 재생성·재시도(05 D10)는 같은 진입점의 "버전을 올리지 않는" 형태다. 행 쓰기의 `datasets` 행 잠금·버전 확인도 dataset service 함수로 감싼다(06 §5).
+- **보관 상태 판정(FU-2b, `03b` 30-1):** 잠근 행에서 `status`를 함께 읽어(`lock_dataset`·`lock_dataset_shared`의 조회 열에 `status` 추가) `archived`면 409 `DATASET_ARCHIVED`를 올리고 롤백한다. 위치는 **잠금 직후, `expected_version` 비교보다 앞**이다. 적용 범위는 `bump=True`인 정의 변경 진입점 호출(B4 B5 B6 D4 D5)과 행 쓰기 함수(C2 C3 C4)이며 `bump=False`(D10 retry·시작 시 재생성)에는 적용하지 않는다(뷰 복구는 정의 변경이 아니다). 보관·복구(B7·B8)는 이 진입점을 쓰지 않는 별도 service 함수다: `lock_dataset` → `status` UPDATE → `audit.record` → 커밋. `def_version`·`def_hash`·열·훅·`ddl`·동기 요청을 건드리지 않는다.
 - 경계 금지: 브라우저 → DB 직접 호출 금지. 브라우저 → Superset REST API 호출 금지(허용 접근은 Embedded iframe과 새 창 링크 둘뿐, 입장권은 FastAPI가 발급하고 서버가 직접 서명하지 않음). 프런트 API 경로는 `config.ts` 한 곳에서 `${basePath}/api`로 조립하고 하드코딩하지 않는다. 클라이언트가 보낸 `rls`·Superset 숫자 id는 받지 않는다(08). SQL 문자열 조립과 `text()` 금지.
 - 확장점 합격선: 함수 추가 = 함수 사전 항목 1개 + 시험 사례(`03b` 5-2 K6) / 열 타입 추가 = 타입 등록 1곳 / 신원 방식 교체 = `auth` 1곳 / 보기 전환 = 저장 형식 변경 없이 화면만 추가.
 
@@ -72,14 +75,16 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | A. 직접 호출(제안) | 쓰기 service가 `audit.service.record(session, …)`를 같은 세션에서 부른다 | §5 층 규칙("service는 다른 모듈의 service 함수만 호출")에 맞고, `audit`은 core·auth 위에 있어 호출자(access·dataset·superset)가 아래를 부르는 **정방향**이다(§3 순환 없음). 포트 연결 누락 없이 import만으로 호출이 보장되고 시험이 호출 여부를 직접 단정한다 |
 | B. `core/ports.py` 포트 | `AuditPort`를 core에 정의하고 audit이 구현, 앱 팩토리가 연결 | 포트는 **역방향** 호출(§3: 훅·동기·`RowViewPort`)을 뒤집는 장치라 이 경우 필요가 없다. 기존 포트는 미등록일 때 no-op 기본 구현(`DefinitionHooks` 빈 등록부, `NoopDatasetSync`)으로 조용히 넘어가는데, 감사에서는 연결 누락이 **기록 없는 변경**(fail-open)이 되어 부적합하다 |
 - `record`는 `commit`·`rollback`을 하지 않고 호출한 쪽이 `session.commit()` **앞에서** 부른다(같은 트랜잭션, 06 §1·§5). INSERT가 실패하면 변경도 실패한다(기존 DB 오류 경로, 감사 없는 변경은 없다). 행위자 인자는 `CurrentUser`(→ `actor_source=user`) 또는 명시적 서버 명령 표식(→ `cli`, 행위자 NULL)이고 그 외는 오류다.
-- **정의 변경 한 곳:** `dataset.definition.apply_definition_change`(§5)가 호출자가 넘긴 **행위 서술**(행위 이름과 `details` 구성 함수)을 받아 `changed=True`일 때만 훅 뒤·`def_version`·`def_hash` 기록 뒤·커밋 앞에서 `record`를 한 번 부른다. 그래서 B4·B5·B6·D4·D5는 이 함수 하나에서 기록되고 formula 모듈은 `audit`을 직접 부르지 않는다. 이 함수는 행위자(`CurrentUser`)를 받아야 하므로 해당 service 함수 시그니처가 늘어난다(구현 몫). B2는 이 함수를 쓰지 않으므로 `create_dataset`이 훅 뒤·커밋 앞에서 직접 기록한다.
+- **정의 변경 한 곳:** `dataset.definition.apply_definition_change`(§5)가 호출자가 넘긴 **행위 서술**(행위 이름과 `details` 구성 함수)을 받아 `changed=True`일 때만 훅 뒤·`def_version`·`def_hash` 기록 뒤·커밋 앞에서 `record`를 한 번 부른다. 그래서 B4·B5·B6·D4·D5는 이 함수 하나에서 기록되고 formula 모듈은 `audit`을 직접 부르지 않는다. 이 함수는 행위자(`CurrentUser`)를 받아야 하므로 해당 service 함수 시그니처가 늘어난다(구현 몫). B2는 이 함수를 쓰지 않으므로 `create_dataset`이 훅 뒤·커밋 앞에서 직접 기록한다. FU-2b의 B7·B8도 이 함수를 쓰지 않고(`bump` 없음) `archive_dataset`·`restore_dataset`이 `status` UPDATE 뒤·커밋 앞에서 직접 기록한다.
 
-### 기록 대상 행위 15개 (실제 service 함수와 1:1, `action`의 전체 값 = 06 §2-1 CHECK)
+### 기록 대상 행위 17개 (실제 service 함수와 1:1, `action`의 전체 값 = 06 §2-1 CHECK)
 `details` 공통: `target_name`(대상 이름 스냅샷, 글자). `changes`는 `{필드: {from, to}}`(스칼라만). 모든 `def_version`은 변경 뒤 값. 금지 항목·크기는 06 §2-1.
 | `action` | API | service 함수(파일) | `target_type` · `target_id` | 허용 `details` 키(`target_name` 외) |
 | --- | --- | --- | --- | --- |
 | `dataset.create` | B2 | `create_dataset` (`backend/app/dataset/service.py`) | dataset · 새 데이터셋 번호 | `team_id`, `date_unit`, `def_version` |
 | `dataset.update` | B4 | `update_dataset` (같은 파일) | dataset · 데이터셋 번호 | `team_id`, `changes`(`name`·`date_unit`·`base_date_column_id`), `def_version` |
+| `dataset.archive` | B7 | `archive_dataset` (같은 파일, FU-2b) | dataset · 데이터셋 번호 | `team_id` (`def_version` 없음: 보관은 정의 버전을 올리지 않는다) |
+| `dataset.restore` | B8 | `restore_dataset` (같은 파일, FU-2b) | dataset · 데이터셋 번호 | `team_id` (`def_version` 없음) |
 | `column.add` | B5 | `add_column` (같은 파일) | dataset · 데이터셋 번호 | `column_id`, `column_name`, `column_type`, `required`, `def_version` |
 | `column.update` | B6 | `update_column` (같은 파일) | dataset · 데이터셋 번호 | `column_id`, `column_name`(변경 뒤), `changes`(`display_name`·`required`·`tag`·`position`), `rules_changed`(불리언, 규칙 값은 기록하지 않음), `def_version` |
 | `formula_column.add` | D4 | `create_formula_column` (`backend/app/formula/service.py`) | dataset · 데이터셋 번호 | `column_id`, `column_name`, `result_type`, `ast_hash`, `def_version` |
@@ -98,10 +103,10 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 
 ### 정확히 1건 / 0건 규칙 (시험으로 단정)
 1. **한 API 호출(또는 서버 명령 한 번) = 감사 행 최대 1건.** 여러 service 함수·표를 거쳐도 행위 이름은 호출이 대표하는 하나다. 예: D4는 열 INSERT + `formulas`·`formula_deps` + `dv_`·`de_` 재생성 + `def_hash` 기록이 한 트랜잭션이어도 `formula_column.add` 1건뿐이고, 훅 안의 `set_formula_result_type`·`clear_column_tag` 같은 내부 호출은 따로 기록하지 않는다. A4처럼 한 호출이 여러 필드(이름과 활성)를 바꾸면 **1건**에 `changes`로 함께 담는다. 기록은 호출당 한 번만 부르는 진입 지점(위 정의 변경 진입점, 또는 service 함수 끝)에 두고 repo·hook·내부 helper에서는 부르지 않는다.
-2. **실제로 바뀐 것이 있을 때만 1건, 없으면 0건.** 0건인 경우: 값이 같은 PATCH(B4·B6·A4·A7·E5), 빈 본문 PATCH(A4·A7: 200), 같은 AST·같은 결과 형으로 다시 저장하는 PUT(D5: 현행 "같은 수식: 버전을 올리지 않는다"), 이미 같은 역할인 A8 재요청, 이미 활성 관리자인 `create-admin` 재실행(`False`, 멱등). 판정은 DB에 쓴 결과(변경된 행 여부, 쓰기 전 값과의 비교)로 하며 호출 인자로 하지 않는다. **현행 코드 중 이 규칙을 맞추려면 고칠 곳(구현 몫):** `set_member`는 역할이 같아도 UPDATE를 하고 `update_dashboard`는 값이 같아도 UPDATE를 하므로 변경 여부를 판정하는 조회·조건(`role IS DISTINCT FROM` 같은 비교)이 필요하다.
-3. **실패·롤백이면 0건:** 409(`ALREADY_EXISTS`·`DEFINITION_VERSION_MISMATCH`·`LAST_ADMIN`·`TARGET_INACTIVE` 등)·404·422·503(`DEFINITION_BUSY`) 등 모든 오류 응답, 서버 명령의 `UserExistsError`, 트랜잭션 중간 실패는 감사 행도 남기지 않는다(같은 트랜잭션).
+2. **실제로 바뀐 것이 있을 때만 1건, 없으면 0건.** 0건인 경우: 값이 같은 PATCH(B4·B6·A4·A7·E5), 빈 본문 PATCH(A4·A7: 200), 같은 AST·같은 결과 형으로 다시 저장하는 PUT(D5: 현행 "같은 수식: 버전을 올리지 않는다"), 이미 같은 역할인 A8 재요청, 이미 활성 관리자인 `create-admin` 재실행(`False`, 멱등), **이미 같은 상태인 B7·B8 재요청(200, FU-2b: 잠근 행의 `status`와 비교)**. 판정은 DB에 쓴 결과(변경된 행 여부, 쓰기 전 값과의 비교)로 하며 호출 인자로 하지 않는다. **현행 코드 중 이 규칙을 맞추려면 고칠 곳(구현 몫):** `set_member`는 역할이 같아도 UPDATE를 하고 `update_dashboard`는 값이 같아도 UPDATE를 하므로 변경 여부를 판정하는 조회·조건(`role IS DISTINCT FROM` 같은 비교)이 필요하다.
+3. **실패·롤백이면 0건:** 409(`ALREADY_EXISTS`·`DEFINITION_VERSION_MISMATCH`·`LAST_ADMIN`·`TARGET_INACTIVE`·`DATASET_ARCHIVED` 등)·404·422·503(`DEFINITION_BUSY`) 등 모든 오류 응답, 서버 명령의 `UserExistsError`, 트랜잭션 중간 실패는 감사 행도 남기지 않는다(같은 트랜잭션).
 4. 경쟁 상황: A8의 동시 추가 경쟁(`IntegrityError` 뒤 역할 갱신)과 `create-admin` 동시 실행은 **실제로 일어난 전이**마다 정확히 1건이고 지는 쪽이 같은 전이를 다시 기록하지 않는다(재시도 경로에서 쓰기 전 값을 다시 읽는다).
-5. 시험 단정(구현 단위가 만든다): 행위 15개 각각에 대해 ① 성공 1건과 `details` 키가 허용 목록과 같음 ② 변경 없음 0건 ③ 대표 오류 0건 ④ 롤백(훅·DDL 실패 주입) 0건 ⑤ 감사 INSERT 실패 주입 시 변경도 롤백. 목록 밖 쓰기 경로가 생기는 것을 막도록 "기록 대상 표(`users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`superset_dashboards`)를 쓰는 service 함수는 §5-1 표에 있거나, 정의 변경 진입점 안에서만 불리는 helper(`add_formula_column` 등, 진입점의 기록에 포함)이거나, 제외 목록에 있다"를 확인하는 점검을 둔다 [제안].
+5. 시험 단정(구현 단위가 만든다): 행위 17개 각각에 대해 ① 성공 1건과 `details` 키가 허용 목록과 같음 ② 변경 없음 0건 ③ 대표 오류 0건 ④ 롤백(훅·DDL 실패 주입) 0건 ⑤ 감사 INSERT 실패 주입 시 변경도 롤백. 목록 밖 쓰기 경로가 생기는 것을 막도록 "기록 대상 표(`users`·`teams`·`team_members`·`datasets`·`dataset_columns`·`superset_dashboards`)를 쓰는 service 함수는 §5-1 표에 있거나, 정의 변경 진입점 안에서만 불리는 helper(`add_formula_column` 등, 진입점의 기록에 포함)이거나, 제외 목록에 있다"를 확인하는 점검을 둔다 [제안].
 
 ## 6. 기능 ↔ 제품 Skill 대응표 (승인)
 `skills/<기능>/SKILL.md`(제품 사용설명서, 형식 `product-skill-authoring`)다. `.claude/skills`·`.claude/agents`(개발 하네스)와는 별개이며, FU-1 Skill 5개는 소단위 완료 때 코드와 함께 만들고 연관 Skill은 양방향으로 적는다. 기존 `skills/local-environment`는 유지한다. API 경로는 05를 따른다.
@@ -113,9 +118,10 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | FU-1d | `formula-column` | 같은 행 수식, 검사·미리보기, 수식 보기, 오류 칸, 뷰 재생성 점검 | S4 수식 편집기, S5 | `/api/datasets/{id}/formulas` (검사·미리보기·수식 보기), `/api/formulas/functions`, `/api/checks` (오류 칸·뷰 재생성) | formulas, formula_deps, `dv_*`, `de_*` | dataset-definition, data-entry, dashboard-link |
 | FU-1e | `dashboard-link` | Superset 등록, 대시보드 연결·보기, 차트 작성 링크, 동기·뷰 현황 화면 | S7, S8, S9 | `/api/dashboards` (입장권), `/api/superset` (동기 상태·다시 시도) | superset_datasets, superset_dashboards | dataset-definition, formula-column, permission-management |
 | FU-2a | `permission-management`(확장 [제안]) | 관리자의 감사 기록 조회(기간·행위자·대상·행위 필터). 아래 제안 참고 | S10 | `/api/audit-logs` | audit_log | dataset-definition, formula-column, dashboard-link (기록되는 변경을 일으키는 Skill, 양방향 한 줄) |
-| (FU-1 운영) | `admin-cleanup` | 잘못 만든 열·데이터셋을 관리자가 수동 정리(FU-1에는 삭제·보관 수단이 없음). 초안: 1b·1d 구현 뒤 검증 | - | 없음(Superset 관리자 화면, `psql` `bi_owner`) | 06·08 정적 표와 `ds_*` `dv_*` `de_*` | dataset-definition, dashboard-link |
+| FU-2b | `dataset-definition`(확장) | 데이터셋 보관·복구(정의 담당자), 보관의 뜻과 한계 안내(Superset·읽기 전용 뷰에는 계속 보임, 데이터를 감추려면 영구 삭제가 따로 필요), 보관 중 막히는 일, 이름 점유. 관리자의 복구 경로(비활성 팀의 정의 담당자 지정 가능 여부)는 **실측 후 기록**(`03b` 30-1 결정 2) | S2, S4 배너 | `/api/datasets/{id}/archive` `/restore`, `/api/datasets?status=` | datasets(`status`), audit_log | data-entry, formula-column, dashboard-link, permission-management (보관 중 편집 불가·감사 기록, 양방향 한 줄) |
+| (FU-1 운영) | `admin-cleanup` | 잘못 만든 열·데이터셋을 관리자가 수동 정리(FU-1에는 삭제 수단이 없고, FU-2b는 데이터셋 보관만 제공: 보관은 정리가 아니다. 뷰·Superset 등록·`ds_` 데이터는 그대로). 초안: 1b·1d 구현 뒤 검증 | - | 없음(Superset 관리자 화면, `psql` `bi_owner`) | 06·08 정적 표와 `ds_*` `dv_*` `de_*` | dataset-definition, dashboard-link |
 - `feature-unit`은 "한 단위 = Skill 하나"이므로 FU-1을 Skill 단위인 1a~1e로 나눠 각각 완료 기준을 적용한다(승인 `03b` 6-2). `admin-cleanup`은 수동 운영 절차 문서이며 코드 단위가 아니다(`03b` 6-2).
-- **FU-2a Skill 제안(사용자 확인):** 감사 조회는 `permission-management`에 "감사 기록 조회" 절로 적는다. 근거: 기록되는 변경의 대부분이 팀·사용자·소속(이 Skill의 관리자 화면 군)이고 조회자도 같은 관리자이며, 엔드포인트가 하나·화면이 하나라 `feature-unit`의 "Skill 하나"를 새로 만들 만큼 독립 기능이 아니다. `admin-cleanup`(수동 정리 절차 문서)에는 넣지 않는다: 그 절차는 서비스를 거치지 않는 `psql` 작업이라 `audit_log`에 남지 않는다는 점만 한 줄 정정한다(현재 "서비스의 `audit_log`는 FU-2 이후" 문구 갱신). 대안: 별도 Skill `audit-log` 신설(기록 규칙이 늘면 분리). `dataset-definition`·`formula-column`·`dashboard-link`에는 "이 변경은 감사 기록에 남는다(15개 중 해당 행위)"를 연관 Skill 줄로 적는다. Skill 문서 수정은 이 문서 승인 뒤 구현 단위가 한다.
+- **FU-2a Skill 제안(사용자 확인):** 감사 조회는 `permission-management`에 "감사 기록 조회" 절로 적는다. 근거: 기록되는 변경의 대부분이 팀·사용자·소속(이 Skill의 관리자 화면 군)이고 조회자도 같은 관리자이며, 엔드포인트가 하나·화면이 하나라 `feature-unit`의 "Skill 하나"를 새로 만들 만큼 독립 기능이 아니다. `admin-cleanup`(수동 정리 절차 문서)에는 넣지 않는다: 그 절차는 서비스를 거치지 않는 `psql` 작업이라 `audit_log`에 남지 않는다는 점만 한 줄 정정한다(현재 "서비스의 `audit_log`는 FU-2 이후" 문구 갱신). 대안: 별도 Skill `audit-log` 신설(기록 규칙이 늘면 분리). `dataset-definition`·`formula-column`·`dashboard-link`에는 "이 변경은 감사 기록에 남는다(17개 중 해당 행위)"를 연관 Skill 줄로 적는다. Skill 문서 수정은 이 문서 승인 뒤 구현 단위가 한다.
 - 05의 `/health`·`/health/db`(H1·H2)는 `local-environment` Skill에, 개발·시험 전용 `/dev/*`(DV1~DV3)는 `permission-management` Skill에 둔다.
 
 ## 7. 기능 단위 순서 (승인)
@@ -129,13 +135,14 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 3 | FU-1d | formulas·formula_deps(`0005`), 파서·정적 검사·순환 검사, `dv_`(와 `de_`) 생성·정의 해시·시작 시 재생성, 미리보기, 수식 보기, 오류 칸, 뷰 점검 → 수식 편집기, S5 | 2 | 데이터셋마다 뷰 1개(수식 열이 없어도, 팀 열 포함)를 정의 변경 훅이 만든다(승인 `03b` 6-2) |
 | 4 | FU-1e | superset_*(`0006`), 서비스 계정 등록, 연결 uuid 등록, 입장권 발급(`rls` 빈 목록, 속도 제한) → S7, S8, S9 | 1d | 하위 경로(STRIP true/false) + Embedded 재검증, 지원 차트 6가지 시험(08 P5) |
 | 5 | FU-2a(FU-1 다음 단위, §7-2) | audit_log(`0007`), `audit.record`, 15개 기록 지점(access·dataset·superset), `GET /audit-logs` → S10 | 4(FU-1 전체) | 새 환경변수·의존성 없음. `DROP_APPROVED` 확인 1건(06 §6). 시험 단정은 §5-1 |
+| 6 | FU-2b(§7-2) | revision `0008`(CHECK 2개 교체), `archive_dataset`·`restore_dataset`, B1 `status`, B7·B8, 보관 중 쓰기 거부 8개, 시작 대조에 보관 포함 → S2 보기·배지·버튼·확인창, S4 배너, S10 문구 2개 | 5 | 새 환경변수·의존성·GRANT 변경 없음. `DROP_APPROVED` 승인 4건(2026-10-14, 06 §6). 시험 단정은 §5-1과 06 §5 |
 - EW 대응(`03b` 5-4): EW-1 계정 분리 = 0~1d의 DB 전제(구현·검증됨 2026-10-11), EW-3 Superset 서비스·발급 계정과 EW-4 `bi_guest` = 1e의 전제(구현·검증됨 2026-10-12, QA 독립 검증과 reviewer 차단 0건), EW-5 = 문서·하네스 정리(완료 2026-10-12), EW-6·7 = 통합 검증·reviewer 점검(완료 2026-10-12, QA 통과·reviewer 차단 0건). EW-2(업로드 상한)는 가져오기 단위로 넘긴다. 붙여넣기 요청 상한은 A안(1MiB 이하)으로 승인되어(`03b` 6-2) nginx `client_max_body_size` 변경은 FU-1에 없다.
 
 ### 7-2. FU-1 다음 단위 순서 제안 (세부 설계 없음, 의존 순서)
 | 단위 | 이유 |
 | --- | --- |
 | **FU-2a 감사 로그**(확정, `03b` 29-1) | 이후 단위가 쓰기 흐름을 늘리기 전에 `audit_log`와 기록 지점(§5-1)을 먼저 넣어야 재작업이 적다. revision `0007`, `audit` 모듈, 15개 행위 기록, F1, S10. 선행: FU-1 전체(대상 service가 모두 있음) |
-| FU-2b 보관·삭제 정책(후속, 질문 Q2~Q8은 그때) | 행 보관(복구)·데이터셋 보관과 뷰·인덱스 조건. 보관·삭제 행위는 FU-2b가 `action`·`target_type` CHECK를 교체해 감사에 추가한다. FU-2a에는 없다 |
+| **FU-2b 데이터셋 보관·복구**(확정, `03b` 30-1) | 범위는 데이터셋 보관·복구뿐이다. 행 보관, 열·수식 보관, 영구 삭제(`deleted`), 30일 뒤 `DROP`은 제외하고 후속 질문(Q2·Q3 본체·Q5~Q7)으로 남는다. revision `0008`, B7·B8, 감사 행위 2개(15 → 17). 선행: FU-2a |
 | FU-3 기준값 표 | 수식 확장의 선행(이름 + 값 + 적용 시작일) |
 | FU-4 수식 확장(이전 행 참조, 같은 데이터셋 집계, 기준값 호출) | 기준 날짜 열 필수 조건이 켜지는 첫 단위, FU-3 뒤 |
 | FU-5 참조 열 | 입력 검증 + 점검 화면 확장, 보관·삭제 정책(끊어진 참조) 뒤 |
@@ -143,6 +150,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | FU-7 엑셀 가져오기 | 그리드·정의·참조 열 검증을 재사용, 업로드 상한(EW-2)과 적재 시간 측정이 첫 작업. 업무 가치가 크면 FU-2 직후로 당길 수 있음(비구속) |
 
 ## 8. FU-1 합격 기준 개요 (`03b` 5-2·6-1에 있는 것만, 상세는 07·08)
+- **FU-2b 시험 단정(`03b` 30-2):** ① 보관·복구 전후 `dv_`·`de_` 뷰 정의 해시와 `ds_` 행 해시가 같고 `CREATE`·`ALTER`·`DROP`이 0건, `def_version` 불변, 감사 1건(같은 상태 재요청은 0건). ② 쓰기 라우트 전부를 순회해 `archived`면 B4 B5 B6 C2 C3 C4 D4 D5가 409 `DATASET_ARCHIVED`(버전이 틀려도 같은 코드), 읽기·검사·미리보기·D10은 통과. ③ 권한: 그 팀 정의 담당자만 B7·B8 성공, 관리자·입력자·다른 팀은 403, 비활성 팀도 성공. ④ 보관 커밋을 기다린 입력 쓰기는 `DATASET_ARCHIVED`. ⑤ 시작 대조에 보관 데이터셋의 뷰·Superset 등록 포함.
 - 훅의 embedded uuid 등록 대조는 H0 실측 2건으로 대체한다(`08-superset-embedding.md` §9, 실측 2 해석은 확정(사용자 판정 2026-10-13: 조건의 목적은 미등록 대시보드의 새 임베드 설정을 막는 것이고 `can_set_embedded`는 Admin만 가진다. `can_write Dashboard`는 내용 편집 권한이며, 조건 ①로 Superset이 읽는 데이터는 원래 모두에게 공개된 것뿐이다)).
 - 수식 미리보기와 뷰 결과의 **불일치 0건**(X-26에서 `CAST` 적용 후에도 남은 22건의 원인 분석 포함, 차분 시험은 07 §6).
 - X-26 주입 사례 10종 + 역슬래시 사례를 **회귀 시험으로 고정**. 완화책 3가지(세션 `standard_conforming_strings` 고정, 역슬래시·제어문자·NUL 거부, 생성 후 재읽기 비교·불일치 시 롤백)와 런타임 DDL `bi_app` 실행을 시험한다.
@@ -191,12 +199,12 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 글자 대소 비교(`<` `>`) 제외, `ROUND*` 자릿수는 상수만 | 기능 축소(수식 함수 범위) | 승인됨 | 07 §2-2 |
 | 같은 기간 행을 정의 담당자가 끌 수 있는 설정(`03b` 3-4 Y9 (a))은 FU-1에 없음(기준 날짜 열이 있으면 기간당 한 행 고정) | 이월 | 승인됨 | 후속, 06 §3-1 |
 | 열 `type`·`kind` 변경 금지(FU-1), 데이터 있는 열의 이름·타입 변환 흐름. 기준 날짜 열의 타입 변경 금지는 결정됨 | 기능 축소(브리프 4.3 "변환 미리보기 후 확인") | 승인됨 | 06 §3-3, 07 §8 |
-| `audit_log` 기록 시작: FU-1의 정의 변경은 기록하지 않았다. **FU-2a가 정의 변경·팀·소속·사용자·대시보드 연결 15개 행위를 기록한다**(`03b` 29-1, K4 변경 기록 범위 답). 아직 기록하지 않는 것: 행 값 수정·입장권 발급(제외 결정), 삭제·기준값 변경 행위(해당 기능이 생길 때), 보존·삭제 정책(자동 삭제 없음) | 구현 단위(FU-2a), 나머지 후속 | 승인됨(`03b` 29-1) | FU-2a, 후속 |
-| 행·열·수식·데이터셋 보관·삭제 없음: FU-1에서는 잘못 입력한 행은 칸 비우기만 가능. FU-2a에서도 같음 | 범위(`03b` 5-1, 29-1 ①) | 승인됨 | FU-2b, 05 §2-3 |
-| 잘못 만든 열·데이터셋의 수동 정리: FU-1에는 화면·API가 없어 관리자 수동 절차를 문서로 둠 | 후속 | 승인됨 | `skills/admin-cleanup/SKILL.md`(초안), FU-2 |
+| `audit_log` 기록 시작: FU-1의 정의 변경은 기록하지 않았다. **FU-2a가 정의 변경·팀·소속·사용자·대시보드 연결 15개 행위를 기록하고, FU-2b가 데이터셋 보관·복구 2개를 더해 17개다**(`03b` 29-1·30-1, K4 변경 기록 범위 답). 아직 기록하지 않는 것: 행 값 수정·입장권 발급(제외 결정), 영구 삭제·기준값 변경 행위(해당 기능이 생길 때), 보존·삭제 정책(자동 삭제 없음) | 구현 단위(FU-2a), 나머지 후속 | 승인됨(`03b` 29-1) | FU-2a, 후속 |
+| 행·열·수식 보관과 영구 삭제 없음: 잘못 입력한 행은 칸 비우기만 가능. 데이터셋 보관·복구만 FU-2b(`03b` 30-1)에서 제공하며 보관은 동결 + 포털 목록 숨김일 뿐 Superset·`bi_readonly` 공개는 유지한다(영구 삭제 단위가 따로 필요) | 범위(`03b` 5-1, 29-1 ①, 30-1) | 승인됨 | 후속 단위, 05 §2-2·§2-3 |
+| 잘못 만든 열·데이터셋의 수동 정리: 화면·API가 없어 관리자 수동 절차를 문서로 둠(FU-2b 보관은 정리 수단이 아님) | 후속 | 승인됨 | `skills/admin-cleanup/SKILL.md`(초안), 영구 삭제 단위 |
 | 역할별 열 편집 권한, 데이터셋별 예외 권한 | 기능 축소 | 승인됨(`03b` 5-2 K2) | 후속 |
 | 이전 행 참조, 같은 데이터셋 집계, 기준값 표·호출, 참조 열, 공통 요약, 엑셀 가져오기 | 후속 단위 | 해당 없음(범위 결정) | FU-3~FU-7 |
-| 미답 질문 K5(소급·마감), K8(추가·교체), K10(보관·비활성), K11 ㄱ·ㄴ·ㄹ(재업로드·시트·개수 상한) | 후속 질문(K4 변경 기록 범위는 `03b` 29-1로 답함) | 해당 단위에서 질문 | FU-2b~FU-7 |
+| 미답 질문 K5(소급·마감), K8(추가·교체), K10(보관·비활성: 데이터셋 보관 뜻은 `03b` 30-1로 답함, 팀 비활성 효과 Q3 본체는 미결), K11 ㄱ·ㄴ·ㄹ(재업로드·시트·개수 상한) | 후속 질문(K4 변경 기록 범위는 `03b` 29-1로 답함) | 해당 단위에서 질문 | FU-3~FU-7 |
 | 8번 인증 방식, 스텁 안전장치 최종 설계, X-19, Explore 자동 로그인, 입장권 `user` 식별자 교체 | 미결정 | 방식 확정 때 | 운영자 답 뒤 |
 | 행·열 전환 보기, 같은 날짜에 여러 행이 필요한 데이터셋, 그 밖의 수식 함수·"건너뛰는 합계"(`03b` 6-1) | 후속 | 해당 단위에서 | 후속 |
 | 가져오기 의존성(`python-multipart`·`openpyxl`·`defusedxml`·`rapidfuzz`)과 상한(EW-2) | 후속 | 착수 때 요청 | FU-7 |
@@ -214,6 +222,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 관리자 / 정의 담당자 / 입력자 | 팀·소속·연결 관리, 모든 열람(정의·입력 권한은 아님) / 팀의 데이터셋 생성·열·수식 편집 / 데이터 입력 | `users.is_admin` / `team_members.role` = `definer` / `entry`. 관리자의 정의·입력 권한은 팀 소속 역할로만, 정의 담당자도 입력 가능(승인 `03b` 6-2) |
 | 열람자 | 인증된 모든 사용자(전 팀 데이터·수식 열람) | 별도 역할 값 없음(`03b` 1-3) |
 | `current_user` | 접속자를 알려 주는 단 한 곳, 스텁은 개발·시험용 신원 흉내 | `CurrentUser`(id, display_name, is_active, is_admin, memberships) |
+| 보관 / 복구 | 데이터셋의 `status`만 `archived`/`active`로 바꿈. 입력·정의 동결 + 포털 목록 기본 숨김. 표·뷰·Superset 등록·`def_version`은 그대로이므로 Superset·읽기 전용 뷰에는 계속 보이고 데이터를 감추는 수단이 아님(영구 삭제는 후속). 이름 점유 유지 | `datasets.status`, B7·B8, `DATASET_ARCHIVED` (`03b` 30-1) |
 | 데이터셋 | 화면 용어("표"·"뷰"는 화면에서 안 씀). 내부 번호 = `datasets.id` | 원본 표 `bi_data.ds_<번호>`, 수식 뷰 `bi_data.dv_<번호>` (결정 2-6) |
 | 열 | 원본 열(`raw`) 또는 계산 열(`formula`). 내부 번호 이름과 표시 이름이 따로 있음. 표시 이름은 `[` `]` `"`·제어문자를 쓸 수 없고 `team`·`팀`·`row_id`·`행 번호`는 예약, 길이 상한이 있음 | `c_<번호>`(번호 = `dataset_columns.id`), `display_name`. Superset에는 `c_<번호>` + 표시 이름(`verbose_name`, 확인됨: 03c A-27) |
 | `RowViewPort` | entry가 행 조회에서 계산 열 값·오류를 받는 `core` 포트. formula가 `dv_`와 `de_`를 `row_id`로 결합해 구현하고, 1d 전에는 계산 열 없는 기본 구현 | 07 §3-1·§9 |
@@ -232,7 +241,7 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | 서비스 계정 / 발급 전용 계정 | Superset 데이터셋 등록·새로고침용 / 입장권 발급용(서로 분리) | `SUPERSET_SERVICE_USER`·`_PASSWORD` / `SUPERSET_GUEST_ISSUER_USER`·`_PASSWORD`(AP-16 확정). 기본 계정 이름 `bi_service`·`bi_guest_issuer`, 역할은 같은 이름 하나씩(구현됨 EW-3) |
 | 입장권(guest token) / embedded uuid | 대시보드 임베드용 5분짜리 접속 허가, `rls`는 항상 빈 목록 / 관리자가 수동 등록하는 임베드 번호 | `superset_dashboards.embedded_uuid` (결정 4-2) |
 | 가상 데이터셋 | `dv_` 뷰를 읽는 Superset 데이터셋(읽기 쉬운 이름) | 이름 `[<팀 표시 이름>] <데이터셋 표시 이름>` (결정 3-3 Y6) |
-| 감사 기록 / 행위자 / 행위 / 대상 | 정의·권한·대시보드 연결 변경의 누가·언제·무엇을 남긴 추가 전용 기록(화면 용어는 "감사 기록", 수정·삭제 없음, 자동 삭제 없음) / 변경을 일으킨 사용자(서버 명령이면 비어 있음) / 바뀐 일의 종류 15가지 / 바뀐 팀·사용자·데이터셋·대시보드 | `audit_log`, `actor_user_id`·`actor_source`, `action`, `target_type`·`target_id` (결정 `03b` 29-1, §5-1, 06 §2-1) |
+| 감사 기록 / 행위자 / 행위 / 대상 | 정의·권한·대시보드 연결 변경의 누가·언제·무엇을 남긴 추가 전용 기록(화면 용어는 "감사 기록", 수정·삭제 없음, 자동 삭제 없음) / 변경을 일으킨 사용자(서버 명령이면 비어 있음) / 바뀐 일의 종류 17가지 / 바뀐 팀·사용자·데이터셋·대시보드 | `audit_log`, `actor_user_id`·`actor_source`, `action`, `target_type`·`target_id` (결정 `03b` 29-1, §5-1, 06 §2-1) |
 
 ### A-2. 엔티티
 | 표 | 핵심 필드 후보 | 소유 모듈 |
@@ -256,11 +265,11 @@ backend는 `app/<모듈>/`에 `router`(API) · `service`(로직) · `repo`(데�
 | `date_unit` | `day`, `month`, `year` |
 | `column_type` | `text`, `number`, `date`, `boolean`, `choice` (참조 타입 `reference`는 후속) |
 | `column_kind` | `raw`, `formula` |
-| `dataset_status` | `active`만 (`archived`·`deleted`는 보관·삭제 단위가 CHECK를 바꿔 추가) |
-| `audit_action` | 15개: `dataset.create` `dataset.update` `column.add` `column.update` `formula_column.add` `formula_column.update` `team.create` `team.update` `member.set` `member.remove` `user.create` `user.update` `user.bootstrap_admin` `dashboard.create` `dashboard.update` (§5-1 표, `text` + 이름 있는 CHECK `ck_audit_log_action`, 후속 단위가 CHECK를 교체해 추가) |
+| `dataset_status` | `active`, `archived`(FU-2b, `ck_datasets_status`). `deleted`는 영구 삭제 단위가 CHECK를 바꿔 추가. 화면 용어 "사용 중"·"보관됨" |
+| `audit_action` | 17개: `dataset.create` `dataset.update` `dataset.archive` `dataset.restore` `column.add` `column.update` `formula_column.add` `formula_column.update` `team.create` `team.update` `member.set` `member.remove` `user.create` `user.update` `user.bootstrap_admin` `dashboard.create` `dashboard.update` (§5-1 표, `text` + 이름 있는 CHECK `ck_audit_log_action`, 후속 단위가 CHECK를 교체해 추가) |
 | `audit_target_type` | `team`, `user`, `dataset`, `dashboard` (멤버십은 `team`, 열·수식은 `dataset`을 대상으로 한다) |
 | `audit_actor_source` | `user`(포털 요청, 행위자 필수), `cli`(서버 명령, 행위자 NULL) |
 | `sync_status` | Superset 등록 동기화 상태(화면 문구 "동기 상태"): `pending`(등록 행이 없거나 갱신 필요), `registered`, `failed` |
-| API 오류 코드(05 §3) | 충돌 `CELL_CONFLICT`, `PASTE_CONFLICT`, `PERIOD_CONFLICT`, `DEFINITION_VERSION_MISMATCH`, 재시도 가능 `WRITE_BUSY`(행 쓰기 락 대기·교착). 나머지 코드는 05 §3 사전을 따른다 |
+| API 오류 코드(05 §3) | 충돌 `CELL_CONFLICT`, `PASTE_CONFLICT`, `PERIOD_CONFLICT`, `DEFINITION_VERSION_MISMATCH`, 보관 중 쓰기 거부 `DATASET_ARCHIVED`(409, FU-2b), 재시도 가능 `WRITE_BUSY`(행 쓰기 락 대기·교착). 나머지 코드는 05 §3 사전을 따른다 |
 | DB 계정·schema | `bi_owner`, `bi_app`, `bi_readonly`, `bi_data`, `public` (결정 3-2). 그 밖에 Superset 메타 DB `superset`과 소유 역할 `superset_meta`(03a). 모두 코드 상수이고 `db-bootstrap`이 만든다(구현됨 EW-1) |
 | Superset | `bi_guest`(guest 역할, 결정 4-2 Z2), 서비스 계정 / 발급 전용 계정(위)과 역할 `bi_service` / `bi_guest_issuer`, 작성자 역할 `bi_author`(Gamma 복사본)와 `bi_data` schema 보조 역할 `bi_author_schema` (08 §5). 구현된 권한 개수: `bi_service` 4, `bi_guest_issuer` 2, `bi_author_schema` 1, `bi_guest` 4, `bi_author` 6.1.0 Gamma 복사본 95, `Public` 0(EW-3·EW-4 QA 실측) |

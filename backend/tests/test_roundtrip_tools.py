@@ -16,6 +16,7 @@ from migrations.roundtrip import (
     SUPERSET_COLUMN_ACL,
     SUPERSET_TABLE_ACL,
     diff,
+    expect_archive_checks,
     expect_bootstrap_state,
     expect_privileges,
     expect_static_privileges,
@@ -350,3 +351,41 @@ def test_static_privileges_detect_widened_audit_acl():
         if row[1] == "audit_log":
             row[4].append("bi_readonly=r/bi_owner")
     assert any("audit_log 표 ACL" in p for p in expect_static_privileges(snap, granted=True))
+
+
+def _checks_snapshot(*, archived: bool, doubled: bool = False) -> dict:
+    """0008 CHECK 두 개만 가진 최소 스냅샷(PostgreSQL이 돌려주는 정의 모양)."""
+    status = (
+        "(status = ANY (ARRAY['active'::text, 'archived'::text]))"
+        if archived
+        else "(status = ANY (ARRAY['active'::text]))"
+    )
+    actions = "'dataset.create'::text, 'dataset.update'::text"
+    if archived:
+        actions += ", 'dataset.archive'::text, 'dataset.restore'::text"
+    prefix = "ck_datasets_" if doubled else ""
+    return {
+        "public_tables": {
+            "datasets": {"checks": [[f"{prefix}ck_datasets_status", status]]},
+            "audit_log": {
+                "checks": [["ck_audit_log_action", f"(action = ANY (ARRAY[{actions}]))"]]
+            },
+        }
+    }
+
+
+def test_archive_checks_expected_at_head_and_old_definition_at_0007():
+    assert expect_archive_checks(_checks_snapshot(archived=True), archived=True) == []
+    assert expect_archive_checks(_checks_snapshot(archived=False), archived=False) == []
+
+
+def test_archive_checks_detect_a_check_left_in_the_wrong_state():
+    # head인데 옛 정의가 남았다 / 0007인데 새 정의가 남았다
+    assert expect_archive_checks(_checks_snapshot(archived=False), archived=True)
+    assert expect_archive_checks(_checks_snapshot(archived=True), archived=False)
+
+
+def test_archive_checks_detect_a_doubled_constraint_name():
+    """`op.f`를 쓰지 않아 이름이 `ck_datasets_ck_datasets_status`처럼 이중으로 붙은 경우."""
+    problems = expect_archive_checks(_checks_snapshot(archived=True, doubled=True), archived=True)
+    assert any("이중" in p for p in problems) and any("제약이 없다" in p for p in problems)

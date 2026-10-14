@@ -4,7 +4,7 @@ import { AUDIT_ACTIONS, ACTION_LABELS, type AuditAction } from "./types";
 
 const names = (id: number) => ({ 7: "박입력" })[id as 7];
 
-/** 04 §5-1 표의 허용 키로 만든 대표 details와 기대 요약. 행위 15개 전부. */
+/** 04 §5-1 표의 허용 키로 만든 대표 details와 기대 요약. 행위 17개 전부. */
 const CASES: Array<[AuditAction, Record<string, unknown>, string]> = [
   ["dataset.create", { target_name: "월별 매출", team_id: 3, date_unit: "month", def_version: 1 }, "팀 번호 3, 날짜 단위 월, 정의 버전 1"],
   [
@@ -12,6 +12,8 @@ const CASES: Array<[AuditAction, Record<string, unknown>, string]> = [
     { target_name: "월별 매출", team_id: 3, changes: { name: { from: "가", to: "나" }, date_unit: { from: "month", to: "day" }, base_date_column_id: { from: null, to: 12 } }, def_version: 4 },
     "이름 '가'→'나', 날짜 단위 월→일, 기준 날짜 열 없음→열 번호 12, 정의 버전 4",
   ],
+  ["dataset.archive", { target_name: "월별 매출", team_id: 3 }, "데이터셋 보관"],
+  ["dataset.restore", { target_name: "월별 매출", team_id: 3 }, "데이터셋 복구"],
   ["column.add", { target_name: "월별 매출", column_id: 5, column_name: "매출", column_type: "number", required: true, def_version: 2 }, "열 '매출' 추가 (숫자, 필수), 정의 버전 2"],
   [
     "column.update",
@@ -36,13 +38,19 @@ const CASES: Array<[AuditAction, Record<string, unknown>, string]> = [
 ];
 
 describe("summarize", () => {
-  it("시험 사례가 행위 15개를 하나도 빠짐없이 덮는다", () => {
+  it("시험 사례가 행위 17개를 하나도 빠짐없이 덮는다", () => {
     expect(CASES.map(([action]) => action).sort()).toEqual([...AUDIT_ACTIONS].sort());
     for (const action of AUDIT_ACTIONS) expect(ACTION_LABELS[action]).toBeTruthy();
   });
 
   it.each(CASES)("%s 요약", (action, details, expected) => {
     expect(summarize(action, details, names)).toBe(expected);
+  });
+
+  it("보관·복구는 허용 키(target_name·team_id) 밖의 값을 이름도 값도 출력하지 않는다", () => {
+    expect(summarize("dataset.archive", { target_name: "비밀 이름", team_id: 3, rows: ["행값 9"], def_version: 4 })).toBe(`데이터셋 보관 ${PARTIAL}`);
+    expect(summarize("dataset.restore", { target_name: "비밀 이름", team_id: "x" })).toBe("데이터셋 복구");
+    expect(summarize("dataset.restore", { target_name: "비밀 이름", team_id: 3, formula: "=A+B" })).not.toContain("=A+B");
   });
 
   it("대시보드 다시 연결과 이름 변경", () => {

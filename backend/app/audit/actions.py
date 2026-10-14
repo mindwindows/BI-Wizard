@@ -1,4 +1,4 @@
-"""감사 기록 행위 15개와 `details` 허용 키 표(04 §5-1, 06 §2-1). 이 파일이 허용 키의 유일한 출처다.
+"""감사 기록 행위 17개와 `details` 허용 키 표(04 §5-1, 06 §2-1). 이 파일이 허용 키의 유일한 출처다.
 
 - 행위 이름은 `db_metadata.AUDIT_ACTIONS`(= `ck_audit_log_action` CHECK)와 같아야 한다(시험이
   대조한다).
@@ -56,6 +56,9 @@ ACTIONS: Mapping[str, ActionSpec] = {
         {"team_id": INT, "def_version": INT},
         changes={"name": STR, "date_unit": STR, "base_date_column_id": INT_OR_NULL},
     ),
+    # FU-2b(`0008`): 보관·복구는 정의 버전을 올리지 않으므로 `def_version`이 없다(04 §5-1).
+    "dataset.archive": ActionSpec("dataset", {"team_id": INT}),
+    "dataset.restore": ActionSpec("dataset", {"team_id": INT}),
     "column.add": ActionSpec(
         "dataset",
         {

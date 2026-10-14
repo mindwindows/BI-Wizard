@@ -4,6 +4,9 @@
 1. `lock_timeout`을 건다(`ALTER TABLE`은 읽기와 서로 기다리므로 오래 기다리지 않는다).
 2. `datasets` 행을 `FOR NO KEY UPDATE` 한 가지 잠금으로 잡는다(advisory 잠금 불사용, 읽기는
    막지 않는다).
+2-1. (FU-2b) `bump=True`이고 잠근 행의 `status`가 `archived`면 409 `DATASET_ARCHIVED`로 롤백한다.
+   판정은 잠금 직후이며 버전 비교(3)·`change`(검증 422)보다 앞이다. `bump=False`(뷰 재생성·재시도)는
+   정의 변경이 아니라 대조 복구이므로 보관 검사를 하지 않는다.
 3. `expected_version`이 `def_version`과 다르면 `DEFINITION_VERSION_MISMATCH`(409).
 4. 호출한 쪽이 넘긴 `change`가 열 변경(`dataset_columns`, 동적 DDL)을 한다. 바뀐 것이 없으면 버전을
    올리지 않고 끝낸다.
@@ -38,6 +41,7 @@ from app.core.db_errors import constraint_name, is_lock_conflict
 from app.core.errors import (
     AppError,
     already_exists,
+    dataset_archived,
     definition_busy,
     definition_version_mismatch,
     not_found,
@@ -144,6 +148,9 @@ def apply_definition_change(
         if locked is None:
             session.rollback()
             raise not_found()
+        if bump and locked["status"] == "archived":
+            session.rollback()
+            raise dataset_archived()
         current = int(locked["def_version"])
         if expected_version is not None and expected_version != current:
             session.rollback()

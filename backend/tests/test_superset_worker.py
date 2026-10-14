@@ -278,6 +278,29 @@ def test_reconcile_queues_missing_pending_failed_and_drifted_registered_only(db,
     assert len(fake.datasets) == 4
 
 
+def test_reconcile_includes_archived_datasets(db, fake, sync):
+    """FU-2b: 보관해도 Superset 가상 데이터셋은 남으므로 시작 대조가 보관 데이터셋도 맞춘다."""
+    from app.db_metadata import datasets
+
+    active, _, _ = make_dataset(db, fake, team="가", name="활성")
+    archived, _, _ = make_dataset(db, fake, team="나", name="보관")
+    registered, _, _ = make_dataset(db, fake, team="다", name="보관된 정상")
+    sync.request_dataset_sync(registered)
+    sync.drain()
+    with db.writer.begin() as conn:  # 둘을 보관한다(등록 행이 없는 것 하나, 정상 등록된 것 하나)
+        conn.execute(
+            sa.update(datasets)
+            .where(datasets.c.id.in_([archived, registered]))
+            .values(status="archived")
+        )
+    assert sync.reconcile_all() == 2  # 활성(등록 없음)과 보관(등록 없음). 정상 등록은 넣지 않는다
+    assert set(sync.pending_ids()) == {active, archived}
+    sync.drain()
+    assert all(row(db, i)["sync_status"] == "registered" for i in (active, archived, registered))
+    # 보관된 데이터셋의 가상 데이터셋 이름도 유지된다
+    assert "[나] 보관" in {d["table_name"] for d in fake.datasets.values()}
+
+
 def test_reconcile_recreates_dataset_deleted_in_superset(db, fake, sync):
     dataset_id, _, _ = make_dataset(db, fake)
     sync.request_dataset_sync(dataset_id)

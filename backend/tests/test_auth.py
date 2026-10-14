@@ -352,6 +352,8 @@ ACCESS_PATHS = {
 DATASET_PATHS = {
     "/api/datasets",
     "/api/datasets/{dataset_id}",
+    "/api/datasets/{dataset_id}/archive",
+    "/api/datasets/{dataset_id}/restore",
     "/api/datasets/{dataset_id}/columns",
     "/api/datasets/{dataset_id}/columns/{col_id}",
 }

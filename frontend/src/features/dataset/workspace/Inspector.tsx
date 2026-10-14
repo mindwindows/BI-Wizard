@@ -57,7 +57,10 @@ const MAX_WIDTH = 640;
 interface InspectorProps {
   detail: DatasetDetail;
   columns: Column[];
+  /** 역할 기준 정의 권한(permissions.define). 보관 여부는 archived로 따로 본다. */
   canDefine: boolean;
+  /** 보관된 데이터셋: 편집은 모두 막고, 수식 보기·검사·미리보기는 그대로 둔다(FU-2b). */
+  archived?: boolean;
   selection: Selection;
   feedback: Feedback;
   actions: Actions;
@@ -67,7 +70,8 @@ interface InspectorProps {
 }
 
 /** S4 우측 Inspector. 접기·폭 조절이 되고, 정의 권한이 없으면 모든 입력칸이 읽기 전용이다. */
-export function Inspector({ detail, columns, canDefine, selection, feedback, actions, selectedCell }: InspectorProps) {
+export function Inspector({ detail, columns, canDefine: canDefineByRole, archived = false, selection, feedback, actions, selectedCell }: InspectorProps) {
+  const canDefine = canDefineByRole && !archived;
   const [open, setOpen] = useState(true);
   const [width, setWidth] = useState(360);
   const widthId = useId();
@@ -104,7 +108,11 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
           ▶
         </button>
       </div>
-      {canDefine ? null : (
+      {archived ? (
+        <p className="muted" data-testid="archived-notice">
+          보관된 데이터셋이라 지금은 읽기 전용입니다. 수식 보기와 검사·미리보기는 쓸 수 있습니다.
+        </p>
+      ) : canDefine ? null : (
         <p className="muted" data-testid="readonly-notice">
           이 데이터셋은 팀의 정의 담당자만 바꿀 수 있습니다. 지금은 읽기 전용입니다.
         </p>
@@ -116,7 +124,7 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
       ) : null}
       {feedback?.kind === "error" ? <ErrorNotice error={feedback.error} /> : null}
       {selection.kind === "dataset" ? (
-        <DatasetSettingsForm key={`d${detail.def_version}`} detail={detail} columns={columns} readOnly={!canDefine} actions={actions} />
+        <DatasetSettingsForm key={`d${detail.def_version}`} detail={detail} columns={columns} readOnly={!canDefine} archived={archived} actions={actions} />
       ) : null}
       {selection.kind === "add" && canDefine ? <ColumnForm key="add" mode="add" readOnly={false} actions={actions} /> : null}
       {selection.kind === "addFormula" && canDefine ? (
@@ -129,7 +137,8 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
             datasetId={detail.id}
             column={selected}
             columns={columns}
-            canDefine={canDefine}
+            canDefine={canDefineByRole}
+            archived={archived}
             version={detail.def_version}
             selectedCell={selectedCell}
             save={actions.saveFormula}
@@ -147,6 +156,7 @@ export function Inspector({ detail, columns, canDefine, selection, feedback, act
           mode="edit"
           column={selected}
           readOnly={!canDefine}
+          archived={archived}
           actions={actions}
         />
       ) : null}
@@ -176,11 +186,13 @@ function DatasetSettingsForm({
   detail,
   columns,
   readOnly,
+  archived = false,
   actions,
 }: {
   detail: DatasetDetail;
   columns: Column[];
   readOnly: boolean;
+  archived?: boolean;
   actions: Actions;
 }) {
   const ids = { name: useId(), unit: useId(), base: useId() };
@@ -246,8 +258,8 @@ function DatasetSettingsForm({
           {message}
         </p>
       ) : null}
-      {readOnly ? null : (
-        <button type="submit" disabled={!dirty || busy}>
+      {readOnly && !archived ? null : (
+        <button type="submit" disabled={readOnly || !dirty || busy}>
           저장
         </button>
       )}
@@ -258,8 +270,8 @@ function DatasetSettingsForm({
 /* ---------------- 열 추가·수정 (B5·B6) ---------------- */
 
 type ColumnFormProps =
-  | { mode: "add"; readOnly: boolean; actions: Actions }
-  | { mode: "edit"; column: Column; readOnly: boolean; actions: Actions };
+  | { mode: "add"; readOnly: boolean; archived?: boolean; actions: Actions }
+  | { mode: "edit"; column: Column; readOnly: boolean; archived?: boolean; actions: Actions };
 
 function ColumnForm(props: ColumnFormProps) {
   const column = props.mode === "edit" ? props.column : null;
@@ -451,12 +463,12 @@ function ColumnForm(props: ColumnFormProps) {
         <input id={ids.position} inputMode="numeric" value={position} disabled={readOnly} onChange={(event) => setPosition(event.target.value)} />
       </Field>
 
-      {readOnly ? (
+      {readOnly && !(props.archived && column?.kind !== "formula") ? (
         column?.kind === "formula" ? (
           <p className="muted">계산 열의 이름·위치는 여기서 고칠 수 없습니다. 수식은 아래에서 확인하고 고칩니다.</p>
         ) : null
       ) : (
-        <button type="submit" disabled={blocked || !dirty || busy}>
+        <button type="submit" disabled={readOnly || blocked || !dirty || busy}>
           {column ? "저장" : "열 추가"}
         </button>
       )}

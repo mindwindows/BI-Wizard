@@ -1150,3 +1150,35 @@ button.link {
   overflow-wrap: anywhere;
   min-width: 220px;
 }
+
+/* ---- FU-2b: 데이터셋 보관·복구 ---- */
+.badge-archived {
+  background: #fde8c8;
+  color: #8a4b08;
+}
+
+.modal-confirm {
+  width: 520px;
+}
+
+.archive-limit {
+  padding: 6px 8px;
+  background: #fff8db;
+  border: 1px solid #e6d27a;
+}
+
+.archive-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  background: #fff3cd;
+  border: 1px solid #e6c34a;
+  color: #5c4400;
+}
+
+.archive-banner p {
+  margin: 0;
+  flex: 1;
+}

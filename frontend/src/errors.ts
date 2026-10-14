@@ -23,6 +23,7 @@ const MESSAGES: Record<string, string> = {
   WRITE_BUSY: "다른 작업이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
   DEFINITION_BUSY: "다른 작업이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
   DATASET_HAS_ROWS: "이미 입력된 행이 있어 날짜 단위와 기준 날짜 열은 바꿀 수 없습니다. 행이 없는 데이터셋에서만 바꿀 수 있습니다.",
+  DATASET_ARCHIVED: "보관된 데이터셋은 고칠 수 없습니다. 복구한 뒤 다시 시도하세요.",
   COLUMN_LOCKED: "열의 타입과 종류는 바꿀 수 없습니다. 다른 타입이 필요하면 새 열을 추가해 주세요.",
   FORMULA_CIRCULAR: "이 변경으로 계산 열이 서로를 참조하는 순환이 생깁니다. 구분 태그나 수식을 확인해 주세요.",
   FORMULA_INVALID: "수식에 고칠 곳이 있어 저장하지 않았습니다. 표시된 위치의 안내를 확인해 주세요.",
@@ -34,6 +35,8 @@ const MESSAGES: Record<string, string> = {
   NETWORK_ERROR: "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",
   INTERNAL_ERROR: "예기치 않은 오류가 발생했습니다. 문의할 때 아래 문의 번호를 알려 주세요.",
 };
+
+const ARCHIVED_NAME_MARK = "보관된 데이터셋과 같은 이름";
 
 const GENERIC = "요청을 처리하지 못했습니다.";
 
@@ -134,6 +137,8 @@ export function describeApiError(error: unknown): string {
   }
   if (error.code === "ALREADY_EXISTS") {
     const field = isRecord(error.details) && typeof error.details.field === "string" ? error.details.field : "";
+    // FU-2b: 충돌 상대가 보관된 데이터셋이면 서버가 메시지에 "보관된 데이터셋과 같은 이름"을 덧붙인다(05 §2-2 B2). 그대로 보여 준다.
+    if (field === "name" && error.message.includes(ARCHIVED_NAME_MARK)) return error.message;
     return EXISTS_BY_FIELD[field] ?? MESSAGES.ALREADY_EXISTS;
   }
   if (error.code === "TARGET_INACTIVE") {

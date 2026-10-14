@@ -1,6 +1,6 @@
 import { ApiError, apiRequest } from "../../api";
 import type { Page } from "../access/types";
-import type { Column, ColumnRules, ColumnSaved, ColumnType, Dataset, DatasetDetail, DateUnit } from "./types";
+import type { Column, ColumnRules, ColumnSaved, ColumnType, Dataset, DatasetDetail, DatasetStatus, DateUnit } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,9 +24,12 @@ function query(params: Record<string, string | number | undefined>): string {
   return text ? `?${text}` : "";
 }
 
+/** B1 보기. 서버 기본은 active이며 화면은 항상 명시해서 보낸다(FU-2b). total도 같은 필터로 센다. */
+export type DatasetView = DatasetStatus | "all";
+
 /** B1. 정렬(내 소속 팀 먼저)은 서버가 하므로 받은 순서 그대로 쓴다. */
 export async function listDatasets(
-  params: { team_id?: number; limit: number; offset: number },
+  params: { team_id?: number; status?: DatasetView; limit: number; offset: number },
   signal?: AbortSignal,
 ): Promise<Page<Dataset>> {
   const data = await apiRequest<unknown>(`/datasets${query(params)}`, { signal });
@@ -45,6 +48,16 @@ function asDetail(data: unknown): DatasetDetail {
     throw badShape();
   }
   return data as unknown as DatasetDetail;
+}
+
+/** B7 보관. 본문 없음, 200 상세. 이미 보관 상태여도 200이다(FU-2b). */
+export async function archiveDataset(id: number): Promise<DatasetDetail> {
+  return asDetail(await apiRequest<unknown>(`/datasets/${id}/archive`, { method: "POST" }));
+}
+
+/** B8 복구. 본문 없음, 200 상세. 이미 사용 중이어도 200이다(FU-2b). */
+export async function restoreDataset(id: number): Promise<DatasetDetail> {
+  return asDetail(await apiRequest<unknown>(`/datasets/${id}/restore`, { method: "POST" }));
 }
 
 /** B2 */

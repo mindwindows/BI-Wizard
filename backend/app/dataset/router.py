@@ -1,8 +1,10 @@
-"""데이터셋·열 정의 API(05 §2-2 B1~B6).
+"""데이터셋·열 정의 API(05 §2-2 B1~B8).
 
 보호 라우터라 `register_routers`가 `current_user`를 붙인다.
 
 - B1·B3는 인증된 활성 사용자 누구나(타 팀 포함) 읽는다.
+- B7(보관)·B8(복구, FU-2b)은 그 데이터셋 팀의 정의 담당자만 한다(관리자 예외 없음, 비활성 팀 허용).
+  본문이 없어야 하고 Superset 동기 요청도 하지 않는다(`status`만 바뀐다).
 - B2는 `team_id` 팀의 정의 담당자만, B4~B6은 그 데이터셋 팀의 정의 담당자만 쓴다. 관리자라도 그 팀의
   `definer`가 아니면 거부한다(06 §4-1). B4~B6의 권한 검사는 의존성이라 본문 검증보다 먼저 실행된다.
   B2는 팀이 본문에 있어 본문 검증 뒤에 검사한다.
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.auth import CurrentUserDep
 from app.auth.permissions import can_define
 from app.core.deps import get_session
-from app.core.errors import forbidden
+from app.core.errors import FieldErrorCode, forbidden, validation_failed
 from app.core.pagination import LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, Page
 from app.core.ports import DatasetSyncPort, DefinitionHooks, run_dataset_sync_request
 from app.dataset import service
@@ -65,16 +67,40 @@ def require_dataset_definer(dataset_id: int, user: CurrentUserDep, session: Sess
 DefinerDep = Depends(require_dataset_definer)
 
 
+async def require_empty_body(request: Request) -> None:
+    """B7·B8: 본문이 없어야 한다(있으면 422). 권한 의존성(404·403) 다음에 실행한다."""
+    async for chunk in request.stream():
+        if chunk:
+            raise validation_failed([("body", FieldErrorCode.BAD_FORMAT)])
+
+
+# B1 `status` 쿼리 값(FU-2b). `all`은 필터 없음이다.
+LIST_STATUS_VALUES = ("active", "archived", "all")
+
+
 @router.get("/datasets")
 def list_datasets(
     user: CurrentUserDep,
     session: SessionDep,
     team_id: int | None = None,
+    status: str = "active",
     limit: LimitParam = LIST_LIMIT_DEFAULT,
     offset: OffsetParam = 0,
 ) -> Page[DatasetOut]:
-    """B1: 데이터셋 목록. 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름 순서."""
-    items, total = service.list_datasets(session, user, team_id=team_id, limit=limit, offset=offset)
+    """B1: 데이터셋 목록. 내 소속 팀 먼저, 다음 팀 이름·데이터셋 이름 순서.
+
+    `status=active|archived|all`(기본 `active`, `total`에도 같은 필터). 목록 밖 값은 422다.
+    """
+    if status not in LIST_STATUS_VALUES:
+        raise validation_failed([("status", FieldErrorCode.NOT_IN_OPTIONS)])
+    items, total = service.list_datasets(
+        session,
+        user,
+        team_id=team_id,
+        status=None if status == "all" else status,
+        limit=limit,
+        offset=offset,
+    )
     return Page[DatasetOut](items=items, total=total, limit=limit, offset=offset)
 
 
@@ -128,6 +154,24 @@ def update_dataset(
     )
     if changed:
         background.add_task(run_dataset_sync_request, sync, dataset_id)
+    return DatasetDetailOut(**service.get_dataset_detail(session, user, dataset_id))
+
+
+@router.post(
+    "/datasets/{dataset_id}/archive", dependencies=[DefinerDep, Depends(require_empty_body)]
+)
+def archive_dataset(dataset_id: int, user: CurrentUserDep, session: SessionDep) -> DatasetDetailOut:
+    """B7: 데이터셋 보관(`status`만 바꾼다). 정의·표·뷰·버전은 그대로, Superset 동기 요청도 없다."""
+    service.archive_dataset(session, user, dataset_id)
+    return DatasetDetailOut(**service.get_dataset_detail(session, user, dataset_id))
+
+
+@router.post(
+    "/datasets/{dataset_id}/restore", dependencies=[DefinerDep, Depends(require_empty_body)]
+)
+def restore_dataset(dataset_id: int, user: CurrentUserDep, session: SessionDep) -> DatasetDetailOut:
+    """B8: 보관된 데이터셋 복구(`status`만 바꾼다). B7과 같은 규칙이다."""
+    service.restore_dataset(session, user, dataset_id)
     return DatasetDetailOut(**service.get_dataset_detail(session, user, dataset_id))
 
 

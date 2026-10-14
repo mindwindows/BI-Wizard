@@ -1,6 +1,7 @@
 """뷰 대조(시작 시 재생성)와 다시 시도(D10)(07 §8, 06 §5).
 
-- 시작할 때 활성 데이터셋마다 **현재 정의로 계산한 정의 해시**와 `datasets.def_hash`를 비교하고 뷰가
+- 시작할 때 활성·보관 데이터셋마다(보관해도 `dv_` 뷰가 공개되므로, FU-2b) **현재 정의로 계산한
+  정의 해시**와 `datasets.def_hash`를 비교하고 뷰가
   있는지 확인한다. 다르거나 없으면 그 데이터셋의 뷰만 정의 변경 진입점의 "버전을 올리지 않는" 형태로
   다시 만든다(잠금 -> 훅 -> `def_hash`). 같은 `datasets` 행 잠금을 쓰므로 정의 편집·다시 시도와
   직렬화된다. 짧은 `lock_timeout`(0.5초)으로 못 잡으면 실패로 남긴다.
@@ -130,12 +131,12 @@ def reconcile_one(
 
 
 def reconcile_all(engine: Engine, hooks: DefinitionHooks, status: ViewStatus) -> None:
-    """시작 때 모든 활성 데이터셋의 뷰를 대조한다. 실패는 밖으로 내지 않는다."""
+    """시작 때 활성·보관 데이터셋 모두의 뷰를 대조한다(FU-2b). 실패는 밖으로 내지 않는다."""
     if engine.dialect.name != "postgresql":
         return  # 뷰 DDL은 PostgreSQL 전용이다(SQLite 시험 변형은 대조하지 않는다)
     try:
         with Session(engine) as session:
-            dataset_ids = dataset_service.list_active_dataset_ids(session)
+            dataset_ids = dataset_service.list_startup_check_dataset_ids(session)
             session.rollback()
     except Exception as exc:
         logger.error("뷰 대조 목록을 읽지 못했다: %s", type(exc).__name__)
@@ -143,7 +144,7 @@ def reconcile_all(engine: Engine, hooks: DefinitionHooks, status: ViewStatus) ->
     for dataset_id in dataset_ids:
         reconcile_one(engine, hooks, status, dataset_id)
     logger.info(
-        "뷰 대조 완료: 활성 데이터셋 %d개, 실패 %d개", len(dataset_ids), status.failed_count
+        "뷰 대조 완료: 데이터셋(활성·보관) %d개, 실패 %d개", len(dataset_ids), status.failed_count
     )
 
 

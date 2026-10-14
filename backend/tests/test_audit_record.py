@@ -1,6 +1,6 @@
 """`audit.record`와 허용 키 표(`audit.actions`)의 단위 시험(04 §5-1, 06 §2-1).
 
-- 행위 15개의 허용 키 표가 04 §5-1 표와 같다(키 이름이 곧 계약이다).
+- 행위 17개의 허용 키 표가 04 §5-1 표와 같다(키 이름이 곧 계약이다).
 - 목록 밖 키·빠진 키·틀린 형·긴 글자·알 수 없는 행위자는 구현 오류(`AuditRecordError`)이고 DB에
   아무것도 쓰지 않는다. 자르거나 고쳐 쓰지 않는다.
 - 가장 긴 값으로 채워도 `details`가 4,000바이트 안이다(DB CHECK는 안전망일 뿐 정상 경로에서
@@ -40,6 +40,8 @@ DOC_KEYS = {
         {"team_id", "def_version"},
         {"name", "date_unit", "base_date_column_id"},
     ),
+    "dataset.archive": ({"team_id"}, None),  # 보관·복구는 정의 버전을 올리지 않는다(FU-2b)
+    "dataset.restore": ({"team_id"}, None),
     "column.add": ({"column_id", "column_name", "column_type", "required", "def_version"}, None),
     "column.update": (
         {"column_id", "column_name", "rules_changed", "def_version"},
@@ -74,6 +76,8 @@ DOC_KEYS = {
 TARGET_TYPES = {
     "dataset.create": "dataset",
     "dataset.update": "dataset",
+    "dataset.archive": "dataset",
+    "dataset.restore": "dataset",
     "column.add": "dataset",
     "column.update": "dataset",
     "formula_column.add": "dataset",
@@ -120,8 +124,8 @@ def user_actor(user_id: int = 1) -> CurrentUser:
 # --- 허용 키 표 ----
 
 
-def test_there_are_fifteen_actions_in_the_order_of_the_check_constraint():
-    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(ACTIONS) == 15
+def test_there_are_seventeen_actions_in_the_order_of_the_check_constraint():
+    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(ACTIONS) == 17
 
 
 @pytest.mark.parametrize("action", AUDIT_ACTIONS)

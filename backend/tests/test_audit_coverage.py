@@ -2,7 +2,7 @@
 
 기록 대상 표(`users` `teams` `team_members` `datasets` `dataset_columns`
 `superset_dashboards`)를 쓰는 함수는 다음 중 하나여야 한다.
-- 04 §5-1 표의 15개 행위를 기록하는 service 함수(함수 안에 그 행위 이름이 정확히 한 번 있다)
+- 04 §5-1 표의 17개 행위를 기록하는 service 함수(함수 안에 그 행위 이름이 정확히 한 번 있다)
 - 정의 변경 진입점(`apply_definition_change`, B4·B5·B6·D4·D5가 한 곳에서 기록한다)
 - 정의 변경 진입점 안에서만 불리는 helper(진입점의 기록에 포함된다)
 - 제외 목록: 시험용 사용자 시드, 버전을 올리지 않는 뷰 재생성(`bump=False`)
@@ -34,6 +34,8 @@ WRITE_FUNCTIONS = {"insert", "update", "delete", "pg_insert", "sqlite_insert"}
 RECORDERS = {
     "dataset.create": "dataset.service.create_dataset",
     "dataset.update": "dataset.service.update_dataset",
+    "dataset.archive": "dataset.service.archive_dataset",
+    "dataset.restore": "dataset.service.restore_dataset",
     "column.add": "dataset.service.add_column",
     "column.update": "dataset.service.update_column",
     "formula_column.add": "formula.service.create_formula_column",

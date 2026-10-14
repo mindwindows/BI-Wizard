@@ -12,6 +12,7 @@ description: 데이터셋에 한 기간 = 한 행으로 값을 입력하는 기�
 - 로그인: 모든 API가 인증을 거친다(`permission-management`, 개발에서는 스텁).
 - 권한(06 §4-1):
   - **읽기(C1): 인증된 활성 사용자 누구나**, 다른 팀 포함.
+  - **보관된 데이터셋은 입력할 수 없다(FU-2b).** 데이터셋이 보관(`status: "archived"`)이면 C2·C3·C4는 409 `DATASET_ARCHIVED`(`details.status="archived"`)다. 판정은 `datasets` 행을 `FOR SHARE`로 잡은 직후이고 **`expected_version` 비교(`DEFINITION_VERSION_MISMATCH`)와 값 검증(422)보다 앞**이라 버전이 틀려도 같은 코드가 나온다. 보관 커밋을 기다린 입력도 커밋 뒤 갱신된 행을 읽어 같은 코드를 받는다. 조회(C1)는 보관 중에도 된다. 정정하려면 그 팀 정의 담당자가 복구(`dataset-definition`의 B8)한 뒤 다시 입력한다(`def_version`은 보관·복구로 바뀌지 않는다).
   - **입력(C2~C4): 그 데이터셋 팀의 `entry` 또는 `definer`.** 관리자(`is_admin`)여도 그 팀 소속이 아니면 403 `FORBIDDEN`이다(필요하면 관리자가 자기를 그 팀에 소속시킨다). 다른 팀 구성원·소속 없는 사용자는 403, 비활성 사용자는 403 `USER_INACTIVE`, 신원 없음은 401. 권한 검사는 본문 검증·크기 검사보다 먼저다.
 - 실행 상태: `local-environment` 통과, `migrate`가 `0004`까지 적용. **1c는 새 revision이 없다**(`ds_<번호>` 행 읽기·쓰기는 DML이라 마이그레이션 대상이 아니다).
 - 선행 데이터: 팀·소속(`permission-management`), 데이터셋과 원본 열(`dataset-definition`). 열이 없는 데이터셋에도 빈 행은 저장할 수 있다(필수 열이 없으면 `cells: {}`로 빈 행 생성을 허용하는 것은 의도된 동작이다).
@@ -153,6 +154,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 | 증상 | 원인 | 확인과 해결 |
 | --- | --- | --- |
 | 403 `FORBIDDEN` | 그 데이터셋 팀의 입력자·정의 담당자가 아님(관리자 포함) | `skills/permission-management`로 팀 소속·역할 확인 |
+| 409 `DATASET_ARCHIVED` | 데이터셋이 보관됨(FU-2b). 입력은 동결 | 정의 담당자에게 복구를 요청한다(`dataset-definition`). 복구 뒤 `def_version`이 그대로라 읽어 둔 값으로 다시 보내도 된다 |
 | 409 `DEFINITION_VERSION_MISMATCH` | 다른 사람이 열을 먼저 바꿈(정의 버전이 올랐다) | `GET /datasets/<번호>`로 정의를 다시 읽고 `expected_version`을 바꿔 다시 보낸다 |
 | 409 `CELL_CONFLICT` | 같은 칸을 다른 사람이 먼저 수정 | `details.conflicts[].current`가 지금 값. 다시 읽고 확인한 뒤 `expected`를 맞춰 다시 보낸다 |
 | 409 `PERIOD_CONFLICT` | 같은 기간 행이 이미 있음(기준 날짜 열이 있는 데이터셋은 기간당 한 행) | `details.conflicts[].row_id`가 그 행. 그 행을 수정하거나 다른 기간을 쓴다 |
@@ -248,6 +250,7 @@ curl -b jar -X POST -H 'content-type: application/json' \
 - `dataset-definition`: 열 타입·필수·범위 규칙·기준 날짜 열·날짜 단위의 정의. 행 쓰기가 같은 `datasets` 행을 `FOR SHARE`로 잡아 정의 변경과 서로 기다린다(`DEFINITION_BUSY`, `DATASET_HAS_ROWS`)
 - `permission-management`: 팀·소속·역할(`입력(팀)` 판정), 인증 스텁, 실제 DB 시험 방법
 - `formula-column`(FU-1d): 계산 열 값과 오류 칸을 `RowViewPort`(`FormulaRowView`)로 제공하고 이 Skill의 행 조회가 그것을 읽는다. 계산 열 키로 쓰기(C2~C4)는 `READ_ONLY`다
+- `dataset-definition`(FU-2b 보관·복구): 보관 중 C2~C4는 409 `DATASET_ARCHIVED`다. 보관해도 뷰·`ds_` 행은 그대로이고 읽기 전용 계정과 Superset에는 계속 보인다
 - `dashboard-link`(FU-1e): 입력된 행이 `dv_` 뷰를 거쳐 Superset 차트에 보인다(뷰를 읽는 데이터셋이라 값 입력은 동기화를 요청하지 않고 정의가 바뀔 때만 요청한다)
 - `admin-cleanup`: 잘못 입력한 행·데이터셋의 수동 정리(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검, 실제 DB 시험 환경

@@ -67,8 +67,14 @@ def get_dataset_definition(session: Session, dataset_id: int) -> RowMapping | No
     return session.execute(stmt).mappings().first()
 
 
-def list_active_dataset_ids(session: Session) -> list[int]:
-    stmt = select(datasets.c.id).where(datasets.c.status == "active").order_by(datasets.c.id)
+def list_startup_check_dataset_ids(session: Session) -> list[int]:
+    """시작 시 뷰·Superset 대조 대상: 활성과 보관 데이터셋 전부(FU-2b, 03b 30-1 결정 7).
+
+    보관해도 `dv_` 뷰는 `bi_readonly`에 공개되고 Superset 가상 데이터셋은 남으므로 대조에서 빼지
+    않는다.
+    (오류 칸 점검 D7의 `list_formula_columns`는 활성만 읽는다: 코드 변경 없음, 05 §2-4.)
+    """
+    stmt = select(datasets.c.id).order_by(datasets.c.id)
     return [int(i) for i in session.execute(stmt).scalars()]
 
 
@@ -84,11 +90,17 @@ def list_datasets(
     *,
     my_team_ids: Sequence[int],
     team_id: int | None,
+    status: str | None,
     limit: int,
     offset: int,
 ) -> tuple[list[RowMapping], int]:
-    """정렬: 내 소속 팀 먼저, 다음 팀 이름, 데이터셋 이름(03b 2-4)."""
+    """정렬: 내 소속 팀 먼저, 다음 팀 이름, 데이터셋 이름(03b 2-4).
+
+    `status`가 None이면 전체, 아니면 그 상태만이다(`total`에도 같은 조건, FU-2b B1).
+    """
     conditions = [] if team_id is None else [datasets.c.team_id == team_id]
+    if status is not None:
+        conditions.append(datasets.c.status == status)
     total = session.execute(
         select(func.count()).select_from(datasets).where(*conditions)
     ).scalar_one()
@@ -175,11 +187,12 @@ def max_position(session: Session, dataset_id: int) -> int | None:
 
 def find_dataset_name_conflict(
     session: Session, team_id: int, name: str, exclude_id: int | None = None
-) -> bool:
-    stmt = select(datasets.c.id).where(datasets.c.team_id == team_id, datasets.c.name == name)
+) -> str | None:
+    """같은 팀에 같은 이름의 데이터셋이 있으면 그 `status`, 없으면 None(보관도 이름을 점유한다)."""
+    stmt = select(datasets.c.status).where(datasets.c.team_id == team_id, datasets.c.name == name)
     if exclude_id is not None:
         stmt = stmt.where(datasets.c.id != exclude_id)
-    return session.execute(stmt).first() is not None
+    return session.execute(stmt).scalars().first()
 
 
 def find_column_name_conflict(
@@ -215,6 +228,7 @@ def lock_dataset(session: Session, dataset_id: int) -> RowMapping | None:
             datasets.c.name,
             datasets.c.date_unit,
             datasets.c.base_date_column_id,
+            datasets.c.status,
             datasets.c.def_version,
             datasets.c.def_hash,
         )
@@ -236,6 +250,7 @@ def lock_dataset_shared(session: Session, dataset_id: int) -> RowMapping | None:
             datasets.c.team_id,
             datasets.c.date_unit,
             datasets.c.base_date_column_id,
+            datasets.c.status,
             datasets.c.def_version,
         )
         .where(datasets.c.id == dataset_id)

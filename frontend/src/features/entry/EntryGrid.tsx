@@ -335,7 +335,7 @@ export function EntryGrid(props: EntryGridProps) {
         </p>
       ) : (
         <p className="state-readonly" role="note">
-          읽기 전용입니다. 이 팀의 입력 권한이 없어 값을 볼 수만 있습니다.
+          {props.archived ? "읽기 전용입니다. 보관된 데이터셋이라 값을 볼 수만 있습니다." : "읽기 전용입니다. 이 팀의 입력 권한이 없어 값을 볼 수만 있습니다."}
         </p>
       )}
 

@@ -73,7 +73,7 @@ describe("S2 데이터셋 목록 (B1)", () => {
     const { calls } = setup();
     await openList();
     const table = screen.getByRole("table", { name: "데이터셋 목록" });
-    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["이름", "팀", "날짜 단위", "생성자", "생성일", "동기 상태"]);
+    expect(within(table).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["이름", "팀", "날짜 단위", "생성자", "생성일", "동기 상태", "관리"]); // 관리자(영업 정의 담당자)에게만 FU-2b 관리 열이 있다
     const rows = within(table).getAllByRole("row").slice(1);
     // 여섯 번째 칸(동기 상태)은 별도 시험이 본다.
     expect(rows.map((r) => within(r).getAllByRole("cell").slice(0, 5).map((c) => c.textContent))).toEqual([

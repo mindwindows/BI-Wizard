@@ -32,6 +32,10 @@ export interface EntryParams {
   onVersion: (version: number) => void;
   /** 정의를 다시 읽는다(DEFINITION_VERSION_MISMATCH) */
   onDefinitionStale: () => Promise<void>;
+  /** 쓰기가 409 DATASET_ARCHIVED로 거부됐다(다른 사람이 방금 보관). 작업공간이 읽기 전용으로 바꾼다(FU-2b). */
+  onArchived?: () => void;
+  /** 보관된 데이터셋이라 입력이 멈춘 상태(canEnter는 false로 넘어온다). 안내 문구만 바꾼다. */
+  archived?: boolean;
   /** 값이 바뀌면 행을 다시 읽는다(수식을 저장해 계산 열 값이 바뀐 뒤 등) */
   refreshToken?: number;
 }
@@ -204,7 +208,11 @@ export function useEntry(params: EntryParams) {
           return;
         }
         revert();
-        if (isCode(error, "PERIOD_CONFLICT")) {
+        if (isCode(error, "DATASET_ARCHIVED")) {
+          // 입력한 값은 저장되지 않았으므로 되돌렸다. 안내를 보이고 읽기 전용으로 바꾼다.
+          notify("error", describeApiError(error));
+          paramsRef.current.onArchived?.();
+        } else if (isCode(error, "PERIOD_CONFLICT")) {
           patchRowByKey(rowKey, (r) => withMark(r, columnId, { kind: "invalid", message: "이미 같은 기간의 행이 있습니다." }));
         } else if (isCode(error, "VALIDATION_ERROR")) {
           markFieldIssues(error, rowKey, columnId, column, patchRowByKey, undefined, paramsRef.current.columns);
@@ -254,7 +262,11 @@ export function useEntry(params: EntryParams) {
         reload();
       } catch (error) {
         patchDraftByKey(draftKey, (d) => ({ ...d, saving: false }));
-        if (isCode(error, "PERIOD_CONFLICT")) {
+        if (isCode(error, "DATASET_ARCHIVED")) {
+          // 임시 행은 저장되지 않았다. 화면에 남겨 두고 사유만 적는다(복구하면 다시 저장할 수 있다).
+          patchDraftByKey(draftKey, (d) => ({ ...d, issue: `${describeApiError(error)} 이 임시 행은 저장되지 않았습니다.` }));
+          paramsRef.current.onArchived?.();
+        } else if (isCode(error, "PERIOD_CONFLICT")) {
           const message = "이미 같은 기간의 행이 있습니다. 기간을 바꾸거나 기존 행을 고쳐 주세요.";
           patchDraftByKey(draftKey, (d) => ({ ...d, issue: message }));
           if (baseDateColumnId !== null) patchDraftByKey(draftKey, (d) => withMark(d, baseDateColumnId, { kind: "invalid", message }));
@@ -356,7 +368,10 @@ export function useEntry(params: EntryParams) {
   const requestPaste = useCallback(
     (text: string, startRow: number | null, startColumn: number) => {
       if (!paramsRef.current.canEnter) {
-        setPaste({ stage: "problems", problems: [{ message: "이 데이터셋은 읽기 전용이라 붙여넣을 수 없습니다. 입력 권한이 필요합니다." }] });
+        setPaste({
+          stage: "problems",
+          problems: [{ message: paramsRef.current.archived ? "보관된 데이터셋은 고칠 수 없어 붙여넣을 수 없습니다. 복구한 뒤 다시 시도하세요." : "이 데이터셋은 읽기 전용이라 붙여넣을 수 없습니다. 입력 권한이 필요합니다." }],
+        });
         return;
       }
       if (startColumn < 0) {
@@ -392,7 +407,10 @@ export function useEntry(params: EntryParams) {
         });
         reload();
       } catch (error) {
-        if (isCode(error, "PASTE_CONFLICT")) {
+        if (isCode(error, "DATASET_ARCHIVED")) {
+          setPaste({ stage: "result", kind: "error", headline: `${describeApiError(error)} 붙여넣기는 저장되지 않았습니다.`, items: [], canRetry: false });
+          paramsRef.current.onArchived?.();
+        } else if (isCode(error, "PASTE_CONFLICT")) {
           const items: string[] = [];
           for (const conflict of conflictsOf(error)) {
             const column = conflict.column_id === null ? undefined : columnById(conflict.column_id);

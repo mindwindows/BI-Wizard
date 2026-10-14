@@ -6,6 +6,7 @@ import { EntryGrid } from "../../entry/EntryGrid";
 import type { SelectedCell } from "../../entry/selectedCell";
 import { createFormula, updateFormula } from "../../formula/api";
 import type { SaveInput, SaveOutcome } from "../../formula/FormulaEditor";
+import { ArchiveAction, doneText } from "../ArchiveAction";
 import { addColumn, getDataset, sortColumns, updateColumn, updateDataset } from "../api";
 import { formatDate } from "../format";
 import {
@@ -35,6 +36,8 @@ function Workspace({ datasetId }: { datasetId: number }) {
   const [gridRefresh, setGridRefresh] = useState(0);
   // 그리드에서 고른 계산 열 칸(전체 값을 Inspector 수식 보기에 보여 준다)
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null);
+  // 다른 사람이 방금 보관해서 쓰기가 409 DATASET_ARCHIVED로 돌아온 경우(재조회 전에도 읽기 전용으로 바꾼다)
+  const [forcedArchived, setForcedArchived] = useState(false);
   const detail = loaded && "detail" in loaded ? loaded.detail : null;
   // 열 목록은 정의가 바뀔 때만 새 배열이 된다(그리드 열 정의가 불필요하게 다시 만들어지지 않게).
   const columns = useMemo(() => sortColumns(detail?.columns ?? []), [detail?.columns]);
@@ -43,6 +46,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
     // 더 오래된 응답(느린 재읽기)이 최신 상태를 덮어쓰지 않게 한다.
     if (next.def_version < versionRef.current) return;
     versionRef.current = next.def_version;
+    setForcedArchived(false);
     setLoaded({ detail: next });
   }, []);
 
@@ -54,6 +58,12 @@ function Workspace({ datasetId }: { datasetId: number }) {
       // 재읽기 실패는 무시한다. 다음 저장 때 서버가 버전 불일치를 다시 알려 준다.
     }
   }, [apply, datasetId]);
+
+  /** 보관 중 쓰기 거부(409 DATASET_ARCHIVED): 읽기 전용으로 바꾸고 최신 상태(status)를 다시 읽는다. */
+  const markArchived = useCallback(() => {
+    setForcedArchived(true);
+    void refetch();
+  }, [refetch]);
 
   const getVersion = useCallback(() => versionRef.current, []);
   /** 서버가 알려 준 정의 버전이 내가 아는 것보다 크면 다른 사람이 정의를 바꾼 것이므로 정의를 다시 읽는다. */
@@ -93,6 +103,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
       setFeedback({ kind: "ok", text: await action() });
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEFINITION_VERSION_MISMATCH") await refetch();
+      if (error instanceof ApiError && error.code === "DATASET_ARCHIVED") markArchived();
       setFeedback({ kind: "error", error });
     }
   }
@@ -172,6 +183,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
       } catch (error) {
         // 정의가 바뀌었다면 최신 정의를 다시 읽는다. 입력 중인 수식은 편집기에 그대로 남는다.
         if (error instanceof ApiError && error.code === "DEFINITION_VERSION_MISMATCH") await refetch();
+        if (error instanceof ApiError && error.code === "DATASET_ARCHIVED") markArchived();
         return { ok: false, error };
       }
     },
@@ -199,6 +211,8 @@ function Workspace({ datasetId }: { datasetId: number }) {
     );
   }
 
+  // 권한(permissions)은 역할 기준 그대로 두고, 보관 상태는 status로 따로 판단한다(FU-2b).
+  const archived = detail.status === "archived" || forcedArchived;
   const canDefine = detail.permissions.define;
   const baseColumn = columns.find((c) => c.id === detail.base_date_column_id);
   const selectedId = selection.kind === "column" ? selection.id : null;
@@ -206,6 +220,25 @@ function Workspace({ datasetId }: { datasetId: number }) {
   return (
     <section data-testid="screen-S4" className="workspace">
       <h1>S4 작업공간: {detail.name}</h1>
+      {archived ? (
+        <div className="archive-banner" role="status" data-testid="archived-banner">
+          <p>
+            보관된 데이터셋입니다. 입력과 정의 변경이 멈춰 있습니다. 복구하면 다시 고칠 수 있습니다.
+            {canDefine ? "" : " 복구는 이 팀의 정의 담당자만 할 수 있습니다."}
+          </p>
+          {canDefine ? (
+            <ArchiveAction
+              dataset={{ id: detail.id, name: detail.name, status: "archived" }}
+              onDone={(kind, next) => {
+                apply(next);
+                setForcedArchived(false);
+                setGridRefresh((value) => value + 1);
+                setFeedback({ kind: "ok", text: doneText(kind, next.name) });
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
       <div className="workspace-grid">
         <div className="workspace-left">
           <section aria-label="데이터셋 정보" className="panel">
@@ -246,10 +279,10 @@ function Workspace({ datasetId }: { datasetId: number }) {
             </ul>
             {canDefine ? (
               <div className="actions">
-                <button type="button" onClick={() => select({ kind: "add" })}>
+                <button type="button" disabled={archived} onClick={() => select({ kind: "add" })}>
                   열 추가
                 </button>
-                <button type="button" onClick={() => select({ kind: "addFormula" })}>
+                <button type="button" disabled={archived} onClick={() => select({ kind: "addFormula" })}>
                   계산 열 추가
                 </button>
               </div>
@@ -267,7 +300,9 @@ function Workspace({ datasetId }: { datasetId: number }) {
               datasetId={datasetId}
               columns={columns}
               baseDateColumnId={detail.base_date_column_id}
-              canEnter={detail.permissions.enter}
+              canEnter={detail.permissions.enter && !archived}
+              archived={archived}
+              onArchived={markArchived}
               selectedColumnId={selectedId}
               onSelectColumn={(id) => select({ kind: "column", id })}
               getVersion={getVersion}
@@ -283,6 +318,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
           detail={detail}
           columns={columns}
           canDefine={canDefine}
+          archived={archived}
           selection={selection}
           feedback={feedback}
           actions={actions}
