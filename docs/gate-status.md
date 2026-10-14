@@ -1,6 +1,6 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-13 FU-2a 감사 로그 완료·main 반영 PR 기준으로 갱신)
+## 다음 세션 인계 (2026-10-14 FU-2a·FU-2b 완료·main 반영(PR #7·#8) 기준으로 갱신)
 
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
@@ -8,10 +8,10 @@
 - 새 세션이 `harness/setup`을 옛 커밋으로 여는 경우가 반복됐으므로, **새 세션은 `main`으로 시작해 `harness/setup`으로 전환하는 방식을 기본으로 한다**(`git fetch` 뒤 HEAD가 `origin/main` 최신인지, `git merge-base --is-ancestor origin/harness/setup origin/main`과 `git diff origin/harness/setup origin/main`이 비어 있는지 확인하고 `git checkout -B harness/setup origin/harness/setup`).
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
-### 현재 상태 (FU-1 완료)
+### 현재 상태 (FU-1·FU-2a·FU-2b 완료, 모두 `main` 병합)
 - **FU-2b(데이터셋 보관·복구, 2026-10-14) 구현·검증 완료:** 결정 `docs/decisions/03b` 30절(결과 30-3). revision `0008`(CHECK 두 개 교체만, 새 열·표·GRANT 없음, `DROP_APPROVED` 사용자 승인 2026-10-14), B7 archive·B8 restore, `DATASET_ARCHIVED`(409), 감사 17개, 시작 대조에 보관 포함, S2 보기 필터·배지·확인창·작업공간 읽기 전용 배너, 스크린샷 `docs/screens/fu2b/` 10장, `skills/dataset-definition` 보관·복구 절. 보관의 뜻은 "입력·정의 동결 + 포털 목록 숨김, Superset 공개 유지(데이터를 감추려면 영구 삭제 단위 필요)". 최종 QA 독립 전체 검증(커밋 `8d89d34`, PostgreSQL 16.10, 약 54분): 실제 PG 전체 pytest 4574 passed·skip 106(SQLite 전용 103 + repo 파일 없는 3건 따로 38 passed)·pg 변형 skip 0, 차분 7,353 수식 불일치 0, vitest 694 passed·0 skipped, 왕복·downgrade 거부·Superset 스모크 STRIP true·false·쓰기 라우트 26개 순회(8개 409)·뷰·`ds_` 해시 불변·CREATE/ALTER/DROP 0건, 메모리 약 482MiB, 503 0건. 알려진 한계: 보관 중 오류 칸은 D7에 안 보임, 비활성 팀 복구는 팀 재활성화 → `definer` 지정 → 복구 경로. 행 보관·열·수식 보관·영구 삭제·30일 `DROP`은 후속.
 - **FU-2a(감사 로그, 2026-10-13) 구현·검증 완료:** 결정 `docs/decisions/03b` 29절. revision `0007`(`audit_log`, 인덱스 3·CHECK 6, `bi_app`은 SELECT·INSERT만), `audit` 모듈, 관리자 전용 `GET /audit-logs`(F1), 기록 훅 15개(정의 변경·팀·소속·사용자·대시보드 연결), 프런트 S10, `skills/permission-management` 5-1절, 스크린샷 `docs/screens/fu2a/` 8장. 최종 QA 독립 전체 검증(커밋 `81cb582`, PostgreSQL 16.10): 실제 PG 전체 pytest 3858 passed·skip 106(전부 SQLite 전용 또는 이미지에 repo 파일이 없는 3건, 따로 38 passed)·pg 변형 skip 0, 차분 7,353 수식 불일치 0, vitest 663 passed·4 skipped(빌드 전 dist 검사 skip, 빌드 뒤 static-checks 13 passed), Superset 스모크 STRIP true·false 7/7, 15개 행위 각 1건·변경 없음/실패 0건, `bi_app` UPDATE·DELETE·TRUNCATE와 `bi_readonly` 접근 42501, 비밀값 0건, 메모리 합계 약 508MiB, 5개 흐름 동시 열 추가 503 0건. 전체 검증 소요 약 44분(QA 보고). **사용자 승인(2026-10-14):** 0007 `downgrade()`의 `drop_table`(03b 29-3)과 `seed-stub-users` 기록 제외(03b 29-5). 승인 반영 뒤 마지막 제품 커밋 `e1e7485` 기준 QA 독립 전체 재검증 통과(실제 PG 3861 passed·skip 103 전부 SQLite 전용, 차분 불일치 0, 왕복·Superset 스모크 STRIP true·false·`seed-stub-users` 감사 0건 포함, 상세 03b 29-5).
-- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. FU-1(1a~1e, 1e-f 포함) 전체를 `main`에 반영하는 **새 PR**을 만들었다(병합은 사용자가 한다, PR 번호는 PR 목록 참조). 병합 뒤에는 새 작업마다 `main` 최신에서 `harness/setup`을 다시 만든다(`git fetch origin main && git checkout -B harness/setup origin/main`, 로컬에 미반영 커밋이 없을 때만).
+- **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. FU-1(PR #5)·FU-2a(PR #7)·FU-2b(PR #8)는 모두 `main`에 병합됐다(`main` 최신 `baa1527`, 이 정리 단계 PR은 번호를 PR 목록에서 확인). **PR 병합은 "Create a merge commit"으로만 하고 "Delete branch"는 누르지 않는다. PR이 열려 있는 동안 `harness/setup`에 push한 커밋은 그 PR에 포함되므로, 다음 단위 커밋은 이전 PR이 병합된 뒤 `harness/setup`을 `origin/main`으로 fast-forward 한 다음에 시작한다**(`CLAUDE.md`).
 - **Gate ①~③ 승인**(③은 FU-1 범위). **Gate ④: FU-1(1a 권한 관리, 1b 데이터셋·열 정의, 1c 입력 그리드, 1d 수식 열, 1e Superset 등록·임베딩) 구현·검증 완료.** 결정 기록은 `docs/decisions/03b` 15~28절.
 - **검증 요약:** 전체 검증(마지막 커밋 `96a5974`, QA 독립): 실제 PG 전체 pytest 3310 passed·pg 변형 skip 0, 차분 7,353 수식 불일치 0, 프런트 616 passed, STRIP true·false Superset 스모크, 비밀값 검사, 메모리 약 0.5~0.6GB(8GB 예산 안), 연결 풀 상향 효과(5개 흐름 동시 열 추가 503 0건). 이후 범위 재검증(스크립트·문서만 변경, 제품 영향 경로 변경 0건): PR 본문에 최종 커밋과 증명이 있다.
 - **환경:** backend `bi_app`, migrate `bi_owner`(슈퍼유저 접속 없음), revision 0001~0008, `superset-init`이 역할·권한 적용, 연결 풀 `bi_app` 10+5(코드 상수), 컨테이너 Env는 `.env` 등급으로 허용(`deploy-coordination.md` 46번).
@@ -24,13 +24,16 @@
 4. 새 환경변수·새 의존성·기준과 다른 설정·권한 확대·에이전트 모델 변경은 적용 전 사용자 승인을 받는다. 최종 검증·재검증 규칙은 `.claude/skills/qa-verification`(범위 재검증 포함), 커밋 전 자체 점검(`ruff`·lint·typecheck)은 `.claude/skills/bi-wizard-dev`.
 
 ### 남은 결정·후속 (사용자)
+- **FU-2 이후 남은 질문(03b 31-2):** Q2 소급·마감(과거 기간 수정 제한), Q5 행 복구 권한자와 기간 유일 인덱스(`ux_ds_<id>_period`) 점유, Q6 열 보관 때 그 열을 쓰는 수식(`formula_deps`) 처리, Q7 영구 삭제와 `deleted` 상태 의미(껍데기 행 vs 행 삭제), **Q3 본체**(비활성 팀·사용자 소유 데이터셋의 효과; FU-2b는 팀 활성 여부를 보지 않는 것까지만 결정). 행·열·수식 보관과 영구 삭제, 30일 뒤 `DROP`은 이 질문에 답한 뒤의 후속 단위다.
 - **미결정 8번(포털 사용자 인증 방식):** 운영자 답 대기(`docs/operator-questions.md`). 정해질 때까지 스텁 신원, 운영 어댑터는 후속 단위에서 교체, 방식별 새 환경변수는 따로 승인.
+- **FU-2a·FU-2b 알려진 한계:** 보관해도 읽기 전용 뷰와 Superset 차트로는 계속 보인다(데이터를 감추려면 영구 삭제 단위 필요); 보관 중 오류 칸은 점검 목록(D7)에 안 보인다(D8로 조회); 비활성 팀 소유 데이터셋의 복구는 팀 재활성화 → `definer` 지정 → 복구 순서(관리자가 비활성 팀에 직접 `definer`를 지정하면 409 `TARGET_INACTIVE`); `0007`·`0008` downgrade는 `audit_log` 전체 삭제·보관 행/감사 행이 있으면 거부(운영에서는 하지 않고 수정 revision으로 대응); 감사 목록은 `occurred_at`이 트랜잭션 시작 시각이고 깊은 offset 속도·하루 건수는 미측정; 0008 잠금 시간은 500행/2만 행에서 약 3.6ms, 100만 행은 추정; 503 다시 시도·403 안내·열린 화면의 409 전환은 vitest로만 확인; 칸 편집·임시 행 저장 중 `DATASET_ARCHIVED` 분기는 코드만 있고 시험 없음; B5는 활성에서도 낡은 버전 409가 규칙 오류 422보다 먼저(03b 31-1 사후 승인).
 - **Superset 로고 이중 접두:** 상류 6.1.0 결함, 새 설정 없이 알려진 문제로 둔다(`deploy-coordination.md` 13번). 우회(`THEME_*.brandLogoUrl`)는 새 설정이라 승인 필요.
 - **후속 보류:** 502 안내 문구가 임베드 해제 원인을 구분하지 못함, 임베드 안 영어 문구·월 이름(Superset 언어·D3 로캘 설정, 승인 필요), 비밀값 파일 전달 강화(`*_FILE`, 새 변수 승인 필요), 저장 지표 `d3format`↔`decimals`, `listDashboards` 200개 초과 잘림, S9 순차 읽기, guest 목록 API 스모크의 CI 편입, 20만 행 부하 메모리, BAT 실행 검증·HTTPS·다중 워커·한글 IME·Superset 한국어는 미시험.
 - **Gate ② 보류 2건:** BAT 6종 실행 검증(사내 환경), Jenkinsfile의 Jenkins 실제 실행(`deploy-coordination.md` 6번).
 - **운영 협의:** `docs/deploy-coordination.md`(1~46번) — 특히 운영 DB 슈퍼유저(29번), PG `max_connections`(45번), 컨테이너 Env 등급(46번).
 
 ### 후속 단위 순서 (제안, 사용자 지시 후 시작)
+FU-1(권한·데이터셋·입력·수식 열·Superset 임베딩), FU-2a(감사 로그), FU-2b(데이터셋 보관·복구)까지 끝났다. 다음 후보(`docs/decisions/04-modules.md` §7): FU-2c(행 보관·열·수식 보관·영구 삭제, 위 Q 답 필요), FU-3 기준값 표 → FU-4 수식 확장(이전 행 참조·같은 데이터셋 집계·기준값 호출) → FU-5 참조 열 → FU-6 공통 요약, FU-7 엑셀 가져오기(업무 가치가 크면 앞당길 수 있음; EW-2 승인 선행). 인증 #8은 운영자 답이 오면 언제든 어댑터 교체 단위로 끼운다. 아래는 기존 문구다.
 `docs/decisions/04-modules.md` 끝의 후속 기능 단위 목록(FU-2 이후)과 §7을 따른다. 엑셀 가져오기(FU-7)는 EW-2(업로드 상한 `APP_UPLOAD_MAX_MB`, nginx `client_max_body_size`, `python-multipart`·`openpyxl`·`defusedxml`)를 먼저 요청한다. 한 번에 한 단위만 진행하고 단위마다 구현→테스트→제품 Skill→QA→reviewer→사용자 승인 순서를 지킨다.
 
 ### 미결 항목
