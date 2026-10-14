@@ -13,7 +13,8 @@ downgrade 0007(CHECK 두 개만 옛 정의로, 표·권한 그대로) -> upgrade
 downgrade 0006(감사 기록 표만 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0005(등록 표·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0004(수식·등록·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
-downgrade 0003(0003 표·권한은 남고 0004~0007 표·권한이 사라짐) ->
+downgrade 0003(0003 표·권한은 남고 0004~0007 표·권한이 사라짐.
+0008은 표·권한 없이 CHECK 두 개만 교체) ->
 upgrade head(B와 같아야 함) -> downgrade base ->
 스냅샷 A'(A와 같아야 함) -> upgrade head -> 스냅샷 B'(B와 같아야 함).
 접속은 `bi_owner`(비밀번호 `POSTGRES_OWNER_PASSWORD`)이다.
@@ -374,7 +375,8 @@ def expect_static_privileges(
 ) -> list[str]:
     """정적 표와 `bi_app` 권한(표·열 단위)이 head에는 정확히 있고 base에는 없는지 확인한다.
 
-    기본은 모든 정적 표(0003 + 0004 + 0005 + 0006 + 0007)다. `table_acl`/`column_acl`로 revision
+    기본은 모든 정적 표(0003 + 0004 + 0005 + 0006 + 0007)다. 0008은 표·권한을 바꾸지 않고
+    CHECK 두 개만 교체하므로 이 목록에 항목이 없다. `table_acl`/`column_acl`로 revision
     하나의
     표만
     볼 수 있다.

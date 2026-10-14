@@ -229,7 +229,7 @@ def names(response) -> list[str]:
 
 
 def test_b1_status_filter_default_active_archived_all_with_total(api, db, world):
-    a = make_dataset(api, world, "가")["id"]
+    make_dataset(api, world, "가")
     b = make_dataset(api, world, "나")["id"]
     make_dataset(api, world, "다")
     assert archive(api, b).status_code == 200
@@ -251,7 +251,6 @@ def test_b1_status_filter_default_active_archived_all_with_total(api, db, world)
     # 복구하면 기본 목록으로 돌아온다
     assert restore(api, b).status_code == 200
     assert names(api("viewer", "GET", "/api/datasets")) == ["가", "나", "다"]
-    assert a
 
 
 @pytest.mark.parametrize("value", ["bogus", "", "ACTIVE", "deleted", "active,archived"])
@@ -283,7 +282,7 @@ def archived_error(response):
 
 
 def test_rejection_comes_before_the_version_comparison_and_the_422_validation(api, db, world, ds):
-    other = make_dataset(api, world, "다른 이름")["id"]
+    make_dataset(api, world, "다른 이름")
     v = version(api, ds["id"])
     # 대조군: 활성일 때는 같은 요청이 각자의 오류를 낸다
     bad_rules = {
@@ -352,7 +351,6 @@ def test_rejection_comes_before_the_version_comparison_and_the_422_validation(ap
     for method, path, body in cases:
         archived_error(api("definer", method, path, json=body))
     assert static_snapshot(db) == snapshot  # 거부된 요청은 아무것도 바꾸지 않았다
-    assert other
 
 
 def test_entry_user_gets_the_same_rejection_for_row_writes(api, ds):
@@ -490,12 +488,11 @@ def test_name_conflict_with_an_archived_dataset_mentions_it_on_rename(api, world
     assert ARCHIVED_NAME_HINT in err(clash)["message"]
     assert version(api, other) == v  # 이름이 바뀌지 않았다
     # 활성 상대와의 충돌에는 덧붙이지 않는다
-    third = make_dataset(api, world, "셋째")["id"]
+    make_dataset(api, world, "셋째")
     plain = api(
         "definer", "PATCH", f"/api/datasets/{other}", json={"expected_version": v, "name": "셋째"}
     )
     assert err(plain)["message"] == "같은 팀에 이미 같은 이름의 데이터셋이 있습니다."
-    assert third
 
 
 def test_name_conflict_hint_also_applies_when_the_unique_constraint_wins_the_race(
@@ -549,3 +546,22 @@ def test_one_audit_row_each_with_team_id_and_no_def_version(api, db, world, ds):
         assert (row["actor_source"], row["actor_user_id"]) == ("user", world.ids["definer"])
         assert row["details"] == {"target_name": "보관 시험", "team_id": world.team_a}
     assert audit_rows_of(db, "dataset.archive") == [a]
+
+
+def test_active_dataset_stale_version_beats_invalid_rules_on_b5(api, ds):
+    """B5의 규칙·태그 검증(422)은 잠금 아래라 활성 데이터셋에서도 낡은 버전(409)이 먼저다."""
+    bad = {"display_name": "열", "type": "number", "rules": {"min": "abc"}}
+    stale = api(
+        "definer",
+        "POST",
+        f"/api/datasets/{ds['id']}/columns",
+        json={**bad, "expected_version": version(api, ds["id"]) + 5},
+    )
+    assert (stale.status_code, err(stale)["code"]) == (409, "DEFINITION_VERSION_MISMATCH")
+    fresh = api(
+        "definer",
+        "POST",
+        f"/api/datasets/{ds['id']}/columns",
+        json={**bad, "expected_version": version(api, ds["id"])},
+    )
+    assert (fresh.status_code, err(fresh)["code"]) == (422, "VALIDATION_ERROR")
