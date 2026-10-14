@@ -9,6 +9,7 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
     python -m migrations.roundtrip
 ```
 순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` ->
+downgrade 0007(CHECK 두 개만 옛 정의로, 표·권한 그대로) -> upgrade head(B와 같아야 함) ->
 downgrade 0006(감사 기록 표만 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0005(등록 표·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0004(수식·등록·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
@@ -178,6 +179,11 @@ def take_snapshot(engine: Engine) -> Snapshot:
                 "indexes": sorted(
                     str([i["name"], i["column_names"], i["unique"]])
                     for i in inspector.get_indexes(table, schema="public")
+                ),
+                # CHECK 제약(0008이 두 개를 교체하므로 정의까지 비교한다)
+                "checks": sorted(
+                    [c["name"], " ".join(c["sqltext"].split())]
+                    for c in inspector.get_check_constraints(table, schema="public")
                 ),
             }
         snap["public_tables"] = tables
@@ -407,6 +413,34 @@ def expect_static_privileges(
     return problems
 
 
+def expect_archive_checks(snapshot: Snapshot, *, archived: bool) -> list[str]:
+    """0008의 두 CHECK 정의: head에서는 `archived`와 보관·복구 행위가 허용되고 0007에서는 아니다.
+
+    제약 이름은 `op.f`로 한 번만 붙어야 한다(`ck_datasets_ck_datasets_status` 같은 이중 이름 금지).
+    """
+    problems: list[str] = []
+    tables = snapshot["public_tables"]
+    names = {t: {c[0]: c[1] for c in tables[t]["checks"]} for t in ("datasets", "audit_log")}
+    for table, name, marker in (
+        ("datasets", "ck_datasets_status", "'archived'"),
+        ("audit_log", "ck_audit_log_action", "'dataset.archive'"),
+    ):
+        text = names[table].get(name)
+        if text is None:
+            problems.append(f"{table}.{name} 제약이 없다")
+            continue
+        if (marker in text) != archived:
+            problems.append(f"{name} 정의가 기대와 다름(archived={archived}): {text}")
+    if archived:
+        restore = names["audit_log"].get("ck_audit_log_action", "")
+        if "'dataset.restore'" not in restore:
+            problems.append("ck_audit_log_action에 dataset.restore가 없다")
+    doubled = [n for t in names.values() for n in t if n.count("ck_") > 1]
+    if doubled:
+        problems.append(f"제약 이름이 이중으로 붙었다: {doubled}")
+    return problems
+
+
 def _current_revision(engine: Engine) -> str | None:
     with engine.connect() as conn:
         return MigrationContext.configure(conn).get_current_revision()
@@ -452,6 +486,18 @@ def main() -> int:
         step("alembic check", [])
     except Exception as error:
         step("alembic check", [f"{type(error).__name__}: {error}"])
+
+    step("upgrade 후 0008 CHECK 정의", expect_archive_checks(head1, archived=True))
+
+    # 0008(CHECK 두 개 교체) 한 단계만: 내리면 0007 상태(옛 정의), 올리면 head와 같다. 표·권한은
+    # 바뀌지 않는다. 보관 행·보관 감사 행이 있을 때의 거부는 pytest(PostgreSQL)가 확인한다.
+    command.downgrade(config, "0007")
+    step8 = take_snapshot(engine)
+    step("0008 downgrade 후 옛 CHECK 정의", expect_archive_checks(step8, archived=False))
+    step("0008 downgrade 후 정적 표 권한 유지", expect_static_privileges(step8, granted=True))
+    step("0008 downgrade 후 bi_data 권한 유지", expect_privileges(step8, granted=True))
+    command.upgrade(config, "head")
+    step("0008 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
 
     # 0007(감사 기록 표) 한 단계만: 내리면 0006 상태(감사 기록 표만 사라짐), 올리면 head와 같다.
     # 주의: downgrade는 감사 기록 전체를 지운다(빈 시험 DB 전용, 03b 29-3 사용자 승인 2026-10-14).

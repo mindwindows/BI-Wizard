@@ -1,6 +1,6 @@
 ---
 name: dataset-definition
-description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 기능. 이름, 날짜 단위(일·월·연), 열 타입(글자·숫자·날짜·예/아니오·선택 목록), 필수·범위 규칙, 기준 날짜 열, 열 구분 태그, 정의 버전(동시 편집 충돌)을 다룬다. "데이터셋 만들어줘", "열 추가", "기준 날짜 열 지정", "열 이름 바꿔줘", "범위 규칙 걸어줘", "정의 충돌 났어요" 같은 요청에 사용한다. 화면(S2·S3·S4 Inspector)은 프런트 단위에서 붙고 이 문서의 5절 "사람(화면)"에 합친다.
+description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 기능. 이름, 날짜 단위(일·월·연), 열 타입(글자·숫자·날짜·예/아니오·선택 목록), 필수·범위 규칙, 기준 날짜 열, 열 구분 태그, 정의 버전(동시 편집 충돌), 데이터셋 보관·복구(FU-2b)를 다룬다. "데이터셋 만들어줘", "열 추가", "기준 날짜 열 지정", "열 이름 바꿔줘", "범위 규칙 걸어줘", "정의 충돌 났어요", "데이터셋 보관해줘", "보관한 데이터셋 복구", "보관된 데이터셋은 고칠 수 없다고 나와요" 같은 요청에 사용한다. 화면(S2·S3·S4 Inspector)은 프런트 단위에서 붙고 이 문서의 5절 "사람(화면)"에 합친다.
 ---
 
 # dataset-definition — 데이터셋·열 정의
@@ -13,6 +13,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - 권한(06 §4-1):
   - **읽기(B1·B3):** 인증된 활성 사용자 누구나, 다른 팀 데이터셋 포함.
   - **정의(B2·B4·B5·B6): 그 데이터셋 팀의 `definer`만.** 관리자(`is_admin`)여도 그 팀의 `definer`가 아니면 403 `FORBIDDEN`이다(필요하면 관리자가 자기를 그 팀의 정의 담당자로 소속시킨다). 입력자(`entry`), 다른 팀 구성원, 소속 없는 사용자도 403이다. 비활성 사용자는 403 `USER_INACTIVE`, 신원 없음은 401.
+  - **보관·복구(B7·B8, FU-2b): 그 데이터셋 팀의 `definer`만.** 관리자 예외 코드는 없다(관리자도 그 팀 `definer`가 아니면 403). 입력자·다른 팀 구성원·비소속 사용자도 403, 비활성 사용자 403 `USER_INACTIVE`, 신원 없음 401. **팀이 비활성이어도 보관·복구할 수 있다**(팀 활성 여부를 보지 않는다).
   - B4~B6의 권한 검사는 본문 검증보다 먼저다(권한 없는 사용자는 입력 오류 내용을 알 수 없다). B2는 팀이 본문에 있어 본문 검증 뒤에 검사한다.
 - 실행 상태: `local-environment` 통과, `migrate`가 `0004`까지 적용(`datasets`·`dataset_columns`). backend 시작 자가 점검이 `bi_data`의 새 객체(표, 열이 소유한 Identity 시퀀스, 인덱스, 제약)를 허용한다.
 - 선행 데이터: 팀과 정의 담당자 소속(`skills/permission-management`).
@@ -55,8 +56,11 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 ### B6 `PATCH /api/datasets/{id}/columns/{col_id}` (보낸 필드만 바꾼다)
 `expected_version`(필수), `display_name?`, `required?`, `rules?`, `tag?`(`null`이면 지움), `position?`. **`type`·`kind`는 바꿀 수 없다**: 현재와 다른 값을 보내면 422 `COLUMN_LOCKED`(같은 값이면 무시). 다른 타입이 필요하면 새 열을 추가한다. 계산 열(`formula`)에는 `required: true`와 `rules`를 줄 수 없다(422). 이름을 바꿔도 원본 표의 열 이름(`c_<번호>`)은 그대로다.
 
+### B7 `POST /api/datasets/{id}/archive` · B8 `POST /api/datasets/{id}/restore` (FU-2b)
+본문 없음(있으면 422 `VALIDATION_ERROR`, 필드 `body`), `expected_version` 없음. 판정 순서는 인증 -> 없는 데이터셋 404 -> 정의 담당자 아님 403 -> 본문 422 -> 행 잠금이다. 자세한 뜻과 한계는 아래 "보관·복구 (FU-2b)".
+
 ### 목록 B1 `GET /api/datasets`
-`team_id?`, `limit`(기본 50, 1~200), `offset`. 정렬: **내 소속 팀의 데이터셋이 먼저**, 다음 팀 이름, 데이터셋 이름. 이름순은 한글 가나다순이다(아래 "이름순 정렬").
+`team_id?`, `status?`(`active`·`archived`·`all`, 기본 `active`. 보관된 데이터셋을 보려면 `archived` 또는 `all`. 목록 밖 값은 422 `VALIDATION_ERROR`의 필드 `status` `NOT_IN_OPTIONS`, `total`에도 같은 필터가 적용된다), `limit`(기본 50, 1~200), `offset`. 정렬: **내 소속 팀의 데이터셋이 먼저**, 다음 팀 이름, 데이터셋 이름. 이름순은 한글 가나다순이다(아래 "이름순 정렬").
 
 ## 4. 출력
 - 공통 형태(05 §1):
@@ -67,7 +71,8 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 - B5 201, B6 200: `{column, def_version}` (새 정의 버전).
 - 오류(`{"error": {"code", "message", "details", "request_id"}}`, 한국어 `message`):
   - 409 `DEFINITION_VERSION_MISMATCH` + `details.current_version` — 다른 사람이 먼저 정의를 바꿈. 새로 읽고 다시 한다.
-  - 409 `ALREADY_EXISTS` + `details.field`(`name`: 팀 안 데이터셋 이름, `display_name`: 데이터셋 안 열 이름)
+  - 409 `ALREADY_EXISTS` + `details.field`(`name`: 팀 안 데이터셋 이름, `display_name`: 데이터셋 안 열 이름). 충돌 상대가 **보관된 데이터셋**이면(B2 생성, B4 이름 변경) 메시지에 "보관된 데이터셋과 같은 이름입니다. 보관된 데이터셋을 복구하거나 다른 이름을 쓰세요."가 덧붙는다(보관해도 이름은 계속 쓰인다).
+  - 409 `DATASET_ARCHIVED` + `details.status="archived"` — **보관된 데이터셋에 정의·입력 쓰기(B4·B5·B6·C2·C3·C4·D4·D5)를 시도.** 메시지는 "보관된 데이터셋은 고칠 수 없습니다. 복구한 뒤 다시 시도하세요." 아래 "보관·복구 (FU-2b)".
   - 409 `TARGET_INACTIVE` + `details.field=team` — B2에서 비활성 팀에는 데이터셋을 만들 수 없다(03b 19-1 결정 1). **권한 판정(그 팀의 정의 담당자)이 먼저**라서 정의 담당자가 아니면 팀이 비활성이어도 403이다. 팀을 다시 사용 중으로 바꾸려면 관리자가 A4(`permission-management`)를 쓴다. 이미 있는 데이터셋의 열 편집·행 입력은 이 규칙의 대상이 아니다.
   - 422 `VALIDATION_ERROR` + `details.fields[{field, code, message}]` — 필드 코드 `REQUIRED`·`TOO_LONG`·`BAD_FORMAT`·`RESERVED`·`OUT_OF_RANGE`. 규칙 오류의 `field`는 `rules.min`처럼 키까지 가리킨다. 기준 날짜 열이 원본 `date` 열이 아니거나 다른 데이터셋의 열이면 `base_date_column_id` `BAD_FORMAT`.
   - 422 `DATASET_HAS_ROWS` — 행이 있어 날짜 단위·기준 날짜 열을 바꿀 수 없음
@@ -79,6 +84,16 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
   - 원본 표 `bi_data.ds_<데이터셋 번호>`: `row_id`(bigint identity, PK)와 원본 열 `c_<열 번호>`(`text`→`text`, `number`→`numeric`, `date`→`date`, `boolean`→`boolean`, `choice`→`text`, 모두 NULL 허용 = 빈 칸은 미입력). 소유자는 `bi_app`, `bi_readonly`(Superset)는 `SELECT`만.
   - **기준 날짜 열**을 지정하면 그 열이 `NOT NULL`이 되고 CHECK `ck_ds_<번호>_period`(기간의 첫날: 월 단위면 1일, 연 단위면 1월 1일. `timestamp` 변환을 거쳐 세션 시간대와 무관)와 유일 인덱스 `ux_ds_<번호>_period`(같은 기간 하나)가 걸린다. 해제하거나 단위를 바꾸면 풀리고 다시 걸린다. 기준 날짜 열은 입력 때 필수로 취급한다(`required` 플래그 값은 그대로 두고 입력 단위가 `REQUIRED`로 판정, FU-1c).
 - 부수 효과: 정의가 **실제로 바뀌고 커밋된 뒤에만** `DatasetSyncPort.request_dataset_sync`를 백그라운드로 요청한다(Superset 가상 데이터셋 동기화. 구현은 `backend/app/superset/worker.py`이고 Superset 접속 설정이 없으면 아무것도 하지 않는 기본 구현이다. 요청은 `pending` 표시와 대기열 투입뿐이라 Superset이 멈춰도 응답은 그대로다, `skills/dashboard-link`). 요청이 실패해도 응답은 그대로다. 아무것도 바뀌지 않은 PATCH(같은 값)는 버전을 올리지 않고 동기화도 요청하지 않는다.
+
+### 보관·복구 (FU-2b, `03b` 30-1)
+- **뜻: "입력·정의 동결 + 포털 목록 숨김, Superset 공개 유지".** 보관하면 `datasets.status`만 `archived`로 바뀐다(새 열·`archived_at` 없음, 보관 시각·행위자는 감사 기록 `dataset.archive`에서 본다). 복구하면 `active`로 돌아온다. **정의 버전(`def_version`)·정의 해시(`def_hash`)·열·`ds_`/`dv_`/`de_` 뷰와 행은 그대로**이고 정의 변경 훅·동적 DDL·Superset 동기 요청이 없다. 그래서 복구하면 보관 전에 읽어 둔 `def_version`이 그대로 유효하다.
+- **한계(꼭 알릴 것): 데이터는 감춰지지 않는다.** 보관해도 `dv_` 뷰는 `bi_readonly`에 계속 공개되고 Superset 가상 데이터셋과 그 위의 차트·대시보드도 그대로 남는다(Superset 등록 유지). **데이터를 감추려면 영구 삭제 단위가 따로 필요하며 아직 없다.** 화면의 보관 확인창도 이 한계를 적는다.
+- **보관 중 막히는 것(409 `DATASET_ARCHIVED`):** B4(이름·날짜 단위·기준 열 수정), B5(열 추가), B6(열 수정), D4(계산 열 만들기), D5(수식 고치기), C2·C3·C4(행 입력·수정·붙여넣기, `data-entry`). 판정은 `datasets` 행을 잠근 직후이며 **버전 비교(`DEFINITION_VERSION_MISMATCH`)와 입력 검증(422)보다 앞**이라 버전이 틀려도 같은 코드가 나온다. 보관 커밋을 기다린 쓰기도 커밋 뒤 갱신된 행을 읽어 같은 코드를 받는다.
+- **보관 중에도 되는 것:** 목록·상세 조회(B1·B3, 보관된 데이터셋은 `status: "archived"`), 행 조회(C1), 수식 검사·미리보기·수식 보기·오류 칸 조회(D1·D2·D3·D6·D8), D10 뷰 다시 만들기(정의 변경이 아니라 대조 복구라 보관 검사를 하지 않는다), Superset 동기 상태·다시 시도(E1·E2)와 대시보드. 새 데이터셋 만들기(B2)도 보관과 무관하다(보관된 것과 같은 이름만 충돌).
+- **알려진 한계:** 오류 칸 점검 목록 D7(`/checks/formula-errors`)은 활성 데이터셋만 대상이라 **보관 중 오류 칸은 그 목록에 안 보인다**(코드 변경 없음, D8로 데이터셋별 조회는 된다).
+- **이름 점유:** 보관된 데이터셋도 `UNIQUE(team_id, name)`에 남아 같은 이름으로 새 데이터셋을 만들거나 이름을 바꿀 수 없다. 복구하거나 다른 이름을 쓴다.
+- **같은 상태 재요청:** 이미 보관인 데이터셋을 다시 보관하거나 이미 활성인 것을 복구해도 200이며 아무것도 바꾸지 않고 감사 기록도 남기지 않는다. 한 호출은 `status` UPDATE와 감사 기록 `dataset.archive`·`dataset.restore`(details는 `target_name`, `team_id`만) 한 줄이 한 트랜잭션이다. 실패·롤백이면 둘 다 없다. 락 대기 초과·교착은 503 `DEFINITION_BUSY`(정의 변경과 같은 행 잠금 하나).
+- **복구 경로(관리자 예외 없음, 실측 2026-10-14):** 보관·복구는 그 팀 `definer`만 한다. 팀에 `definer`가 남아 있으면 팀이 비활성이어도 그 사람이 복구한다. `definer`가 없어졌을 때(예: 모두 소속 해제): 관리자가 **비활성 팀에는 A8로 `definer`를 지정할 수 없다**(409 `TARGET_INACTIVE`, `details.field=team`). 따라서 ① 관리자가 A4로 팀을 다시 활성화 -> ② A8로 `definer` 지정 -> ③ 그 `definer`가 복구(이 시점에 팀을 다시 비활성으로 돌려도 복구된다)의 순서로 한다. 사용자가 비활성이면(`USER_INACTIVE`) A7으로 먼저 활성화한다. 시험: `test_dataset_archive.py`의 `test_admin_cannot_designate_a_definer_in_an_inactive_team_but_can_reactivate_first`.
 
 ### 정의 버전과 정의 변경 진입점 (동시 편집)
 - 정의를 바꾸는 모든 요청(B4~B6, D4·D5)은 한 함수(`backend/app/dataset/definition.py`)를 지난다: ① `lock_timeout 1초` ② `datasets` 행을 `FOR NO KEY UPDATE`로 잠금(읽기는 막지 않는다) ③ `expected_version` 확인 ④ 열 변경(정의 행 + 원본 표 DDL) ⑤ 정의 변경 훅(formula 모듈이 등록한다: 저장된 수식 전부를 현재 열 이름·태그로 다시 컴파일해 `formulas`·`formula_deps`를 쓰고 `dv_<번호>`·`de_<번호>` 뷰를 같은 트랜잭션에서 만든다. 수식이 깨지면 `FORMULA_INVALID`/`FORMULA_CIRCULAR`로 열 변경까지 전부 롤백) ⑥ `def_version + 1`과 `def_hash`(훅이 돌려준 뷰 정의 해시) 기록 후 커밋. 데이터셋 등록(B2)도 같은 훅을 불러 수식이 없어도 `dv_`(팀 열 포함)·`de_`를 만든다. 중간에 실패하면 모두 롤백된다(원본 표 DDL 포함).
@@ -129,13 +144,17 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 # 4) 열 이름·규칙 바꾸기
 curl -b jar -X PATCH -H 'content-type: application/json' \
   -d '{"expected_version": 4, "display_name": "총매출", "rules": {"min": 0, "max": 100000}}' "$BASE/datasets/<번호>/columns/<열 번호>"
+# 5) 보관·복구 (그 팀의 정의 담당자만, 본문 없음, FU-2b)
+curl -b jar -X POST "$BASE/datasets/<번호>/archive"
+curl -b jar "$BASE/datasets?status=archived"       # 보관된 데이터셋 목록(status=all이면 전부)
+curl -b jar -X POST "$BASE/datasets/<번호>/restore"
 ```
 - 충돌(409 `DEFINITION_VERSION_MISMATCH`)이면 `GET /datasets/<번호>`로 최신 `def_version`과 열을 읽고 바꿀 내용을 확인한 뒤 새 버전으로 다시 보낸다.
-- 잘못 만든 열·데이터셋을 지우는 API는 FU-1에 없다. 관리자가 수동으로 정리한다: `skills/admin-cleanup`.
+- 잘못 만든 열·데이터셋을 지우는 API는 없다(FU-2b는 보관·복구만 제공하고 보관은 정리가 아니다: 뷰·Superset 등록·`ds_` 데이터는 그대로). 관리자가 수동으로 정리한다: `skills/admin-cleanup`.
 
 ## 6. 관련 UI / API / command / DB
 - UI: S2 `/datasets`, S3 `/datasets/new`, S4 `/datasets/<번호>`(Inspector 포함). 구현 `frontend/src/features/dataset/`.
-- API: B1~B6(05 §2-2). 코드 `backend/app/dataset/`(`router`·`service`·`repo`·`schemas`·`rules`·`definition`·`hashing`), 동적 DDL `backend/app/ddl/`(`names`·`dynamic`), 정의 변경 훅·동기화 포트 `backend/app/core/ports.py`.
+- API: B1~B8(05 §2-2, B7·B8 보관·복구는 FU-2b). 코드 `backend/app/dataset/`(`router`·`service`·`repo`·`schemas`·`rules`·`definition`·`hashing`), 동적 DDL `backend/app/ddl/`(`names`·`dynamic`), 정의 변경 훅·동기화 포트 `backend/app/core/ports.py`.
 - command: 없음. 정리·점검은 `skills/admin-cleanup`(수동 절차)와 `python -m migrations.roundtrip`.
 - DB: `public.datasets`, `public.dataset_columns`(revision `0004_datasets_columns`), `bi_data.ds_<번호>`(런타임 DDL, `bi_app` 소유).
   - `bi_app` 권한은 명시 GRANT뿐이다: 표 단위 SELECT·INSERT(DELETE 없음), UPDATE는 열 단위(`datasets`: `name`·`date_unit`·`base_date_column_id`·`status`·`def_version`·`def_hash`, `dataset_columns`: `display_name`·`type`·`required`·`rules`·`tag`·`position`). `datasets.team_id`·`created_by`와 `dataset_columns.dataset_id`·`kind`는 DB가 변경을 거부한다(팀 열은 뷰에 상수로 들어가고 열 종류는 바뀌지 않는다). `type`은 계산 열 결과 형 때문에 갱신 권한이 있고 원본 열의 `type` 금지는 앱 규칙(`COLUMN_LOCKED`)이다.
@@ -151,6 +170,9 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 | 422 `COLUMN_LOCKED` | 열 `type`·`kind` 변경 시도 | 새 열을 추가한다 |
 | 422 `VALIDATION_ERROR` | 이름 규칙(금지 문자·예약어·길이)·규칙 모양·태그 위반 | `details.fields[].field/code`. 예약어는 `team`·`팀`·`row_id`·`행 번호` |
 | 409 `ALREADY_EXISTS` | `details.field`가 `name`(팀 안 데이터셋) 또는 `display_name`(데이터셋 안 열) | 다른 이름을 쓴다 |
+| 409 `DATASET_ARCHIVED` | 보관된 데이터셋에 정의·입력 쓰기(B4 B5 B6 C2 C3 C4 D4 D5) | `GET /datasets/<번호>`의 `status`가 `archived`인지 본다. 정의 담당자가 `POST /datasets/<번호>/restore`로 복구한 뒤 다시 한다(`def_version`은 그대로) |
+| 보관·복구 버튼이 없거나 403 | 그 팀의 정의 담당자가 아님(관리자도 마찬가지, 비활성 팀이어도 정의 담당자면 된다) | 정의 담당자가 없으면 위 "복구 경로"(팀 재활성화 -> A8 -> 복구) |
+| 보관했는데 Superset·읽기 전용 뷰에서 계속 보임 | 의도된 동작(보관은 동결과 포털 숨김일 뿐 데이터를 감추지 않는다) | 데이터를 감추려면 영구 삭제 단위가 필요하다(아직 없음) |
 | 403 `FORBIDDEN` | 그 데이터셋 팀의 정의 담당자가 아님(관리자 포함) | `skills/permission-management`로 팀 소속·역할 확인 |
 | 500 `INTERNAL_ERROR` | 원본 표 생성·열 추가 실패 등(전부 롤백됨) | 오류 본문 `request_id`로 `docker compose logs backend`. 정의 행과 원본 표가 함께 되돌려졌는지는 `datasets`와 `bi_data`의 `ds_*`를 비교 |
 | 503 `SERVICE_UNAVAILABLE` (모든 API) | DB 장애뿐 아니라 **사용자 조회 설정 오류(권한 거부·표 없음)도 같은 503으로 보인다**(접근을 닫는 fail-closed). 예: `migrate` 전, 접속 계정이 `bi_app`이 아님 | `/api/health/db`, `docker compose logs migrate backend`. `migrate`가 `0004`까지 적용됐는지, 접속 계정이 `bi_app`인지 확인 |
@@ -178,6 +200,7 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 | DATASET_HAS_ROWS (422) | 이미 입력된 행이 있어 날짜 단위·기준 날짜 열을 바꿀 수 없음 |
 | COLUMN_LOCKED (422) | 열의 타입과 종류는 바꿀 수 없음, 새 열을 추가 |
 | FORMULA_CIRCULAR (422) | 이 변경으로 계산 열이 서로를 참조하는 순환이 생김(태그·수식 확인) |
+| DATASET_ARCHIVED (409) | 보관된 데이터셋은 고칠 수 없음, 복구한 뒤 다시 시도 |
 | FORBIDDEN (403) | 이 작업을 할 권한이 없음 |
 | NOT_FOUND (404) | 대상을 찾을 수 없음(없는 데이터셋 주소 포함) |
 | SERVICE_UNAVAILABLE (503) | 서버가 일시적으로 응답하지 못함, 잠시 뒤 다시 시도 |
@@ -205,12 +228,13 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 - 실제 PostgreSQL(권장, `skills/permission-management/SKILL.md`의 "검증 방법" 절차로 tmpfs `postgres-test` 준비): 같은 `pytest`가 `pg` 변형을 포함해 돈다. 시험 실행 환경에 `REQUIRE_PG=1`을 주면 PostgreSQL 환경이 없을 때 건너뛰지 않고 실패한다.
 - 시험 위치(`backend/tests/`):
   - `test_dataset_api.py` — B1~B6 동작, 이름·규칙·태그 검증, 버전 충돌, 등록 + 원본 표 생성 원자성(실패 시 정의 행과 표가 함께 롤백), 정의 변경 훅, 동기화 요청 시점
-  - `test_permission_matrix.py` — A1~A9, B1~B6 × 역할(관리자·정의 담당자·입력자·다른 팀 구성원·비소속 읽기·비활성·인증 없음), 거부된 요청이 데이터를 바꾸지 않음
+  - `test_dataset_archive.py` (SQLite·PostgreSQL), `test_dataset_archive_static.py`, `test_dataset_archive_pg.py` (FU-2b) — 상태 전이·같은 상태 재요청·404·본문 거부, 권한(관리자 예외 없음, 비활성 팀 허용, 복구 경로 실측), B1 `status` 필터, 보관 중 거부가 버전·검증보다 먼저, 읽기·D10·E 동작, 이름 충돌 문구(경쟁 경로 포함), 감사 1건, 불변 단정(뷰 정의·`ds_` 행·객체 oid·해시 동일, SQL에 `CREATE`·`ALTER`·`DROP`·`bi_data` 0건, `ddl` 호출 0건, 훅 미호출, 읽기 전용 뷰 접근 유지), 시작 대조에 보관 포함, 동시성(동시 보관 감사 1건, 보관 vs C2·C3·C4·B4·B5·B6, 교착 0건), 소스 점검(`lock_dataset`·`lock_dataset_shared` 호출자 허용 목록), 마이그레이션 `downgrade` 거부
+  - `test_permission_matrix.py` — A1~A9, B1~B8 × 역할(관리자·정의 담당자·입력자·다른 팀 구성원·비소속 읽기·비활성·인증 없음), 거부된 요청이 데이터를 바꾸지 않음. FU-2b: 표의 "보관 상태 기대 결과" 열로 모든 쓰기 라우트를 보관 상태에서 순회(B4 B5 B6 C2 C3 C4 D4 D5는 409, 나머지는 평소와 같음)
   - `test_static_acl.py` — 정적 표 `datasets`·`dataset_columns`의 `bi_app` 권한(표·열 단위 카탈로그 대조 + 실제 거부 42501), `bi_readonly` 접근 불가, 제약·복합 FK
   - `test_ddl.py`, `test_ddl_names.py` — 이름 규칙, 허용 목록 밖 거부(실행 전; 표 생성의 외래키·유일 제약·계산 열 거부 포함, 모든 DDL 보조 함수가 이름 규칙을 거침), `text()`·`exec_driver_sql`·ddl 모듈 밖 DDL이 없음을 코드에서 검사, 실제 DB에서 표·열·기준 날짜 열 규칙, 롤백 시 표가 남지 않음, `bi_app`이 `public`에 만들 수 없음, 시작 자가 점검이 새 객체를 허용, `alembic check`, `downgrade 0004` 뒤 `ds_*` 보존
   - `test_dataset_concurrency.py` — 동시 정의 변경(`DEFINITION_VERSION_MISMATCH`), 락 대기 초과(`DEFINITION_BUSY`), `FOR NO KEY UPDATE`가 읽기·FK 자식 INSERT를 막지 않음, `FOR SHARE` 상호 대기와 굶음 관찰(앞지름을 단정으로 고정), 이름 변경 중 FK 자식 INSERT 대기 관찰, 같은 이름 동시 등록
   - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리(JSON 부동소수점·큰 정수 거부 회귀 포함), 구조 해시
-  - `test_migrations.py`, `test_roundtrip_tools.py` — 0004·0005 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`)
+  - `test_migrations.py`, `test_roundtrip_tools.py` — 0004·0005·0008 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`, 0008의 `ck_datasets_status` 교체)
   - `test_formula_api.py`, `test_formula_views_pg.py` — 정의 변경 훅이 뷰를 만들고 `def_hash`를 기록하는 동작(`formula-column` 8절)
 - 마이그레이션 왕복(**새** 빈 `postgres-test`에서): `python -m migrations.roundtrip`, `alembic check` (`skills/local-environment/SKILL.md`).
 - 수동 확인: 위 curl 순서 실행 뒤 `psql`(`bi_owner`)로 `\d bi_data.ds_<번호>`에서 `row_id`와 `c_<번호>` 열, 기준 날짜 열의 `NOT NULL`·`ck_ds_<번호>_period`·`ux_ds_<번호>_period`를 본다.
@@ -222,8 +246,8 @@ curl -b jar -X PATCH -H 'content-type: application/json' \
 
 ## 9. 연관 Skill
 - `permission-management`: 팀·소속·역할(정의 담당자 판정), `/api/me`의 `memberships`, 인증 스텁, 실제 DB 시험 방법
-- `permission-management`(FU-2a 감사 기록 조회): 데이터셋 만들기·수정(B2·B4)과 열 추가·수정(B5·B6)은 성공하고 실제로 바뀐 경우에만 감사 기록(`dataset.create`·`dataset.update`·`column.add`·`column.update`)이 한 건 남는다. 검증 규칙 값은 기록되지 않고 `rules_changed`만 남는다. 관리자가 5-1절 API로 조회한다.
-- `data-entry`(FU-1c): 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
+- `permission-management`(FU-2a 감사 기록 조회): 데이터셋 만들기·수정(B2·B4)과 열 추가·수정(B5·B6), 보관·복구(B7·B8, FU-2b)는 성공하고 실제로 바뀐 경우에만 감사 기록(`dataset.create`·`dataset.update`·`dataset.archive`·`dataset.restore`·`column.add`·`column.update`)이 한 건 남는다. 비활성 팀의 `definer`를 지정할 수 없는 문제의 복구 순서는 이 Skill의 "복구 경로". 검증 규칙 값은 기록되지 않고 `rules_changed`만 남는다. 관리자가 5-1절 API로 조회한다.
+- `data-entry`(FU-1c, FU-2b): 보관 중에는 행 입력(C2~C4)이 409 `DATASET_ARCHIVED`로 막힌다. 이 정의의 열 타입·필수·범위 규칙으로 행을 입력·검증하고, 행 쓰기가 `datasets` 행을 `FOR SHARE`로 잡아 `expected_version`을 확인한다
 - `formula-column`(FU-1d): 계산 열(`kind=formula`)을 만들고 정의 변경 훅에서 `formulas`·`formula_deps`, `dv_`·`de_` 뷰, `def_hash`(뷰 정의 해시)를 맡는다. 태그 변경의 순환 재검사(`FORMULA_CIRCULAR`)도 이 훅이다
 - `dashboard-link`(FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다. 열 표시 이름은 Superset에서 `c_<번호>` 열의 이름이 되고(전체 열 한 번에 갱신), 이름 변경(B4)·열 추가(B5)·열 이름 변경(B6)도 같은 경로로 반영된다
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)

@@ -1,5 +1,5 @@
 """권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
-A1~A9, B1~B6, C1~C4, D1~D10, E1~E6, F1, DV1~DV3.
+A1~A9, B1~B8, C1~C4, D1~D10, E1~E6, F1, DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
@@ -52,11 +52,16 @@ def allowed_roles(who: str) -> set[str]:
     }[who]
 
 
-# (ID, 메서드, 경로 템플릿, 경로 만들기, 본문 만들기, 성공 코드, 누가 성공하는가)
-Endpoint = tuple[str, str, str, Callable[[World], str], Callable[[World], Any], int, str]
+# 보관 상태 기대 결과(FU-2b, 05 §2-2): 데이터셋이 `archived`일 때 허용된 역할의 같은 요청이
+# - REJECTED: 409 `DATASET_ARCHIVED`(정의·입력 쓰기 B4 B5 B6 C2 C3 C4 D4 D5, 버전 비교보다 앞)
+# - SAME: 보관과 무관하게 평소와 같은 성공 코드(읽기·검사·미리보기·D10·E·A 전체, B7 B8, B2)
+REJECTED, SAME = "rejected", "same"
+
+# (ID, 메서드, 경로 템플릿, 경로 만들기, 본문 만들기, 성공 코드, 누가 성공, 보관 상태 기대 결과)
+Endpoint = tuple[str, str, str, Callable[[World], str], Callable[[World], Any], int, str, str]
 ENDPOINTS: list[Endpoint] = [
-    ("A1", "GET", "/api/me", lambda w: "/api/me", lambda w: None, 200, READER),
-    ("A2", "GET", "/api/teams", lambda w: "/api/teams", lambda w: None, 200, READER),
+    ("A1", "GET", "/api/me", lambda w: "/api/me", lambda w: None, 200, READER, SAME),
+    ("A2", "GET", "/api/teams", lambda w: "/api/teams", lambda w: None, 200, READER, SAME),
     (
         "A3",
         "POST",
@@ -65,6 +70,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"code": "new_team", "name": "새 팀"},
         201,
         ADMIN,
+        SAME,
     ),
     (
         "A4",
@@ -74,8 +80,9 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"name": "바뀐 B팀"},
         200,
         ADMIN,
+        SAME,
     ),
-    ("A5", "GET", "/api/users", lambda w: "/api/users", lambda w: None, 200, ADMIN),
+    ("A5", "GET", "/api/users", lambda w: "/api/users", lambda w: None, 200, ADMIN, SAME),
     (
         "A6",
         "POST",
@@ -84,6 +91,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"login_id": "fresh", "display_name": "새 사용자"},
         201,
         ADMIN,
+        SAME,
     ),
     (
         "A7",
@@ -93,6 +101,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"display_name": "바뀐 이름"},
         200,
         ADMIN,
+        SAME,
     ),
     (
         "A8",
@@ -102,6 +111,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"role": "entry"},
         200,
         ADMIN,
+        SAME,
     ),
     (
         "A9",
@@ -111,8 +121,9 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         204,
         ADMIN,
+        SAME,
     ),
-    ("B1", "GET", "/api/datasets", lambda w: "/api/datasets", lambda w: None, 200, READER),
+    ("B1", "GET", "/api/datasets", lambda w: "/api/datasets", lambda w: None, 200, READER, SAME),
     (
         "B2",
         "POST",
@@ -121,6 +132,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"team_id": w.team_a, "name": "새 데이터셋", "date_unit": "month"},
         201,
         DEFINER,
+        SAME,
     ),
     (
         "B3",
@@ -130,6 +142,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "B4",
@@ -139,6 +152,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "name": "바뀐 이름"},
         200,
         DEFINER,
+        REJECTED,
     ),
     (
         "B5",
@@ -148,6 +162,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "display_name": "새 열", "type": "text"},
         201,
         DEFINER,
+        REJECTED,
     ),
     (
         "B6",
@@ -157,6 +172,27 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "display_name": "바뀐 열"},
         200,
         DEFINER,
+        REJECTED,
+    ),
+    (
+        "B7",
+        "POST",
+        "/api/datasets/{dataset_id}/archive",
+        lambda w: f"/api/datasets/{w.dataset_id}/archive",
+        lambda w: None,
+        200,
+        DEFINER,
+        SAME,  # 이미 보관이면 200(아무것도 바꾸지 않음)
+    ),
+    (
+        "B8",
+        "POST",
+        "/api/datasets/{dataset_id}/restore",
+        lambda w: f"/api/datasets/{w.dataset_id}/restore",
+        lambda w: None,
+        200,
+        DEFINER,
+        SAME,  # 보관 상태에서 복구하면 활성이 되어 200
     ),
     (
         "C1",
@@ -166,6 +202,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "C2",
@@ -175,6 +212,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "cells": {str(w.column_id): "5"}},
         201,
         ENTER,
+        REJECTED,
     ),
     (
         "C3",
@@ -187,6 +225,7 @@ ENDPOINTS: list[Endpoint] = [
         },
         200,
         ENTER,
+        REJECTED,
     ),
     (
         "C4",
@@ -200,6 +239,7 @@ ENDPOINTS: list[Endpoint] = [
         },
         200,
         ENTER,
+        REJECTED,
     ),
     (
         "D1",
@@ -209,6 +249,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "D2",
@@ -218,6 +259,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expression": "[기존 열] + 1"},
         200,
         DEFINER,
+        SAME,
     ),
     (
         "D3",
@@ -227,6 +269,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expression": "[기존 열] + 1"},
         200,
         DEFINER,
+        SAME,
     ),
     (
         "D4",
@@ -236,6 +279,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "display_name": "새 계산", "expression": "[기존 열] * 2"},
         201,
         DEFINER,
+        REJECTED,
     ),
     (
         "D5",
@@ -245,6 +289,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"expected_version": 1, "expression": "[기존 열] + 2"},
         200,
         DEFINER,
+        REJECTED,
     ),
     (
         "D6",
@@ -254,6 +299,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "D7",
@@ -263,6 +309,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "D8",
@@ -272,8 +319,18 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
-    ("D9", "GET", "/api/checks/views", lambda w: "/api/checks/views", lambda w: None, 200, ADMIN),
+    (
+        "D9",
+        "GET",
+        "/api/checks/views",
+        lambda w: "/api/checks/views",
+        lambda w: None,
+        200,
+        ADMIN,
+        SAME,
+    ),
     (
         "D10",
         "POST",
@@ -282,6 +339,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {},
         200,
         ADMIN,
+        SAME,
     ),
     (
         "E1",
@@ -291,6 +349,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         200,
         READER,
+        SAME,
     ),
     (
         "E2",
@@ -300,8 +359,18 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"dataset_ids": [w.dataset_id]},
         202,
         ADMIN,
+        SAME,
     ),
-    ("E3", "GET", "/api/dashboards", lambda w: "/api/dashboards", lambda w: None, 200, READER),
+    (
+        "E3",
+        "GET",
+        "/api/dashboards",
+        lambda w: "/api/dashboards",
+        lambda w: None,
+        200,
+        READER,
+        SAME,
+    ),
     (
         "E4",
         "POST",
@@ -310,6 +379,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"name": "새 대시보드", "embedded_uuid": "aaaaaaaa-1111-2222-3333-444444444444"},
         201,
         ADMIN,
+        SAME,
     ),
     (
         "E5",
@@ -319,6 +389,7 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: {"name": "바뀐 이름"},
         200,
         ADMIN,
+        SAME,
     ),
     # 이 매트릭스의 앱에는 Superset 접속 설정이 없어 권한을 통과한 읽기 사용자는 503(연동 미설정)을
     # 받는다. 실제 발급 200과 속도 제한은 test_superset_api.py가 가짜 Superset으로 확인한다.
@@ -330,9 +401,10 @@ ENDPOINTS: list[Endpoint] = [
         lambda w: None,
         503,
         READER,
+        SAME,
     ),
     # F1(FU-2a): 감사 기록 조회는 관리자 전용이다(05 §4, 06 §4-1). 권한 검사가 쿼리 검증보다 먼저다.
-    ("F1", "GET", "/api/audit-logs", lambda w: "/api/audit-logs", lambda w: None, 200, ADMIN),
+    ("F1", "GET", "/api/audit-logs", lambda w: "/api/audit-logs", lambda w: None, 200, ADMIN, SAME),
 ]
 
 
@@ -373,7 +445,7 @@ def mworld(db: Db, world: World) -> World:
 @pytest.mark.parametrize("role", ROLES, ids=lambda r: r or "anonymous")
 @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=lambda e: e[0])
 def test_endpoint_by_role(api, db: Db, mworld: World, endpoint: Endpoint, role):
-    _, method, _template, make_path, make_body, success, who = endpoint
+    _, method, _template, make_path, make_body, success, who, _archived = endpoint
     body = make_body(mworld)
     response = api(role, method, make_path(mworld), **({"json": body} if body is not None else {}))
     if role is None:
@@ -384,6 +456,58 @@ def test_endpoint_by_role(api, db: Db, mworld: World, endpoint: Endpoint, role):
         assert response.status_code == success, response.text
     else:
         assert (response.status_code, response.json()["error"]["code"]) == (403, "FORBIDDEN")
+
+
+def archive_in_db(db: Db, dataset_id: int) -> None:
+    """API를 거치지 않고 `status`만 보관으로 바꾼다(보관 상태의 다른 라우트 동작만 보려는 준비)."""
+    with db.writer.begin() as conn:
+        conn.execute(
+            sa.update(datasets).where(datasets.c.id == dataset_id).values(status="archived")
+        )
+
+
+@pytest.mark.parametrize("role", ROLES, ids=lambda r: r or "anonymous")
+@pytest.mark.parametrize("endpoint", ENDPOINTS, ids=lambda e: e[0])
+def test_endpoint_by_role_when_the_dataset_is_archived(api, db: Db, mworld: World, endpoint, role):
+    """모든 쓰기 라우트 순회(FU-2b): 보관이면 B4 B5 B6 C2 C3 C4 D4 D5가 409 `DATASET_ARCHIVED`다.
+
+    권한 판정(401·403)이 먼저라 허용되지 않은 역할은 보관 여부와 관계없이 평소와 같고, 허용된
+    역할만 보관 상태 기대 결과를 받는다. 나머지 라우트는 보관과 무관하게 평소와 같다.
+    """
+    _, method, _template, make_path, make_body, success, who, archived = endpoint
+    archive_in_db(db, mworld.dataset_id)
+    body = make_body(mworld)
+    kwargs = {"json": body} if body is not None else {}
+    response = api(role, method, make_path(mworld), **kwargs)
+    if role is None:
+        assert (response.status_code, response.json()["error"]["code"]) == (401, "UNAUTHENTICATED")
+    elif role == "inactive":
+        assert (response.status_code, response.json()["error"]["code"]) == (403, "USER_INACTIVE")
+    elif role not in allowed_roles(who):
+        assert (response.status_code, response.json()["error"]["code"]) == (403, "FORBIDDEN")
+    elif archived == REJECTED:
+        error = response.json()["error"]
+        assert (response.status_code, error["code"]) == (409, "DATASET_ARCHIVED"), response.text
+        assert error["details"] == {"status": "archived"}
+        # 버전이 틀려도 같은 코드다(보관 판정이 버전 비교보다 앞)
+        assert isinstance(body, dict) and "expected_version" in body
+        stale = api(role, method, make_path(mworld), json={**body, "expected_version": 99})
+        assert (stale.status_code, stale.json()["error"]["code"]) == (409, "DATASET_ARCHIVED")
+    else:
+        assert response.status_code == success, response.text
+
+
+def test_rejected_routes_change_nothing_while_archived(api, db: Db, mworld: World):
+    """보관 중 거부된 쓰기는 응답만이 아니라 정말 아무것도 바꾸지 않았다(감사 기록 포함)."""
+    archive_in_db(db, mworld.dataset_id)
+    before = _snapshot(db)
+    for _id, method, _t, make_path, make_body, _code, who, archived in ENDPOINTS:
+        if archived != REJECTED:
+            continue
+        role = "entry" if who == ENTER else "definer"
+        body = make_body(mworld)
+        assert api(role, method, make_path(mworld), json=body).status_code == 409, _id
+    assert _snapshot(db) == before
 
 
 def _snapshot(db: Db):
@@ -410,7 +534,7 @@ def _snapshot(db: Db):
 def test_denied_requests_do_not_change_data(api, db: Db, mworld: World):
     """403은 응답만이 아니라 실제로 아무것도 바뀌지 않았다는 뜻이어야 한다."""
     before = _snapshot(db)
-    for _id, method, _template, make_path, make_body, _code, who in ENDPOINTS:
+    for _id, method, _template, make_path, make_body, _code, who, _archived in ENDPOINTS:
         if who == READER:
             continue
         body = make_body(mworld)

@@ -255,6 +255,29 @@ def _prepare_datasets(owner: Engine) -> dict[str, int]:
     return {**ids, "ds": first, "ds2": second, "col": col, "col2": col2, "other_col": other_col}
 
 
+def test_bi_app_may_archive_and_restore_but_not_set_other_statuses(
+    pg_owner_engine, pg_app_engine, clean_pg
+):
+    """FU-2b(0008): GRANT는 그대로(status UPDATE는 0004부터)이고 CHECK만 archived를 허용한다."""
+    ids = _prepare_datasets(pg_owner_engine)
+
+    def set_status(value):
+        return update(datasets).where(datasets.c.id == ids["ds"]).values(status=value)
+
+    with pg_app_engine.begin() as c:
+        c.execute(set_status("archived"))
+        assert c.execute(
+            select(datasets.c.status).where(datasets.c.id == ids["ds"])
+        ).scalar_one() == ("archived")
+        c.execute(set_status("active"))
+    for bad in ("deleted", "Archived", ""):
+        with pytest.raises(DBAPIError) as error, pg_app_engine.begin() as c:
+            c.execute(set_status(bad))
+        assert sqlstate(error.value) == CHECK_VIOLATION and "ck_datasets_status" in str(
+            error.value.orig
+        )
+
+
 def test_bi_app_allowed_dataset_operations(pg_owner_engine, pg_app_engine, clean_pg):
     ids = _prepare_datasets(pg_owner_engine)
     with pg_app_engine.begin() as c:
@@ -655,7 +678,11 @@ def test_dataset_constraints(pg_owner_engine, pg_app_engine, clean_pg):
     # 팀 안 데이터셋 이름 유일(다른 팀은 같은 이름 가능, 아래 두 번째 팀으로 확인)
     fails(new_dataset(name="D1"), UNIQUE_VIOLATION, "uq_datasets_team_id_name")
     fails(new_dataset(date_unit="week"), CHECK_VIOLATION, "ck_datasets_date_unit")
-    fails(new_dataset(status="archived"), CHECK_VIOLATION, "ck_datasets_status")
+    # FU-2b(0008): archived는 허용, 영구 삭제 단위가 오기 전까지 deleted 같은 값은 거부
+    fails(new_dataset(status="deleted"), CHECK_VIOLATION, "ck_datasets_status")
+    fails(new_dataset(status="ARCHIVED"), CHECK_VIOLATION, "ck_datasets_status")
+    with pg_app_engine.begin() as c:
+        c.execute(new_dataset(name="N-archived", status="archived"))
     fails(new_dataset(team_id=99999), FOREIGN_KEY_VIOLATION, "fk_datasets_team_id_teams")
     fails(new_dataset(created_by=99999), FOREIGN_KEY_VIOLATION, "fk_datasets_created_by_users")
     # 열: 데이터셋 안 표시 이름 유일, 열거 CHECK, 계산 열은 필수·선택 목록 형이 아님
@@ -1154,7 +1181,7 @@ def test_audit_check_constraints_accept_the_boundary_and_every_action(
         c.execute(_audit_row(details={"k": "x" * (4000 - OVERHEAD + 1)}))
     assert sqlstate(error.value) == CHECK_VIOLATION and "details_size" in str(error.value.orig)
     with pg_owner_engine.connect() as c:
-        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 16
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 18
 
 
 def test_audit_actor_must_exist_and_target_id_has_no_foreign_key(

@@ -11,7 +11,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 팀 사용자가 엑셀에서 쓰던 계산을 데이터셋의 계산 열로 옮길 수 있게, 같은 행 수식을 안전하게 검사하고 DB 식으로 바꾼다. 수식이 틀리면 SQL 용어 없이 "어디가 왜 틀렸는지"를 알려 주고, 빈 칸과 오류 칸을 0으로 오해하지 않게 구별한다. 저장하기 전에 일부 행으로 결과를 미리 보고, 저장한 수식은 누구나 현재 열 이름으로 풀어 읽을 수 있다. 함수 추가는 사전 항목 한 개와 시험 사례로 끝난다.
 
 ## 2. 사용 조건 / 사전 요구사항
-- 권한(05 §4): 함수 도움말(D1)·수식 보기(D6)·오류 칸 점검(D7·D8)은 로그인한 활성 사용자 누구나(타 팀 포함). 검사(D2)·미리보기(D3)·계산 열 만들기(D4)·수식 고치기(D5)는 **그 데이터셋 팀의 정의 담당자**만(관리자라도 그 팀 `definer`가 아니면 403). 뷰 점검(D9)·다시 시도(D10)는 관리자.
+- 권한(05 §4): 함수 도움말(D1)·수식 보기(D6)·오류 칸 점검(D7·D8)은 로그인한 활성 사용자 누구나(타 팀 포함). 검사(D2)·미리보기(D3)·계산 열 만들기(D4)·수식 고치기(D5)는 **그 데이터셋 팀의 정의 담당자**만(관리자라도 그 팀 `definer`가 아니면 403). 뷰 점검(D9)·다시 시도(D10)는 관리자. **보관된 데이터셋(FU-2b):** 계산 열 만들기(D4)·수식 고치기(D5)는 409 `DATASET_ARCHIVED`(버전 비교·수식 검사 422보다 앞)다. 검사(D2)·미리보기(D3)·수식 보기(D6)·오류 칸 조회(D8)와 D10 다시 시도(뷰 재생성은 정의 변경이 아니라 대조 복구)는 보관 중에도 된다. 시작 시 뷰 대조는 보관된 데이터셋도 포함한다(보관해도 `dv_` 뷰는 공개되므로). **알려진 한계:** 오류 칸 점검 목록 D7은 활성 데이터셋만 대상이라 보관 중 오류 칸은 그 목록에 안 보인다(D8로 데이터셋별 조회는 된다).
 - 데이터셋과 원본 열이 `dataset-definition`으로 만들어져 있어야 한다. 환경은 `local-environment` 통과 상태(PostgreSQL, `bi_app`·`bi_owner` 분리, `0005` 적용).
 - 1단계 라이브러리는 로그인·DB가 필요 없는 순수 파이썬이다. `lark==1.3.1`(MIT, 승인 AP-15)이 `backend/requirements*.txt`에 고정돼 있다. 상수 부분식 검사(`1/0` 등)와 뷰·미리보기는 PostgreSQL이 필요하다.
 - 뷰 DDL은 PostgreSQL 전용이다. SQLite 시험 엔진에서는 `formulas`·`formula_deps`만 쓰고 뷰를 만들지 않는다.
@@ -125,7 +125,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
   계산 열을 참조하려면 그 열을 `ColumnInfo(id, name, type, kind="formula", formula=<저장된 AST>)`로 준다(`ast_from_json`). 편집 중인 기존 열은 `column_id=`, 새 열의 태그는 `tag=`로 알린다.
 - **함수 추가**: `backend/app/formula/functions.py`에 `FunctionSpec` 하나(+ `cases`)를 더하고 `_ALL_SPECS`에 넣는다. 파서·C0·변환기·도움말·API·**차분 시험 행렬**은 고치지 않는다(`tests/test_formula_registry.py`가 임시 함수로 증명하고, `tests/formula_matrix.py`가 사전에서 행렬을 자동으로 키운다). 새 SQL 함수(`func.xxx`)를 쓰면 뷰 정의 게이트의 허용 목록 `ddl.VIEW_ALLOWED_FUNCTIONS`(`backend/app/ddl/dynamic.py`)에 검토해서 더해야 한다(목록 밖 함수는 `create_view`가 실행 전에 거부하고, `tests/test_formula_units.py`의 검토 목록 시험이 알려 준다). 함수 변경으로 변환 SQL이 바뀌면 정의 해시가 달라져 다음 시작 때 해당 데이터셋의 뷰만 자동으로 다시 만들어진다(예: `ROUNDUP`의 값 식을 정확한 곱셈 형태로 바꾼 1d 수정 뒤 `ROUNDUP`을 쓰는 데이터셋의 뷰가 시작 때 한 번 재생성된다. 값이 달라지는 경우는 이전에 유효숫자 약 16자리를 넘는 값에서 틀리던 경우뿐이다). 항목 규칙은 `registry.py` 머리말.
 - **시작 지연(실측)**: 서비스는 시작 대조(`reconcile_all`)가 끝나야 요청을 받는다(lifespan에서 동기 실행). 활성 데이터셋 50개(원본 열 2개 + 계산 열 3개, 행 없음, tmpfs PostgreSQL, 2026-10-12)에서 해시가 모두 같은 보통의 재시작은 약 1.2초, 모든 뷰를 다시 만드는 경우(해시 전부 불일치)는 약 4.3초였다(`test_startup_reconcile_time_with_fifty_datasets`가 다시 잰다. 행 수는 뷰 생성 시간에 거의 영향이 없고 데이터셋 수와 계산 열 수에 비례하는 것으로 보이나 행이 많은 운영 데이터로는 확인하지 못했다). 코드는 바꾸지 않았다.
-- **운영 점검**: 시작할 때 활성 데이터셋마다 현재 정의로 계산한 해시와 `datasets.def_hash`를 비교하고(뷰가 없어도) 다른 데이터셋의 뷰만 다시 만든다. 못 만든 데이터셋은 `/api/health`의 `views_failed_count`와 D9 `failed`에 나오고(**시작은 막지 않는다**) 원인을 고친 뒤 D10(화면 S9 "다시 시도")으로 다시 만든다.
+- **운영 점검**: 시작할 때 활성·보관 데이터셋마다(FU-2b: 보관해도 `dv_`가 공개되므로) 현재 정의로 계산한 해시와 `datasets.def_hash`를 비교하고(뷰가 없어도) 다른 데이터셋의 뷰만 다시 만든다. 못 만든 데이터셋은 `/api/health`의 `views_failed_count`와 D9 `failed`에 나오고(**시작은 막지 않는다**) 원인을 고친 뒤 D10(화면 S9 "다시 시도")으로 다시 만든다.
 
 ## 6. 관련 UI / API / command / DB
 - UI: 수식 편집기·수식 보기(S4), 점검(S5), 관리자 현황의 뷰 재생성 구역(S9). 화면 설명은 5절 자리에 합쳐진다.
@@ -146,7 +146,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 
 ## 7. 실패 시 확인 방법
 - 사용자에게 보이는 검사 오류는 `issues[].message`(쉬운 말)와 `start`/`end`다. 코드: `UNEXPECTED_END`·`UNEXPECTED_TOKEN`·`UNCLOSED_STRING`·`UNCLOSED_COLUMN`·`BARE_NAME`(문법), `UNKNOWN_COLUMN`·`UNKNOWN_FUNCTION`, `ARG_COUNT`·`ARG_TYPE`·`TYPE_MISMATCH`·`CONST_REQUIRED`·`CONST_RANGE`, `TEXT_CONSTANT_INVALID`·`NUMBER_INVALID`, `TAG_EMPTY`, `CIRCULAR`·`CHAIN_TOO_LONG`, `TOO_MANY_NODES`·`TOO_DEEP`·`TOO_COMPLEX`, `CONSTANT_ERROR`(상수 부분식 오류: `1/0`, `DATE(0,1,1)`, `LEFT("가",-1)`).
-- API 오류 코드와 대응: 422 `FORMULA_INVALID`는 `details.errors`를 본다. 422 `FORMULA_CIRCULAR`는 `details.path`의 열 이름 경로를 보고 수식을 고친다. 409 `DEFINITION_VERSION_MISMATCH`는 정의를 다시 읽는다. 503 `DEFINITION_BUSY`(락 대기 1초 초과)는 잠시 뒤 다시 시도한다. 429 `PREVIEW_BUSY`는 `retry_after`초 뒤 다시 시도한다. 422 `FORMULA_RUNTIME_ERROR`는 시간 초과이거나 계산 불가 수식이다(서버 로그에 예외 클래스와 SQLSTATE만 남는다).
+- API 오류 코드와 대응: 409 `DATASET_ARCHIVED`(D4·D5, 데이터셋이 보관됨)는 정의 담당자가 복구(`dataset-definition`의 B8)한 뒤 다시 한다. 422 `FORMULA_INVALID`는 `details.errors`를 본다. 422 `FORMULA_CIRCULAR`는 `details.path`의 열 이름 경로를 보고 수식을 고친다. 409 `DEFINITION_VERSION_MISMATCH`는 정의를 다시 읽는다. 503 `DEFINITION_BUSY`(락 대기 1초 초과)는 잠시 뒤 다시 시도한다. 429 `PREVIEW_BUSY`는 `retry_after`초 뒤 다시 시도한다. 422 `FORMULA_RUNTIME_ERROR`는 시간 초과이거나 계산 불가 수식이다(서버 로그에 예외 클래스와 SQLSTATE만 남는다).
 - 화면 문구 표(error.code 분기):
 
 | 코드 | 화면 |
@@ -223,6 +223,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 
 ## 9. 연관 Skill
 - `dataset-definition`: 계산 열(`kind=formula`)의 정의·태그(`SUMTAG`)·표시 이름을 소유한다. 열 이름 변경은 AST가 열 번호 참조라 수식에 영향이 없다. 정의 변경 진입점(`definition.py`)이 이 모듈의 훅을 부르고 태그 변경의 순환을 재검사한다.
+- `dataset-definition`(FU-2b 보관·복구): 보관 중 D4·D5는 409 `DATASET_ARCHIVED`, 시작 대조·D10은 보관 데이터셋도 대상, D7은 활성만.
 - `data-entry`: 행 조회가 계산 열 값과 오류 칸을 `RowViewPort`로 받는다. 원본 열 값의 NFC 정규화와 글자 규칙이 이 엔진의 상수 규칙과 같은 방향이다. 계산 열 키로 쓰면 `READ_ONLY`다.
 - `permission-management`: 수식 편집·미리보기는 정의(팀) 권한, 열람은 인증된 모두. PostgreSQL 시험 절차(8절)를 쓴다.
 - `permission-management`(FU-2a 감사 기록 조회): 계산 열 만들기·고치기(D4·D5)는 감사 기록(`formula_column.add`·`formula_column.update`)이 한 건 남는다(같은 수식·같은 결과 형으로 다시 저장하면 없음). **수식 원문은 기록되지 않고** 열 번호와 `ast_hash`만 남는다. 미리보기·검사·시작 시 뷰 재생성은 기록되지 않는다.
