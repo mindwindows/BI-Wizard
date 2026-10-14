@@ -35,6 +35,8 @@ export interface FormulaEditorProps {
   /** 시작 수식. 고칠 때는 수식 보기(D6)의 text */
   initialExpression: string;
   save: (input: SaveInput) => Promise<SaveOutcome>;
+  /** 값이 있으면 저장을 막고 이 문구를 보인다(보관된 데이터셋, FU-2b). 검사·미리보기는 그대로 쓸 수 있다. */
+  saveBlockedText?: string;
   /** 입력이 멈춘 뒤 수식 검사(D2)를 부르기까지(ms). 07 §5 "입력 후 약 1초 뒤 자동 미리보기" = 검사 + 미리보기 지연 */
   checkDelayMs?: number;
   /** 검사가 통과한 뒤 미리보기(D3)를 자동으로 부르기까지(ms) */
@@ -43,6 +45,7 @@ export interface FormulaEditorProps {
   busyRetryMs?: number;
 }
 
+export const ARCHIVED_SAVE_TEXT = "보관된 데이터셋이라 저장할 수 없습니다. 검사와 미리보기는 쓸 수 있습니다. 복구한 뒤 저장해 주세요.";
 export const DEFAULT_CHECK_DELAY_MS = 400;
 export const DEFAULT_PREVIEW_DELAY_MS = 600;
 
@@ -253,7 +256,7 @@ export function FormulaEditor(props: FormulaEditorProps) {
   const positionError = positionTrim !== "" && !/^\d+$/.test(positionTrim) ? "위치는 0 이상의 정수로 입력해 주세요." : null;
   const dirty = editing ? expression !== baseline : true;
   const blockedByCheck = checkResult !== undefined && !checkResult.ok;
-  const canSave = !saving && expression.trim() !== "" && dirty && !blockedByCheck && nameError === null && tagError === null && positionError === null;
+  const canSave = props.saveBlockedText === undefined && !saving && expression.trim() !== "" && dirty && !blockedByCheck && nameError === null && tagError === null && positionError === null;
 
   async function submit() {
     if (!canSave) return;
@@ -455,6 +458,11 @@ export function FormulaEditor(props: FormulaEditorProps) {
       )}
 
       {saveError !== null ? <SaveFailure error={saveError} /> : null}
+      {props.saveBlockedText ? (
+        <p className="muted" data-testid="save-blocked">
+          {props.saveBlockedText}
+        </p>
+      ) : null}
 
       <div className="actions">
         <button type="submit" className="primary" disabled={!canSave}>

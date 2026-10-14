@@ -38,13 +38,17 @@ export interface Column {
   position: number;
 }
 
+/** 05 §1 Dataset.status (FU-2b). 화면 용어: active = "사용 중", archived = "보관됨". */
+export type DatasetStatus = "active" | "archived";
+export const DATASET_STATUS_LABELS: Record<DatasetStatus, string> = { active: "사용 중", archived: "보관됨" };
+
 export interface Dataset {
   id: number;
   team_id: number;
   name: string;
   date_unit: DateUnit;
   base_date_column_id: number | null;
-  status: string;
+  status: DatasetStatus;
   def_version: number;
   created_by: { id: number; display_name: string };
   created_at: string;

@@ -27,7 +27,7 @@ from app.dataset import rules
 DateUnit = Literal["day", "month", "year"]
 ColumnType = Literal["text", "number", "date", "boolean", "choice"]
 ColumnKind = Literal["raw", "formula"]
-DatasetStatus = Literal["active"]
+DatasetStatus = Literal["active", "archived"]
 
 
 def _dataset_name(value: str) -> str:

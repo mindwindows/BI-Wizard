@@ -5,7 +5,7 @@ import { COLUMN_KIND_LABELS, COLUMN_TYPE_LABELS, type Column } from "../dataset/
 import type { SelectedCell } from "../entry/selectedCell";
 import { cellErrorText } from "./messages";
 import { getFormulaView } from "./api";
-import { FormulaEditor, type SaveInput, type SaveOutcome } from "./FormulaEditor";
+import { ARCHIVED_SAVE_TEXT, FormulaEditor, type SaveInput, type SaveOutcome } from "./FormulaEditor";
 import type { FormulaView } from "./types";
 
 interface FormulaPanelProps {
@@ -15,6 +15,8 @@ interface FormulaPanelProps {
   /** 데이터셋의 모든 열 */
   columns: Column[];
   canDefine: boolean;
+  /** 보관된 데이터셋(FU-2b): 수식 검사·미리보기는 되지만 저장은 막는다. */
+  archived?: boolean;
   /** 정의 버전. 바뀌면(다른 열 이름 변경, 수식 저장) 수식 보기를 다시 읽는다 */
   version: number;
   save: (input: SaveInput) => Promise<SaveOutcome>;
@@ -25,7 +27,7 @@ interface FormulaPanelProps {
 type Loaded = { key: string; view?: FormulaView; error?: unknown } | null;
 
 /** S4 Inspector의 계산 열: 수식 보기(D6, 누구나 읽기 전용) + 정의 담당자의 수식 고치기(D5). */
-export function FormulaPanel({ datasetId, column, columns, canDefine, version, save, selectedCell }: FormulaPanelProps) {
+export function FormulaPanel({ datasetId, column, columns, canDefine, archived = false, version, save, selectedCell }: FormulaPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>(null);
   const [reload, setReload] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -68,6 +70,7 @@ export function FormulaPanel({ datasetId, column, columns, canDefine, version, s
               editing={column}
               initialExpression={view.text}
               save={save}
+              saveBlockedText={archived ? ARCHIVED_SAVE_TEXT : undefined}
             />
           ) : (
             <Loading label="수식을 불러오는 중" />

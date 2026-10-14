@@ -2,6 +2,8 @@
 export const AUDIT_ACTIONS = [
   "dataset.create",
   "dataset.update",
+  "dataset.archive",
+  "dataset.restore",
   "column.add",
   "column.update",
   "formula_column.add",
@@ -23,6 +25,8 @@ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export const ACTION_LABELS: Record<AuditAction, string> = {
   "dataset.create": "데이터셋 만들기",
   "dataset.update": "데이터셋 설정 변경",
+  "dataset.archive": "데이터셋 보관",
+  "dataset.restore": "데이터셋 복구",
   "column.add": "열 추가",
   "column.update": "열 수정",
   "formula_column.add": "계산 열 추가",

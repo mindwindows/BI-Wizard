@@ -25,7 +25,8 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
 # 여기에 기록한다. **확인이 아직 없는 항목**은 `DROP_PENDING_PREFIX`로 시작하는 문구로 기록하며
 # 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 지금은 대기 항목이 없고(0007은
-# 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이 생기는 것을 막는다.
+# 2026-10-14 승인, 0008도 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이
+# 생기는 것을 막는다.
 DROP_PENDING_PREFIX = "사용자 확인 대기("
 DROP_APPROVED: dict[str, str] = {
     # 0003 downgrade()의 op.drop_table 3개(team_members, teams, users)는 06 §6의 표 역순 삭제다.
@@ -68,6 +69,12 @@ DROP_APPROVED: dict[str, str] = {
         "DROP 확인: 사용자 승인 (2026-10-14, 03b 29-3 답: 0007 downgrade()의 "
         "op.drop_table(audit_log) 1개. 정적 표 대상, 동적 객체 아님. downgrade는 감사 기록 전체를 "
         "지우므로 운영에서는 하지 않고 실행 전 백업 필수)"
+    ),
+    # 0008의 op.drop_constraint 4개(upgrade 2 + downgrade 2): ck_datasets_status와
+    # ck_audit_log_action을 지우고 새 정의로 다시 만든다(제약 교체, 표·열 DROP 없음).
+    "20261014_0008_dataset_archive.py": (
+        "DROP 확인: 사용자 승인 (2026-10-14, 03b 30-1 결정 4: drop_constraint 4개 = upgrade·downgrade "
+        "각각의 ck_datasets_status, ck_audit_log_action 교체. 표·열 DROP 없음. 대기 표시 없음)"
     ),
 }
 
@@ -187,12 +194,13 @@ def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0007"]
+    assert heads == ["0008"]
 
 
 def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     script = ScriptDirectory.from_config(_alembic_config())
     assert [r.revision for r in script.walk_revisions()] == [
+        "0008",
         "0007",
         "0006",
         "0005",
@@ -208,6 +216,7 @@ def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     assert script.get_revision("0005").down_revision == "0004"
     assert script.get_revision("0006").down_revision == "0005"
     assert script.get_revision("0007").down_revision == "0006"
+    assert script.get_revision("0008").down_revision == "0007"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -269,7 +278,7 @@ def test_drop_requires_recorded_user_approval():
 
 
 def test_no_pending_drop_confirmations():
-    """확인 대기 DROP은 없다. 0007(03b 29-3)은 2026-10-14에 승인됐다.
+    """확인 대기 DROP은 없다. 0007(03b 29-3)·0008(03b 30-1)은 2026-10-14에 승인됐다.
 
     새 대기 항목이 조용히 생기지 않게 하고(대기 문구는 이 시험을 깨뜨린다), 모든 DROP 기록이
     승인 문구인지 확인한다.
@@ -278,6 +287,9 @@ def test_no_pending_drop_confirmations():
     assert pending == set()
     assert all(_is_approved(note) for note in DROP_APPROVED.values()), "승인이 아닌 DROP 기록"
     assert "2026-10-14" in DROP_APPROVED["20261013_0007_audit_log.py"]
+    note = DROP_APPROVED["20261014_0008_dataset_archive.py"]
+    assert "DROP 확인: 사용자 승인 (2026-10-14" in note and "03b 30-1" in note
+    assert "대기" not in note.replace("대기 표시 없음", "")
 
 
 def test_0007_drop_is_only_in_downgrade_never_in_upgrade():

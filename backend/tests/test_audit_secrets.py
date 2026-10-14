@@ -96,6 +96,8 @@ def run_workload(ctx: Ctx) -> None:
         },
     )
     call("definer", "POST", f"/api/datasets/{ds}/formulas/preview", json={"expression": "[매출]"})
+    call("definer", "POST", f"/api/datasets/{ds}/archive")  # FU-2b: 보관·복구도 비밀이 없다
+    call("definer", "POST", f"/api/datasets/{ds}/restore")
     call(
         "admin",
         "PUT",
@@ -137,7 +139,7 @@ def test_no_secret_row_value_formula_rule_or_login_id_reaches_the_audit_log(ctx:
     run_workload(ctx)
     rows = audit_rows(ctx.db)
     actions = {r["action"] for r in rows}
-    # 이 작업이 15개 행위를 모두 일으켰는지 확인한다(빈 검사가 되지 않게)
+    # 이 작업이 17개 행위 모두 일으켰는지 확인한다(빈 검사가 되지 않게)
     assert actions == set(ACTIONS), set(ACTIONS) - actions
     text = json.dumps(rows, ensure_ascii=False, default=str)
     for secret in ALL_SECRETS:

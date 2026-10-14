@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,9 +25,12 @@ from app.auth.models import CurrentUser
 from app.auth.permissions import can_define, can_enter
 from app.core.db_errors import sqlstate
 from app.core.errors import (
+    AppError,
+    ErrorCode,
     FieldErrorCode,
     already_exists,
     column_locked,
+    dataset_archived,
     dataset_has_rows,
     definition_version_mismatch,
     not_found,
@@ -47,6 +52,11 @@ from app.dataset.hashing import structure_hash
 # 기준 날짜 열 규칙을 거는 DDL이 기존 값 때문에 실패하는 SQLSTATE: NOT NULL·CHECK·유일 위반.
 _PERIOD_RULE_VIOLATIONS = frozenset({"23502", "23514", "23505"})
 _DATASET_NAME_TAKEN = "같은 팀에 이미 같은 이름의 데이터셋이 있습니다."
+# 충돌 상대가 보관된 데이터셋이면 덧붙이는 문구(FU-2b, 03b 30-1 결정 9: 보관도 이름을 점유한다).
+_DATASET_NAME_TAKEN_ARCHIVED = (
+    _DATASET_NAME_TAKEN
+    + " 보관된 데이터셋과 같은 이름입니다. 보관된 데이터셋을 복구하거나 다른 이름을 쓰세요."
+)
 _COLUMN_NAME_TAKEN = "이 데이터셋에 이미 같은 이름의 열이 있습니다."
 
 
@@ -132,11 +142,18 @@ def _dataset_dict(row: RowMapping) -> dict[str, Any]:
 
 
 def list_datasets(
-    session: Session, user: CurrentUser, *, team_id: int | None, limit: int, offset: int
+    session: Session,
+    user: CurrentUser,
+    *,
+    team_id: int | None,
+    status: str | None = "active",
+    limit: int,
+    offset: int,
 ) -> tuple[list[dict[str, Any]], int]:
+    """B1. `status`는 `active`·`archived` 또는 None(전체). 기본은 활성만이다(FU-2b)."""
     mine = [m.team_id for m in user.memberships]
     rows, total = repo.list_datasets(
-        session, my_team_ids=mine, team_id=team_id, limit=limit, offset=offset
+        session, my_team_ids=mine, team_id=team_id, status=status, limit=limit, offset=offset
     )
     return [_dataset_dict(r) for r in rows], total
 
@@ -300,9 +317,9 @@ def get_dataset_name(session: Session, dataset_id: int) -> str | None:
     return row["name"] if row is not None else None
 
 
-def list_active_dataset_ids(session: Session) -> list[int]:
-    """시작 시 뷰 대조 대상: 활성 데이터셋 번호(번호 오름차순)."""
-    return repo.list_active_dataset_ids(session)
+def list_startup_check_dataset_ids(session: Session) -> list[int]:
+    """시작 시 뷰·Superset 대조 대상: 활성·보관 데이터셋 번호(번호 오름차순, FU-2b)."""
+    return repo.list_startup_check_dataset_ids(session)
 
 
 def lock_row_context(session: Session, dataset_id: int, expected_version: int) -> RowContext:
@@ -311,12 +328,18 @@ def lock_row_context(session: Session, dataset_id: int, expected_version: int) -
     `lock_timeout`(코드 상수)을 걸고, 잠근 **뒤에** 정의(열 목록)를 읽는다. 버전이 다르면 잠금을
     풀고 409 `DEFINITION_VERSION_MISMATCH`다. 락 대기 초과·교착(`55P03`·`40P01`)은 DBAPIError로
     올라가며 호출한 쪽(entry service)이 `WRITE_BUSY`로 바꾼다. 잠금은 커밋·롤백할 때 풀린다.
+
+    (FU-2b) 잠근 행의 `status`가 `archived`면 버전 비교보다 앞에서 409 `DATASET_ARCHIVED`다.
+    보관 커밋을 기다린 쓰기도 커밋 뒤 갱신된 행을 읽어 같은 코드를 받는다(06 §5).
     """
     set_lock_timeout(session, ROW_WRITE_LOCK_TIMEOUT)
     locked = repo.lock_dataset_shared(session, dataset_id)
     if locked is None:
         session.rollback()
         raise not_found()
+    if locked["status"] == "archived":
+        session.rollback()
+        raise dataset_archived()
     if int(locked["def_version"]) != expected_version:
         current = int(locked["def_version"])
         session.rollback()
@@ -325,6 +348,27 @@ def lock_row_context(session: Session, dataset_id: int, expected_version: int) -
 
 
 # --- B2 등록 ----
+
+
+def _name_conflict_hint(
+    session: Session, error: AppError, *, team_id: int, name: str, exclude_id: int | None
+) -> AppError:
+    """이름 충돌(409 `ALREADY_EXISTS`, `field=name`)의 상대가 보관된 데이터셋이면 문구를 덧붙인다.
+
+    이미 롤백된 세션에서 상대의 `status`를 한 번 읽는다. 사전 조회에서 잡은 충돌과 유일 제약 위반
+    (경쟁)으로 바뀐 충돌이 모두 이 길을 지난다. 읽기에 실패하면 원래 오류를 그대로 쓴다.
+    """
+    if error.code != ErrorCode.ALREADY_EXISTS or error.details.get("field") != "name":
+        return error
+    try:
+        other = repo.find_dataset_name_conflict(session, team_id, name, exclude_id)
+        session.rollback()
+    except DBAPIError:
+        session.rollback()
+        return error
+    if other == "archived":
+        return already_exists("name", _DATASET_NAME_TAKEN_ARCHIVED)
+    return error
 
 
 def create_dataset(
@@ -347,7 +391,7 @@ def create_dataset(
             # 권한 판정(정의 담당자)은 라우터에서 먼저 끝났다. 비활성 팀에는 만들 수 없다(B2).
             session.rollback()
             raise target_inactive("team", "사용 중지된 팀에는 데이터셋을 만들 수 없습니다.")
-        if repo.find_dataset_name_conflict(session, team_id, name):
+        if repo.find_dataset_name_conflict(session, team_id, name) is not None:
             session.rollback()
             raise already_exists("name", _DATASET_NAME_TAKEN)
         dataset_id = repo.insert_dataset(
@@ -374,12 +418,91 @@ def create_dataset(
     except DBAPIError as error:
         translated = translate_db_error(session, error)
         if translated is not None:
-            raise translated from None
+            raise _name_conflict_hint(
+                session, translated, team_id=team_id, name=name, exclude_id=None
+            ) from None
         raise
+    except AppError as error:
+        session.rollback()
+        raise _name_conflict_hint(
+            session, error, team_id=team_id, name=name, exclude_id=None
+        ) from None
     except BaseException:
         session.rollback()  # 등록 행과 원본 표 생성이 함께 되돌려진다.
         raise
     return dataset_id
+
+
+# --- B7·B8 보관·복구 (FU-2b, 03b 30-1) ----
+# 정의 변경 진입점을 쓰지 않는다: `def_version`·`def_hash`·열·정의 변경 훅·동적 DDL·Superset 동기
+# 요청이 모두 없다(`ds_`·`dv_`·`de_`는 그대로, 04 §5). 순서는 행 잠금 -> (같은 상태면 롤백 후
+# 종료) -> `status` UPDATE -> 감사 기록 -> 커밋이다.
+
+
+@contextmanager
+def _status_transaction(session: Session) -> Iterator[None]:
+    """보관·복구 트랜잭션의 공통 오류 처리: 락 대기 초과·교착은 503, 그 밖의 오류는 롤백한다."""
+    try:
+        set_lock_timeout(session)
+        yield
+    except DBAPIError as error:
+        translated = translate_db_error(session, error)
+        if translated is not None:
+            raise translated from None
+        raise
+    except BaseException:
+        session.rollback()
+        raise
+
+
+def _lock_for_status(session: Session, dataset_id: int, new_status: str) -> RowMapping | None:
+    """행을 잠그고 바꿔야 할 때만 잠근 행을 돌려준다. 이미 같은 상태면 롤백하고 None, 없으면 404."""
+    locked = repo.lock_dataset(session, dataset_id)
+    if locked is None:
+        session.rollback()
+        raise not_found()
+    if locked["status"] == new_status:
+        session.rollback()  # 바뀐 것이 없다(감사 0건, 잠금 해제)
+        return None
+    return locked
+
+
+def archive_dataset(session: Session, actor: CurrentUser, dataset_id: int) -> bool:
+    """B7: 데이터셋을 보관한다(`status='archived'`). 바뀌었으면 True, 이미 보관이면 False."""
+    with _status_transaction(session):
+        locked = _lock_for_status(session, dataset_id, "archived")
+        if locked is None:
+            return False
+        repo.update_dataset(session, dataset_id, {"status": "archived"})
+        audit.record(
+            session,
+            actor=actor,
+            action="dataset.archive",
+            target_id=dataset_id,
+            target_name=locked["name"],
+            details={"team_id": int(locked["team_id"])},
+        )
+        session.commit()
+        return True
+
+
+def restore_dataset(session: Session, actor: CurrentUser, dataset_id: int) -> bool:
+    """B8: 보관된 데이터셋을 복구한다(`status='active'`). 바뀌었으면 True, 이미 활성이면 False."""
+    with _status_transaction(session):
+        locked = _lock_for_status(session, dataset_id, "active")
+        if locked is None:
+            return False
+        repo.update_dataset(session, dataset_id, {"status": "active"})
+        audit.record(
+            session,
+            actor=actor,
+            action="dataset.restore",
+            target_id=dataset_id,
+            target_name=locked["name"],
+            details={"team_id": int(locked["team_id"])},
+        )
+        session.commit()
+        return True
 
 
 # --- B4 데이터셋 수정 ----
@@ -408,8 +531,11 @@ def update_dataset(
     def change(locked: RowMapping) -> tuple[bool, dict[str, Any]]:
         updates: dict[str, Any] = {}
         if name is not None and name != locked["name"]:
-            if repo.find_dataset_name_conflict(
-                session, locked["team_id"], name, exclude_id=dataset_id
+            if (
+                repo.find_dataset_name_conflict(
+                    session, locked["team_id"], name, exclude_id=dataset_id
+                )
+                is not None
             ):
                 raise already_exists("name", _DATASET_NAME_TAKEN)
             updates["name"] = name
@@ -456,14 +582,25 @@ def update_dataset(
             "def_version": version,
         }
 
-    outcome = apply_definition_change(
-        session,
-        hooks,
-        dataset_id,
-        expected_version=expected_version,
-        change=change,
-        audit_spec=AuditSpec(actor, "dataset.update", describe),
-    )
+    try:
+        outcome = apply_definition_change(
+            session,
+            hooks,
+            dataset_id,
+            expected_version=expected_version,
+            change=change,
+            audit_spec=AuditSpec(actor, "dataset.update", describe),
+        )
+    except AppError as error:
+        if name is None or error.code != ErrorCode.ALREADY_EXISTS:
+            raise
+        row = repo.get_dataset(session, dataset_id)  # team_id는 DB가 불변으로 강제한다
+        session.rollback()
+        if row is None:
+            raise
+        raise _name_conflict_hint(
+            session, error, team_id=int(row["team_id"]), name=name, exclude_id=dataset_id
+        ) from None
     return outcome.changed, outcome.def_version
 
 
@@ -499,9 +636,10 @@ def add_column(
     position: int | None,
 ) -> ColumnChange:
     """원본 열을 추가한다: 정의 행 + 원본 표 열을 한 트랜잭션으로 만든다."""
-    normalized_rules, tag = _clean_rules_and_tag(column_type, raw_rules, raw_tag)
 
     def change(locked: RowMapping) -> tuple[bool, dict[str, Any]]:
+        # 규칙·태그 검증(422)은 잠금 아래에서 한다: 보관 판정(409)이 먼저다(FU-2b).
+        normalized_rules, tag = _clean_rules_and_tag(column_type, raw_rules, raw_tag)
         if repo.find_column_name_conflict(session, dataset_id, display_name):
             raise already_exists("display_name", _COLUMN_NAME_TAKEN)
         last = repo.max_position(session, dataset_id)

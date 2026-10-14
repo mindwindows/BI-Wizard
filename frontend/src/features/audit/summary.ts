@@ -133,6 +133,15 @@ const SPECS: Record<AuditAction, ActionSpec> = {
       return { parts: [...c.parts, version(d)], skipped: c.skipped };
     },
   },
+  // FU-2b: 보관·복구는 정의 버전을 올리지 않으므로 def_version이 없다. 허용 키는 target_name·team_id뿐(04 §5-1)이고 요약에는 값을 쓰지 않는다(대상 이름은 '대상' 칸이 보여 준다).
+  "dataset.archive": {
+    keys: ["team_id"],
+    build: () => ({ parts: ["데이터셋 보관"] }),
+  },
+  "dataset.restore": {
+    keys: ["team_id"],
+    build: () => ({ parts: ["데이터셋 복구"] }),
+  },
   "column.add": {
     keys: ["column_id", "column_name", "column_type", "required", "def_version"],
     build: (d) => {

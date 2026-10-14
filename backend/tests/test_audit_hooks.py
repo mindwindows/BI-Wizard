@@ -1,4 +1,4 @@
-"""감사 기록 훅 시험(04 §5-1 "시험 단정" 5가지): 행위 15개 각각에 대해
+"""감사 기록 훅 시험(04 §5-1 "시험 단정" 5가지): 행위 17개 각각에 대해
 
 ① 성공 = 감사 행 정확히 1건, `details` 키가 허용 목록과 같고 값이 기대와 같음
 ② 변경 없음 = 0건
@@ -6,7 +6,7 @@
 ④ 롤백(훅·DDL 실패 주입, 커밋 실패 주입) = 0건이고 변경도 없음
 ⑤ 감사 INSERT 실패 주입 = 변경도 롤백
 
-SQLite와 실제 PostgreSQL(`pg`) 두 변형으로 돈다. API로 부르는 14개는 아래 시나리오 표가, 서버 명령
+SQLite와 실제 PostgreSQL(`pg`) 두 변형으로 돈다. API로 부르는 16개는 아래 시나리오 표가, 서버 명령
 `create-admin`(`user.bootstrap_admin`)은 마지막 절이 맡는다.
 """
 
@@ -155,6 +155,33 @@ def error_dataset_update(ctx: Ctx):
         json={"expected_version": ds_version(ctx) + 9, "name": "아무 이름"},
     )
     return response, 409, "DEFINITION_VERSION_MISMATCH"
+
+
+# 2-1. dataset.archive (FU-2b: 정의 버전을 올리지 않으므로 details에 def_version이 없다)
+def act_dataset_archive(ctx: Ctx):
+    return ctx.call("definer", "POST", f"/api/datasets/{ctx.vars['ds']}/archive")
+
+
+def expect_dataset_archive(ctx: Ctx, response):
+    return ctx.vars["ds"], "기존 데이터셋", {"team_id": ctx.world.team_a}
+
+
+def error_dataset_archive(ctx: Ctx):
+    return ctx.call("definer", "POST", "/api/datasets/999999/archive"), 404, "NOT_FOUND"
+
+
+# 2-2. dataset.restore
+def setup_archived_dataset(ctx: Ctx) -> None:
+    setup_dataset(ctx)
+    assert act_dataset_archive(ctx).status_code == 200
+
+
+def act_dataset_restore(ctx: Ctx):
+    return ctx.call("definer", "POST", f"/api/datasets/{ctx.vars['ds']}/restore")
+
+
+def error_dataset_restore(ctx: Ctx):
+    return ctx.call("definer", "POST", "/api/datasets/999999/restore"), 404, "NOT_FOUND"
 
 
 # 3. column.add
@@ -574,6 +601,22 @@ SCENARIOS = [
         uses_hook=True,
     ),
     Scenario(
+        "dataset.archive",
+        "definer",
+        setup_dataset,
+        act_dataset_archive,
+        expect_dataset_archive,
+        error_dataset_archive,
+    ),
+    Scenario(
+        "dataset.restore",
+        "definer",
+        setup_archived_dataset,
+        act_dataset_restore,
+        expect_dataset_archive,
+        error_dataset_restore,
+    ),
+    Scenario(
         "column.add",
         "definer",
         setup_dataset,
@@ -692,9 +735,9 @@ scenarios = pytest.mark.parametrize("scn", SCENARIOS, ids=ids)
 
 
 def test_scenario_table_covers_every_api_action_except_the_server_command():
-    """15개 중 서버 명령(`user.bootstrap_admin`)만 아래 CLI 절이 맡고 나머지 14개는 이 표에 있다."""
+    """17개 중 서버 명령(`user.bootstrap_admin`)만 아래 CLI 절이 맡고 나머지 16개는 이 표에 있다."""
     assert set(BY_ACTION) == set(ACTIONS) - {"user.bootstrap_admin"}
-    assert len(ACTIONS) == 15
+    assert len(ACTIONS) == 17
 
 
 # --- ① 성공: 정확히 1건 ----
@@ -854,6 +897,26 @@ def test_definition_change_inside_hooks_records_nothing_on_its_own(ctx: Ctx):
     assert row["action"] == "formula_column.update"
     assert row["details"]["result_type"] == "text"
     assert row["details"]["result_type_changed"] is True
+
+
+def test_archive_and_restore_repeats_record_nothing(ctx: Ctx):
+    """B7·B8: 이미 같은 상태인 재요청은 200이고 감사 0건·상태 불변이다(04 §5-1 2번)."""
+    setup_dataset(ctx)
+    ds = ctx.vars["ds"]
+    before = audit_rows(ctx.db)
+    # 활성에서 복구 = 같은 상태
+    assert ctx.call("definer", "POST", f"/api/datasets/{ds}/restore").status_code == 200
+    assert audit_rows(ctx.db) == before
+    assert ctx.call("definer", "POST", f"/api/datasets/{ds}/archive").status_code == 200
+    after_archive = audit_rows(ctx.db)
+    assert [r["action"] for r in after_archive[len(before) :]] == ["dataset.archive"]
+    state = static_snapshot(ctx.db)
+    again = ctx.call("definer", "POST", f"/api/datasets/{ds}/archive")
+    assert again.status_code == 200 and again.json()["status"] == "archived"
+    assert audit_rows(ctx.db) == after_archive and static_snapshot(ctx.db) == state
+    assert ctx.call("definer", "POST", f"/api/datasets/{ds}/restore").status_code == 200
+    rows = audit_rows(ctx.db)[len(before) :]
+    assert [r["action"] for r in rows] == ["dataset.archive", "dataset.restore"]
 
 
 def test_member_set_role_change_records_the_previous_role(ctx: Ctx):

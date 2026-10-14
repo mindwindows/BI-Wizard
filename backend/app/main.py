@@ -110,7 +110,7 @@ def create_app(
             raise
         view_status.bind(app.state.startup_report)
         if own_hooks:
-            # 활성 데이터셋마다 정의 해시를 대조해 다른 뷰만 다시 만든다. 실패해도 시작을 막지
+            # 활성·보관 데이터셋마다 정의 해시를 대조해 다른 뷰만 다시 만든다. 실패해도 시작을 막지
             # 않는다.
             await run_in_threadpool(reconcile_all, app.state.engine, hooks, view_status)
         if superset_services is not None:

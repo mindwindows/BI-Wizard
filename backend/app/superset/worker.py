@@ -19,7 +19,7 @@
   자동 재시도하고, 그 밖의 사유는 관리자의 "다시 시도"(E2)나 다음 시작 점검이 되돌린다.
 - 시작 점검(결정 E): Superset `/health`가 200이 될 때까지 **이 스레드 안에서** 기다린 뒤(backend
   시작과
-  Superset과 무관한 API는 기다리지 않는다) 활성 데이터셋 전체를 대조한다: 등록 행이 없거나
+  Superset과 무관한 API는 기다리지 않는다) 활성·보관 데이터셋 전체를 대조한다: 등록 행이 없거나
   `pending`·`failed`면 큐에 넣고, `registered`는 Superset의 이름·SQL·열을 읽어 어긋나면 큐에 넣는다
   (커밋 직후 크래시로 열 변경이 반영되지 않은 틈).
 - 로그에는 클래스 이름과 사유 코드만 남긴다(예외 메시지·URL·응답 본문·토큰 금지).
@@ -296,7 +296,7 @@ class SupersetDatasetSync:
     # --- 시작 점검·자동 재시도 ---
 
     def reconcile_all(self) -> int:
-        """활성 데이터셋 전체를 Superset과 대조해 어긋난 것을 큐에 넣는다(결정 E ①).
+        """활성·보관 데이터셋 전체를 Superset과 대조해 어긋난 것을 큐에 넣는다(결정 E ①).
 
         Superset을 읽는 호출이 연결 문제로 실패하면 `SupersetUnavailable`을 그대로 올려 호출한 쪽이
         나중에 다시 하게 한다. 큐에 넣은 건수를 돌려준다.
@@ -304,7 +304,7 @@ class SupersetDatasetSync:
         if self._engine is None:
             return 0
         with Session(self._engine) as session:
-            ids = dataset_service.list_active_dataset_ids(session)
+            ids = dataset_service.list_startup_check_dataset_ids(session)
             rows = repo.all_sync_rows(session)
         queued = 0
         for dataset_id in ids:

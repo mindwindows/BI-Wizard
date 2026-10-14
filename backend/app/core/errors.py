@@ -56,6 +56,7 @@ class ErrorCode:
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"  # 405 (03b 17-1 결정 1, 05 §3)
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"  # 503 DB 등 내부 의존 장애 (03b 17-1 결정 2)
     TARGET_INACTIVE = "TARGET_INACTIVE"  # 409 비활성 팀·사용자에 소속 추가·변경 (03b 17-1 결정 3)
+    DATASET_ARCHIVED = "DATASET_ARCHIVED"  # 409 보관된 데이터셋에 정의·입력 쓰기 (FU-2b, 03b 30-1)
 
 
 class FieldErrorCode:
@@ -164,6 +165,16 @@ def definition_busy() -> AppError:
         "다른 작업이 진행 중입니다. 잠시 후 다시 시도하세요.",
         status_code=503,
         details={"retry_after": DEFINITION_RETRY_AFTER_SECONDS},
+    )
+
+
+def dataset_archived() -> AppError:
+    """보관된 데이터셋에 정의·입력 쓰기를 시도했다(B4 B5 B6 C2 C3 C4 D4 D5, 05 §3)."""
+    return AppError(
+        ErrorCode.DATASET_ARCHIVED,
+        "보관된 데이터셋은 고칠 수 없습니다. 복구한 뒤 다시 시도하세요.",
+        status_code=409,
+        details={"status": "archived"},
     )
 
 

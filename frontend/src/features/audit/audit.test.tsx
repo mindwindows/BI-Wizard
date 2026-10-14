@@ -173,12 +173,12 @@ describe("S10 필터", () => {
     expect(lastQuery(calls)).toEqual({ from: "2026-10-01", to: "2026-10-13", actor_user_id: "7", target_type: "dataset", target_id: "12", action: "column.add", limit: "50", offset: "0" });
   });
 
-  it("행위자·행위·대상 종류 선택지는 한국어이고 행위는 15개다", async () => {
+  it("행위자·행위·대상 종류 선택지는 한국어이고 행위는 17개다", async () => {
     open({ "GET /audit-logs": () => pageOf([]) });
     await ready();
     const actions = [...(field("행위") as HTMLSelectElement).options].map((o) => o.textContent);
-    expect(actions).toHaveLength(16);
-    expect(actions.slice(0, 3)).toEqual(["전체", "데이터셋 만들기", "데이터셋 설정 변경"]);
+    expect(actions).toHaveLength(18);
+    expect(actions.slice(0, 5)).toEqual(["전체", "데이터셋 만들기", "데이터셋 설정 변경", "데이터셋 보관", "데이터셋 복구"]);
     expect([...(field("대상 종류") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["전체", "팀", "사용자", "데이터셋", "대시보드"]);
     expect([...(field("행위자") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["전체", "관리자 김", "박입력", "이퇴사 (사용 중지)"]);
   });

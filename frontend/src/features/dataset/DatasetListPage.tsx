@@ -4,7 +4,8 @@ import { ErrorNotice, Loading } from "../../components";
 import { listAllTeams } from "../access/api";
 import { useMe } from "../access/MeContext";
 import type { Page, Team } from "../access/types";
-import { listDatasets } from "./api";
+import { ArchiveAction, doneText } from "./ArchiveAction";
+import { listDatasets, type DatasetView } from "./api";
 import { listSupersetStatusFor } from "../superset/api";
 import { SyncBadge } from "../superset/SyncBadge";
 import type { SupersetDatasetStatus } from "../superset/types";
@@ -12,6 +13,9 @@ import { formatDate } from "./format";
 import { DATE_UNIT_LABELS, type Dataset } from "./types";
 
 const PAGE_SIZE = 50;
+
+const VIEW_LABELS: Record<DatasetView, string> = { active: "사용 중", archived: "보관됨", all: "전체" };
+const VIEWS: DatasetView[] = ["active", "archived", "all"];
 
 /** 동기 상태 칸. undefined = 읽는 중, null = 읽었지만 이 데이터셋의 상태를 못 받음. */
 function SyncCell({ status }: { status: SupersetDatasetStatus | null | undefined }) {
@@ -39,6 +43,8 @@ export function DatasetListPage() {
   const { state, workTeamId } = useMe();
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamId, setTeamId] = useState<number | undefined>(undefined);
+  const [view, setView] = useState<DatasetView>("active");
+  const [notice, setNotice] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const [result, setResult] = useState<LoadResult | null>(null);
@@ -54,16 +60,16 @@ export function DatasetListPage() {
     };
   }, []);
 
-  const requestKey = `${reloadKey}|${teamId ?? ""}|${offset}`;
+  const requestKey = `${reloadKey}|${teamId ?? ""}|${view}|${offset}`;
   useEffect(() => {
     let active = true;
-    listDatasets({ team_id: teamId, limit: PAGE_SIZE, offset })
+    listDatasets({ team_id: teamId, status: view, limit: PAGE_SIZE, offset })
       .then((page) => active && setResult({ key: requestKey, page }))
       .catch((error: unknown) => active && setResult({ key: requestKey, error }));
     return () => {
       active = false;
     };
-  }, [requestKey, teamId, offset]);
+  }, [requestKey, teamId, view, offset]);
 
   // 동기 상태: 표시된 쪽의 번호들로 한 번 읽는다. 못 읽어도 목록은 그대로 보여 주고 열에는 "확인 못함"을 둔다.
   const pageIds = (result?.page?.items ?? []).map((dataset) => dataset.id).join(",");
@@ -83,9 +89,13 @@ export function DatasetListPage() {
   // 화면 편의일 뿐이다. 최종 방어선은 서버의 B2 권한 검사다.
   const canCreate = workMembership?.role === "definer" && workMembership.team_is_active !== false;
 
+  // 보관·복구 버튼은 그 데이터셋 팀의 정의 담당자에게만 보인다(관리자 예외 없음, 비활성 팀이어도 표시). 최종 방어선은 서버(B7·B8)다.
+  const isDefinerOf = (teamIdOfDataset: number) => me?.memberships.some((m) => m.team_id === teamIdOfDataset && m.role === "definer") ?? false;
+
   const loading = result?.key !== requestKey;
   const items = result?.page?.items ?? [];
   const total = result?.page?.total ?? 0;
+  const showActions = items.some((dataset) => isDefinerOf(dataset.team_id));
   const teamName = (id: number) => teams.find((t) => t.id === id)?.name ?? `팀 ${id}`;
 
   return (
@@ -109,6 +119,23 @@ export function DatasetListPage() {
             ))}
           </select>
         </label>
+        <label>
+          보기
+          <select
+            value={view}
+            onChange={(event) => {
+              setOffset(0);
+              setNotice(null);
+              setView(event.target.value as DatasetView);
+            }}
+          >
+            {VIEWS.map((v) => (
+              <option key={v} value={v}>
+                {VIEW_LABELS[v]}
+              </option>
+            ))}
+          </select>
+        </label>
         {canCreate ? (
           <Link to="/datasets/new" className="button-link">
             새 데이터셋
@@ -120,6 +147,11 @@ export function DatasetListPage() {
         )}
       </div>
 
+      {notice ? (
+        <p role="status" className="state state-ok" data-testid="archive-notice">
+          {notice}
+        </p>
+      ) : null}
       {loading ? <Loading label="데이터셋을 불러오는 중" /> : null}
       {!loading && result?.error ? (
         <ErrorNotice error={result.error}>
@@ -132,7 +164,11 @@ export function DatasetListPage() {
         <>
           {items.length === 0 ? (
             <p className="muted" data-testid="no-datasets">
-              {teamId !== undefined ? "이 팀에는 등록된 데이터셋이 없습니다." : "등록된 데이터셋이 없습니다."}
+              {view === "archived"
+                ? "보관된 데이터셋이 없습니다."
+                : teamId !== undefined
+                  ? "이 팀에는 등록된 데이터셋이 없습니다."
+                  : "등록된 데이터셋이 없습니다."}
             </p>
           ) : (
             <table aria-label="데이터셋 목록" className="list-table">
@@ -144,6 +180,7 @@ export function DatasetListPage() {
                   <th scope="col">생성자</th>
                   <th scope="col">생성일</th>
                   <th scope="col">동기 상태</th>
+                  {showActions ? <th scope="col">관리</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -151,6 +188,7 @@ export function DatasetListPage() {
                   <tr key={dataset.id}>
                     <td>
                       <Link to={`/datasets/${dataset.id}`}>{dataset.name}</Link>
+                      {dataset.status === "archived" ? <span className="badge badge-archived">보관</span> : null}
                     </td>
                     <td>{teamName(dataset.team_id)}</td>
                     <td>{DATE_UNIT_LABELS[dataset.date_unit] ?? dataset.date_unit}</td>
@@ -159,6 +197,19 @@ export function DatasetListPage() {
                     <td data-testid={`sync-${dataset.id}`}>
                       <SyncCell status={syncReady ? (sync.map?.get(dataset.id) ?? null) : undefined} />
                     </td>
+                    {showActions ? (
+                      <td>
+                        {isDefinerOf(dataset.team_id) ? (
+                          <ArchiveAction
+                            dataset={dataset}
+                            onDone={(kind) => {
+                              setNotice(doneText(kind, dataset.name));
+                              setReloadKey((value) => value + 1);
+                            }}
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
