@@ -56,13 +56,21 @@ def test_every_compile_call_in_the_formula_package_passes_env():
     seen: dict[str, int] = {}
     for path in sorted(FORMULA.glob("*.py")):
         for name, node in calls_of(path):
-            keywords = {k.arg for k in node.keywords}
-            assert "env" in keywords, f"{path.name} 줄 {node.lineno}: {name}()에 env= 가 없다"
+            where = f"{path.name} 줄 {node.lineno}: {name}()"
+            assert not node.args[2:] or name == "compile_all", f"{where}: 위치 인수로 env를 넘기지 않는다"
+            for keyword in node.keywords:
+                assert keyword.arg is not None, f"{where}: **kwargs로 env를 숨기지 않는다"
+            env = [k for k in node.keywords if k.arg == "env"]
+            assert len(env) == 1, f"{where}에 env= 가 없다"
+            value = env[0].value
+            assert not (isinstance(value, ast.Constant) and value.value is None), (
+                f"{where}: env=None 상수는 REF를 막는 우회다"
+            )
             seen[path.name] = seen.get(path.name, 0) + 1
-    # 07 §3-2의 6곳이 실제로 있다: service(check·preview·save·view_formula), hook, reconcile, views
-    assert seen["service.py"] == 4
-    assert seen["hook.py"] == 1 and seen["reconcile.py"] == 1
-    assert seen["views.py"] == 1 and seen["api.py"] == 1  # views.compile_all 안과 check_formula
+    # 07 §3-2의 호출 지점이 모두 실제로 있다(정확한 횟수는 단정하지 않는다: 지점이 늘어도 위 검사가 지킨다)
+    for needed in ("service.py", "hook.py", "reconcile.py", "views.py", "api.py"):
+        assert seen.get(needed, 0) >= 1, f"{needed}에 컴파일 호출이 없다(호출 지점이 사라졌다)"
+    assert seen["service.py"] >= 4  # check·preview·save·view_formula
 
 
 def test_the_six_call_sites_build_their_env_with_the_shared_helper():
@@ -160,12 +168,14 @@ def test_a_base_date_column_that_is_not_a_raw_date_column_counts_as_missing(colu
         ("REF([메모])", "CONST_REQUIRED"),
         ('REF("전기" & "요금")', "CONST_REQUIRED"),
         ('REF(IF(TRUE, "전기요금", "수도요금"))', "CONST_REQUIRED"),
-        ('REF("' + "가" * 51 + '")', "CONST_RANGE"),
+        # 51자 이름은 항목이 될 수 없어 범위 오류와 함께 없는 이름으로도 보고된다(둘 다 정확히 단정)
+        ('REF("' + "가" * 51 + '")', ["CONST_RANGE", "REF_UNKNOWN"]),
         ('REF("전기\\요금")', "TEXT_CONSTANT_INVALID"),
     ],
 )
 def test_argument_errors_use_the_existing_codes(expression, code):
-    assert code in [i.code for i in issues(expression)], expression
+    expected = code if isinstance(code, list) else [code]
+    assert [i.code for i in issues(expression)] == expected, expression
 
 
 def test_a_ref_name_is_compared_exactly_after_nfc():

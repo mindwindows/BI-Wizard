@@ -42,6 +42,10 @@ RV = sa.table(
     schema="public",
 ).alias("rv")
 LOOKUP = ReferenceLookup(7, 1)
+# 정규형 비교에서 거부될 때의 메시지. 거부 사례는 `match=SHAPE`로 "다른 선행 검사(text·사용자 연산자·
+# 함수 목록)에 걸려 정규형 비교까지 가지 않은 것"이 아님을 보인다(그 검사들은 정규형 비교 뒤에 온다).
+SHAPE = "허용된 기준값 조회 모양"
+COLUMN_ONLY = "열 식 안에서만"
 
 
 def item(value: object = 7) -> sa.ColumnElement:
@@ -106,7 +110,7 @@ def test_the_error_expression_shape_passes():
 
 
 def test_without_any_declared_lookup_every_subquery_is_rejected():
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(good_sub()), references=())
 
 
@@ -119,18 +123,18 @@ def test_without_any_declared_lookup_every_subquery_is_rejected():
     ],
 )
 def test_a_subquery_that_differs_from_the_declared_lookup_is_rejected(references):
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(good_sub()), references)
 
 
 def test_one_wrong_subquery_among_valid_ones_rejects_the_whole_view():
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(good_sub(), good_sub(8), good_sub()))  # 8번은 선언되지 않았다
 
 
 def test_the_base_column_must_belong_to_the_dataset_that_owns_the_view():
     """다른 데이터셋의 기준 날짜 열로 연도를 뽑는 서브쿼리는 기대 모양이 아니다."""
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(good_sub(7, OTHER_DS.c.c_1)))
 
 
@@ -200,13 +204,13 @@ def _t(name: str, schema: str | None, *columns: str) -> sa.Alias:
     ],
 )
 def test_other_tables_schemas_and_columns_are_rejected(sub):
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(sub.scalar_subquery()))
 
 
 def test_selecting_all_columns_of_the_table_is_rejected():
     star = sa.select(RV).where(*_where_ok()).scalar_subquery()
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(star))
 
 
@@ -251,20 +255,20 @@ def test_selecting_all_columns_of_the_table_is_rejected():
 )
 def test_item_id_must_be_an_integer_constant_cast_to_integer(item_side):
     sub = inner(RV.c.item_id == item_side, RV.c.year == year_of()).scalar_subquery()
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(sub))
 
 
 def test_item_id_from_a_bind_value_that_is_not_the_declared_number_is_rejected():
     for value in (8, 0, -7, 2**31 - 1):
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=SHAPE):
             check(view_of(good_sub(value)))
 
 
 def test_changing_the_comparison_operator_or_swapping_sides_is_rejected():
     for cond in (RV.c.item_id != item(), RV.c.item_id > item(), RV.c.item_id.in_([item()])):
         sub = inner(cond, RV.c.year == year_of()).scalar_subquery()
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=SHAPE):
             check(view_of(sub))
 
 
@@ -295,7 +299,7 @@ def test_changing_the_comparison_operator_or_swapping_sides_is_rejected():
 )
 def test_year_must_come_only_from_the_base_date_column_of_its_own_ds(year_side):
     sub = inner(RV.c.item_id == item(), RV.c.year == year_side).scalar_subquery()
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(sub))
 
 
@@ -309,7 +313,7 @@ def test_missing_or_extra_conditions_are_rejected():
         [sa.or_(RV.c.item_id == item(), RV.c.year == year_of())],
         [RV.c.item_id == item(), sa.false(), RV.c.year == year_of()],
     ):
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=SHAPE):
             check(view_of(inner(*conditions).scalar_subquery()))
 
 
@@ -398,7 +402,7 @@ def _base():
 def test_structural_variations_of_the_subquery_are_rejected(build):
     built = build()
     sub = built.scalar_subquery()
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(sub))
 
 
@@ -407,10 +411,10 @@ def test_a_nested_subquery_inside_the_subquery_is_rejected():
         RV.c.item_id == item(),
         RV.c.year == sa.select(year_of()).scalar_subquery(),
     )
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(nested.scalar_subquery()))
     deeper = sa.select(good_sub().label("x")).scalar_subquery()  # 정상 서브쿼리를 한 겹 더 감쌈
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(deeper))
 
 
@@ -421,27 +425,27 @@ def test_text_and_literal_column_inside_the_subquery_are_rejected():
         inner(RV.c.item_id == item(), RV.c.year == sa.literal_column("2026")),
         sa.select(sa.literal_column("number_value")).select_from(RV).where(*_where_ok()),
     ):
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=SHAPE):
             check(view_of(sub.scalar_subquery()))
 
 
 def test_a_forbidden_function_inside_the_subquery_is_rejected():
     sleepy = inner(*_where_ok(), columns=[sa.func.pg_sleep(1)])
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(sleepy.scalar_subquery()))
     version = inner(
         RV.c.item_id == item(), RV.c.year == sa.cast(sa.func.pg_backend_pid(), sa.Integer)
     )
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(version.scalar_subquery()))
 
 
 def test_custom_operators_and_callable_binds_inside_the_subquery_are_rejected():
     custom = inner(RV.c.item_id.op("= 7 OR 1 =")(item()), RV.c.year == year_of())
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         check(view_of(custom.scalar_subquery()))
     callable_item = sa.cast(sa.bindparam("lit", callable_=lambda: 7, type_=sa.Integer), sa.Integer)
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match="호출형"):  # 정규형 비교 전에 상수 검사가 먼저 거부한다
         check(
             view_of(inner(RV.c.item_id == callable_item, RV.c.year == year_of()).scalar_subquery())
         )
@@ -461,10 +465,10 @@ def test_a_correct_subquery_outside_the_column_list_is_rejected():
         outer.having(good.is_not(None)).group_by(DS.c.row_id),
         sa.select(DS.c.row_id).select_from(DS).where(DS.c.row_id.in_([good])),
     ):
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=COLUMN_ONLY):
             check(select)
     exists = sa.select(DS.c.row_id).select_from(DS).where(sa.exists(inner(*_where_ok())))
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=COLUMN_ONLY):
         check(exists)
 
 
@@ -472,27 +476,30 @@ def test_a_correct_subquery_as_a_derived_table_or_cte_of_the_view_is_rejected():
     body = sa.select(good_sub().label("v"), DS.c.row_id).select_from(DS)
     for source in (body.subquery("s"), body.cte("c"), body.lateral("l")):
         select = sa.select(source.c.row_id).select_from(source)
-        with pytest.raises(DdlError):
+        with pytest.raises(DdlError, match=COLUMN_ONLY):
             check(select)
 
 
 def test_a_view_over_two_tables_is_still_rejected_even_with_a_correct_subquery():
     other = sa.table("ds_9", sa.column("row_id"), schema="bi_data")
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match="자기 원본 표 하나만"):
         check(view_of(good_sub(), froms=(DS, other)))
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match="자기 원본 표"):
         check(view_of(good_sub(), froms=(OTHER_DS,)))
 
 
 def test_a_view_that_is_itself_a_union_is_rejected():
     union = sa.union_all(view_of(good_sub()), view_of(good_sub()))
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match="SELECT여야"):
         check(union)  # type: ignore[arg-type]
 
 
 def test_literal_column_and_text_in_the_outer_view_are_still_rejected():
-    for expression in (sa.literal_column("1").label("x"), sa.text("1")):
-        with pytest.raises(DdlError):
+    for expression, reason in (
+        (sa.literal_column("1").label("x"), "literal_column"),
+        (sa.text("1"), r"text\(\)"),
+    ):
+        with pytest.raises(DdlError, match=reason):
             check(sa.select(DS.c.row_id, expression).select_from(DS))
 
 
@@ -502,7 +509,7 @@ def test_literal_column_and_text_in_the_outer_view_are_still_rejected():
 def test_run_ddl_applies_the_same_gate_before_touching_the_database():
     view = view_of(good_sub())
     statement = CreateView(view, "dv_5", schema="bi_data")
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         run_ddl(None, statement)  # type: ignore[arg-type]  # 선언된 조회가 없으면 DB 전에 거부
-    with pytest.raises(DdlError):
+    with pytest.raises(DdlError, match=SHAPE):
         run_ddl(None, statement, references=[ReferenceLookup(8, 1)])  # type: ignore[arg-type]
