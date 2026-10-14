@@ -1,4 +1,4 @@
-"""감사 기록 행위 17개와 `details` 허용 키 표(04 §5-1, 06 §2-1). 이 파일이 허용 키의 유일한 출처다.
+"""감사 기록 행위 20개와 `details` 허용 키 표(04 §5-1, 06 §2-1). 이 파일이 허용 키의 유일한 출처다.
 
 - 행위 이름은 `db_metadata.AUDIT_ACTIONS`(= `ck_audit_log_action` CHECK)와 같아야 한다(시험이
   대조한다).
@@ -114,4 +114,12 @@ ACTIONS: Mapping[str, ActionSpec] = {
     "user.bootstrap_admin": ActionSpec("user", {"is_admin": BOOL}),
     "dashboard.create": ActionSpec("dashboard", {"embedded_uuid": STR}),
     "dashboard.update": ActionSpec("dashboard", changes={"name": STR, "is_active": BOOL}),
+    # FU-3(`0009`): 기준값은 포털 전역 설정값이며 행 값이 아니다(06 §2-1 ③ 예외).
+    # 대상은 항목 번호다.
+    # 설명 원문은 기록하지 않는다(길이만). `value`·`value_from`·`value_to`는 십진 문자열 하나다.
+    "reference.create": ActionSpec("reference", {"description_length": INT}),
+    "reference_value.add": ActionSpec("reference", {"year": INT, "value": STR}),
+    "reference_value.update": ActionSpec(
+        "reference", {"year": INT, "value_from": STR, "value_to": STR}
+    ),
 }

@@ -7,6 +7,7 @@
 from app.formula.api import (
     CompileResult,
     ConstProbe,
+    ReferenceEnv,
     check_formula,
     compile_formula,
     render_text,
@@ -38,6 +39,7 @@ __all__ = [
     "FunctionRegistry",
     "FunctionSpec",
     "Literals",
+    "ReferenceEnv",
     "ast_from_json",
     "ast_hash",
     "ast_to_json",

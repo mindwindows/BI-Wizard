@@ -43,6 +43,7 @@ from app.dataset.service import DefinitionView
 from app.formula import repo
 from app.formula.api import check_formula, compile_formula
 from app.formula.columns import ColumnInfo
+from app.formula.context import ReferenceEnv
 from app.formula.errors import CELL_ERROR_BY_NUMBER, CELL_ERROR_MESSAGES_KO
 from app.formula.functions import get_default_registry
 from app.formula.hook import (
@@ -54,6 +55,7 @@ from app.formula.hook import (
 )
 from app.formula.literals import LITERALS
 from app.formula.nodes import ast_from_json, column_ids
+from app.formula.refenv import load_env
 from app.formula.textview import render_text
 from app.formula.views import (
     FormulaCompileFailure,
@@ -106,6 +108,7 @@ class Context:
     defn: DefinitionView
     stored: Mapping[int, repo.StoredFormula]
     infos: list[ColumnInfo]
+    env: ReferenceEnv  # `REF`가 읽는 기준값 환경(07 §3-2: 컴파일 호출 지점이 모두 넘긴다)
 
     def column(self, column_id: int) -> ColumnInfo | None:
         return next((c for c in self.infos if c.id == column_id), None)
@@ -114,7 +117,7 @@ class Context:
 def load_context(session: Session, dataset_id: int) -> Context:
     defn = dataset_service.read_definition(session, dataset_id)
     stored = repo.load_formulas(session, dataset_id)
-    return Context(defn, stored, build_column_infos(defn, stored))
+    return Context(defn, stored, build_column_infos(defn, stored), load_env(session, defn))
 
 
 def require_formula_column(ctx: Context, column_id: int) -> ColumnInfo:
@@ -166,7 +169,9 @@ def check(
     if column_id is not None:
         require_formula_column(ctx, column_id)
     probe = make_probe(session) if is_postgresql(session) else None
-    result = check_formula(expression, ctx.infos, column_id=column_id, const_probe=probe)
+    result = check_formula(
+        expression, ctx.infos, column_id=column_id, const_probe=probe, env=ctx.env
+    )
     session.rollback()
     return result.check_response(ctx.infos)
 
@@ -196,6 +201,7 @@ def preview(
             column_id=column_id,
             source_columns=source_columns(ctx.defn, ds),
             const_probe=make_probe(session) if is_postgresql(session) else None,
+            env=ctx.env,
         )
         if not result.ok:
             session.rollback()
@@ -283,6 +289,7 @@ def _compile_for_save(
         column_name_hint=display_name,
         source_columns=source_columns(ctx.defn, ds),
         const_probe=make_probe(session) if is_postgresql(session) else None,
+        env=ctx.env,
     )
     if not result.ok:
         failure = FormulaCompileFailure(column_id, display_name or "", result.issues)
@@ -448,7 +455,7 @@ def view_formula(session: Session, dataset_id: int, column_id: int) -> dict[str,
         for cid in column_ids(ast_from_json(stored.ast))
         if cid in names
     ]
-    result = compile_formula(text, ctx.infos, column_id=column_id, build_sql=False)
+    result = compile_formula(text, ctx.infos, column_id=column_id, build_sql=False, env=ctx.env)
     tag_ids = sorted({cid for ids in result.sumtag_columns.values() for cid in ids})
     response = {
         "column_id": column_id,

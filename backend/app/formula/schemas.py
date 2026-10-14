@@ -163,3 +163,20 @@ class ViewsStatusOut(BaseModel):
 class ViewsRetryOut(BaseModel):
     rebuilt: int
     views_failed_count: int
+
+
+class ReferenceUsageItemOut(BaseModel):
+    dataset_id: int
+    dataset_name: str
+    team_id: int
+    team_name: str
+    status: str
+    column_count: int
+
+
+class ReferenceUsageOut(BaseModel):
+    """05 R6: 기준값 항목을 `REF`로 쓰는 데이터셋(정정 확인창의 영향 목록)."""
+
+    items: list[ReferenceUsageItemOut]
+    total: int
+    truncated: bool

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ErrorNotice, Loading } from "../../components";
 import { listFormulaErrorCells, listFormulaErrorSummaries } from "../formula/api";
-import { cellErrorText } from "../formula/messages";
+import { REFERENCE_MISSING_CODE, cellErrorText } from "../formula/messages";
 import type { FormulaErrorCell, FormulaErrorSummary, ListPage } from "../formula/types";
 
 const PAGE_SIZE = 50;
@@ -47,6 +47,9 @@ export function ChecksPage() {
       <h1>S5 점검</h1>
       <p className="muted">
         수식을 계산할 수 없는 칸(오류 칸)이 있는 열의 목록입니다. 오류 칸은 빈 값이 되어 입력 그리드에 붉게 표시됩니다. 원인이 되는 입력 값이나 수식을 데이터셋 작업공간에서 고쳐 주세요.
+      </p>
+      <p className="muted" data-testid="checks-e4-help">
+        오류 코드 E4(기준값 없음)는 REF 수식에서 그 행의 기준 날짜가 속한 연도의 기준값이 등록되지 않았다는 뜻입니다. 기준값 화면에서 그 연도 값을 추가하면 사라집니다.
       </p>
       <div className="toolbar">
         <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
@@ -191,7 +194,15 @@ function ErrorCells({ datasetId, columnId, columnName }: { datasetId: number; co
                     <td>{cell.period ?? ""}</td>
                     <td>#{cell.row_id}</td>
                     <td>{cell.error}</td>
-                    <td>{cell.message || cellErrorText(cell.error, undefined)}</td>
+                    <td className={cell.error === REFERENCE_MISSING_CODE ? "check-e4" : undefined}>
+                      {cell.message || cellErrorText(cell.error, undefined)}
+                      {cell.error === REFERENCE_MISSING_CODE ? (
+                        <>
+                          {" "}
+                          <Link to="/reference-values">기준값 화면 열기</Link>
+                        </>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

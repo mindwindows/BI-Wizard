@@ -1,7 +1,7 @@
 import type { CellClassParams, ColDef, ValueFormatterParams, ValueGetterParams } from "ag-grid-community";
 import type { CustomCellRendererProps } from "ag-grid-react";
 import { COLUMN_TYPE_LABELS, type Column } from "../dataset/types";
-import { cellErrorText } from "../formula/messages";
+import { REFERENCE_MISSING_CODE, REFERENCE_MISSING_LABEL, cellErrorText } from "../formula/messages";
 import type { GridRow } from "./model";
 import { BOOL_FALSE, BOOL_TRUE, displayText, editorText, formatComputedNumber, isBlank, isComputedNumber } from "./values";
 
@@ -53,7 +53,7 @@ function EntryCell(props: CustomCellRendererProps<GridRow> & { entryColumn?: Col
   return (
     <span className="cell-text" title={cellTitle(column, row, props.cellErrors)}>
       <span className="cell-value">
-        {errorCode ? <span aria-label={`계산 오류 ${errorCode}: ${cellErrorText(errorCode, props.cellErrors)}`}>오류</span> : blank ? <span className="cell-blank-mark" aria-label="빈 칸" /> : text}
+        {errorCode ? <span aria-label={`계산 오류 ${errorCode}: ${cellErrorText(errorCode, props.cellErrors)}`}>{errorCode === REFERENCE_MISSING_CODE ? REFERENCE_MISSING_LABEL : "오류"}</span> : blank ? <span className="cell-blank-mark" aria-label="빈 칸" /> : text}
       </span>
       {errorCode ? <span className="cell-errcode" aria-hidden="true"> {errorCode}</span> : null}
       {mark?.kind === "invalid" ? <span className="cell-flag" aria-hidden="true"> !</span> : null}
@@ -111,7 +111,7 @@ export function buildColumnDefs(input: ColumnDefsInput): ColDef<GridRow>[] {
         const mark = row?.marks[key];
         const classes = [`cell-${column.type}`];
         if (column.kind === "formula") classes.push("cell-formula");
-        if (row?.errors[key]) classes.push("cell-error");
+        if (row?.errors[key]) classes.push("cell-error", ...(row.errors[key] === REFERENCE_MISSING_CODE ? ["cell-error-e4"] : []));
         else if (row && isBlank(row.cells[key])) classes.push("cell-blank");
         if (mark) classes.push(`cell-${mark.kind}`);
         if (row?.draft) classes.push("cell-draft");

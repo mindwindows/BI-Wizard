@@ -17,6 +17,10 @@ export const AUDIT_ACTIONS = [
   "user.bootstrap_admin",
   "dashboard.create",
   "dashboard.update",
+  // FU-3 기준값(04 부록 A-3, 20개)
+  "reference.create",
+  "reference_value.add",
+  "reference_value.update",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -40,9 +44,12 @@ export const ACTION_LABELS: Record<AuditAction, string> = {
   "user.bootstrap_admin": "최초 관리자 등록",
   "dashboard.create": "대시보드 연결",
   "dashboard.update": "대시보드 수정",
+  "reference.create": "기준값 항목 추가",
+  "reference_value.add": "기준값 연도 값 추가",
+  "reference_value.update": "기준값 정정",
 };
 
-export const TARGET_TYPES = ["team", "user", "dataset", "dashboard"] as const;
+export const TARGET_TYPES = ["team", "user", "dataset", "dashboard", "reference"] as const;
 export type AuditTargetType = (typeof TARGET_TYPES)[number];
 
 export const TARGET_TYPE_LABELS: Record<AuditTargetType, string> = {
@@ -50,6 +57,7 @@ export const TARGET_TYPE_LABELS: Record<AuditTargetType, string> = {
   user: "사용자",
   dataset: "데이터셋",
   dashboard: "대시보드",
+  reference: "기준값",
 };
 
 export function isAuditAction(value: unknown): value is AuditAction {

@@ -136,6 +136,9 @@ def _check_bound_value(value: Any, type_: sa.types.TypeEngine) -> None:
     elif isinstance(type_, sa.SmallInteger | sa.Integer):
         if isinstance(value, bool) or not isinstance(value, int):
             raise LiteralError("정수 상수가 아닙니다.")
+        limit = 2**15 if isinstance(type_, sa.SmallInteger) else 2**31
+        if not -limit <= value < limit:
+            raise LiteralError("정수 상수가 범위를 벗어났습니다.")
     else:
         raise LiteralError("허용되지 않은 상수 형입니다.")
 
@@ -157,6 +160,16 @@ class Literals:
 
     def integer(self, value: int) -> ColumnElement[Any]:
         """`CAST(… AS INTEGER)`(함수가 정수 인수를 요구할 때)."""
+        return self._cast(value, INTEGER)
+
+    def reference_id(self, value: int) -> ColumnElement[Any]:
+        """기준값 항목 번호 전용 정수 상수(07 §4-1): `CAST(… AS INTEGER)`, 1 이상 INTEGER 범위.
+
+        `item_id`(integer)와 `NUMERIC` 상수를 비교하면 열에 캐스트가 걸려 인덱스를 못 쓴다.
+        `bool`·0·음수·범위 밖은 `LiteralError`다.
+        """
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise LiteralError("기준값 항목 번호는 1 이상의 정수여야 합니다.")
         return self._cast(value, INTEGER)
 
     def smallint(self, value: int) -> ColumnElement[Any]:

@@ -10,6 +10,7 @@ const MAIN_LINKS = [
   { to: "/datasets", label: "데이터셋", end: false },
   { to: "/checks", label: "점검", end: false },
   { to: "/dashboards", label: "대시보드", end: false },
+  { to: "/reference-values", label: "기준값", end: false },
 ];
 
 const ADMIN_LINKS = [

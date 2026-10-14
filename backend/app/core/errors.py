@@ -57,6 +57,8 @@ class ErrorCode:
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"  # 503 DB 등 내부 의존 장애 (03b 17-1 결정 2)
     TARGET_INACTIVE = "TARGET_INACTIVE"  # 409 비활성 팀·사용자에 소속 추가·변경 (03b 17-1 결정 3)
     DATASET_ARCHIVED = "DATASET_ARCHIVED"  # 409 보관된 데이터셋에 정의·입력 쓰기 (FU-2b, 03b 30-1)
+    # 422 REF를 쓰는 수식이 있어 기준 날짜 열 해제 불가 (FU-3, 05 §3)
+    BASE_DATE_IN_USE = "BASE_DATE_IN_USE"
 
 
 class FieldErrorCode:
@@ -175,6 +177,21 @@ def dataset_archived() -> AppError:
         "보관된 데이터셋은 고칠 수 없습니다. 복구한 뒤 다시 시도하세요.",
         status_code=409,
         details={"status": "archived"},
+    )
+
+
+def base_date_in_use(column_id: int | None, display_name: str) -> AppError:
+    """`REF`를 쓰는 계산 열이 있어 기준 날짜 열을 해제할 수 없다(B4, 05 §3, 03b 32-3 C-6).
+
+    `details.column`은 정의 변경 훅의 전체 재컴파일이 처음 걸린 `REF` 계산 열이다(전부 나열하지
+    않는다).
+    """
+    return AppError(
+        ErrorCode.BASE_DATE_IN_USE,
+        "REF를 쓰는 수식이 있어 기준 날짜 열을 해제할 수 없습니다. "
+        "먼저 그 수식을 고치거나 다른 날짜 열로 바꾸세요.",
+        status_code=422,
+        details={"column": {"column_id": column_id, "display_name": display_name}},
     )
 
 

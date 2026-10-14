@@ -243,7 +243,7 @@ function DatasetSettingsForm({
           ))}
         </select>
       </Field>
-      <Field label="기준 날짜 열" htmlFor={ids.base} hint="한 기간에 한 행만 들어가도록 기간을 정하는 날짜 열입니다. 입력 열 중 날짜 열만 고를 수 있습니다.">
+      <Field label="기준 날짜 열" htmlFor={ids.base} hint="한 기간에 한 행만 들어가도록 기간을 정하는 날짜 열입니다. 입력 열 중 날짜 열만 고를 수 있습니다. REF(기준값)를 쓰는 수식이 있으면 '없음'으로 해제할 수 없습니다.">
         <select id={ids.base} value={base} disabled={readOnly} onChange={(event) => setBase(event.target.value)}>
           <option value="">없음</option>
           {dateColumns.map((column) => (

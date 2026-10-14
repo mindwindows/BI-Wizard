@@ -4,6 +4,9 @@
 - D2~D5는 그 데이터셋 팀의 정의 담당자만(관리자라도 소속 `definer`가 아니면 403, 06 §4-1). 권한
   검사는 의존성이라 본문 검증보다 먼저 실행된다.
 - D9·D10은 관리자 전용이다.
+- R6(`GET /reference-items/{id}/usage`, FU-3, 05 §2-8)은 관리자 전용이다. 저장된 수식 AST를 읽어야
+  해서 기준값 라우터(`reference`)가 아니라 이 모듈이 라우터를 가진다(04 §2-2: `reference`는
+  `formula`를 import하지 않는다).
 - 정의가 바뀌어 커밋된 뒤에만 `DatasetSyncPort`로 동기화를 요청한다(실패해도 응답은 그대로).
 """
 
@@ -24,7 +27,7 @@ from app.core.pagination import LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX, Page
 from app.core.ports import DatasetSyncPort, DefinitionHooks, run_dataset_sync_request
 from app.core.timefmt import to_kst_iso
 from app.dataset import service as dataset_service
-from app.formula import reconcile, service
+from app.formula import reconcile, service, usage
 from app.formula.schemas import (
     CheckOut,
     FormulaCheckBody,
@@ -37,6 +40,7 @@ from app.formula.schemas import (
     FormulaViewOut,
     FunctionCatalogOut,
     PreviewOut,
+    ReferenceUsageOut,
     ViewFailureOut,
     ViewsRetryBody,
     ViewsRetryOut,
@@ -262,3 +266,9 @@ def retry_views(
         if dataset_id not in still_failed:
             background.add_task(run_dataset_sync_request, sync, dataset_id)
     return ViewsRetryOut(rebuilt=rebuilt, views_failed_count=status.failed_count)
+
+
+@router.get("/reference-items/{item_id}/usage", dependencies=[Depends(require_admin)])
+def reference_usage(item_id: int, session: SessionDep) -> ReferenceUsageOut:
+    """R6: 기준값 항목을 `REF("이름")`으로 쓰는 데이터셋 목록(관리자, 정정 영향 안내용)."""
+    return ReferenceUsageOut(**usage.reference_usage(session, item_id))

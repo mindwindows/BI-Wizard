@@ -4,7 +4,7 @@ import { AUDIT_ACTIONS, ACTION_LABELS, type AuditAction } from "./types";
 
 const names = (id: number) => ({ 7: "박입력" })[id as 7];
 
-/** 04 §5-1 표의 허용 키로 만든 대표 details와 기대 요약. 행위 17개 전부. */
+/** 04 §5-1 표의 허용 키로 만든 대표 details와 기대 요약. 행위 20개 전부(FU-3 기준값 3개 포함). */
 const CASES: Array<[AuditAction, Record<string, unknown>, string]> = [
   ["dataset.create", { target_name: "월별 매출", team_id: 3, date_unit: "month", def_version: 1 }, "팀 번호 3, 날짜 단위 월, 정의 버전 1"],
   [
@@ -35,10 +35,13 @@ const CASES: Array<[AuditAction, Record<string, unknown>, string]> = [
   ["user.bootstrap_admin", { target_name: "김관리", is_admin: true }, "서버 명령으로 최초 관리자 등록"],
   ["dashboard.create", { target_name: "경영", embedded_uuid: "0f8fad5b-d9cb-469f-a165-70867728950e" }, "임베드 번호 0f8fad5b-d9cb-469f-a165-70867728950e"],
   ["dashboard.update", { target_name: "경영", changes: { is_active: { from: true, to: false } } }, "연결 해제"],
+  ["reference.create", { target_name: "전기요금_A팀", description_length: 12 }, "항목 만들기"],
+  ["reference_value.add", { target_name: "전기요금_A팀", year: 2026, value: "12.50" }, "2026년 값 추가 (12.50)"],
+  ["reference_value.update", { target_name: "전기요금_A팀", year: 2026, value_from: "12.50", value_to: "13.00" }, "2026년 값 12.50→13.00 정정"],
 ];
 
 describe("summarize", () => {
-  it("시험 사례가 행위 17개를 하나도 빠짐없이 덮는다", () => {
+  it("시험 사례가 행위 20개를 하나도 빠짐없이 덮는다", () => {
     expect(CASES.map(([action]) => action).sort()).toEqual([...AUDIT_ACTIONS].sort());
     for (const action of AUDIT_ACTIONS) expect(ACTION_LABELS[action]).toBeTruthy();
   });
@@ -51,6 +54,23 @@ describe("summarize", () => {
     expect(summarize("dataset.archive", { target_name: "비밀 이름", team_id: 3, rows: ["행값 9"], def_version: 4 })).toBe(`데이터셋 보관 ${PARTIAL}`);
     expect(summarize("dataset.restore", { target_name: "비밀 이름", team_id: "x" })).toBe("데이터셋 복구");
     expect(summarize("dataset.restore", { target_name: "비밀 이름", team_id: 3, formula: "=A+B" })).not.toContain("=A+B");
+  });
+
+  it("기준값 요약: 정정은 이전→이후 값, 허용 키 밖의 값은 출력하지 않는다", () => {
+    expect(summarize("reference_value.update", { year: 2025, value_from: "1", value_to: "2" })).toBe("2025년 값 1→2 정정");
+    const out = summarize("reference_value.update", { target_name: "x", year: 2026, value_from: "1", value_to: "2", rows: ["행값-9"], formula: "=A+B" });
+    expect(out).toBe(`2026년 값 1→2 정정 ${PARTIAL}`);
+    expect(out).not.toMatch(/행값|=A\+B/);
+    expect(summarize("reference.create", { target_name: "x", description: "설명 원문은 기록하지 않는다" })).toBe(`항목 만들기 ${PARTIAL}`);
+  });
+
+  it("기준값 요약: 숫자 모양이 아닌 값·범위 밖 연도는 값 없이 안전하게 줄인다", () => {
+    expect(summarize("reference_value.update", { year: 2026, value_from: "비밀", value_to: "2" })).toBe("2026년 값 정정");
+    expect(summarize("reference_value.update", { year: 2026, value_from: 1, value_to: "2" })).toBe("2026년 값 정정");
+    expect(summarize("reference_value.add", { year: 2026, value: "x".repeat(60) })).toBe("2026년 값 추가");
+    expect(summarize("reference_value.add", { year: 99999, value: "1" })).toBe(OMITTED);
+    expect(summarize("reference_value.update", { year: "2026", value_from: "1", value_to: "2" })).toBe(OMITTED);
+    expect(summarize("reference_value.update", null)).toBe(OMITTED);
   });
 
   it("대시보드 다시 연결과 이름 변경", () => {

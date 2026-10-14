@@ -40,6 +40,21 @@ def load_formulas(session: Session, dataset_id: int) -> dict[int, StoredFormula]
     }
 
 
+def reference_candidates(session: Session) -> list[tuple[int, int, Any]]:
+    """`REF`가 들어 있을 수 있는 저장 수식: (데이터셋 번호, 열 번호, AST JSON).
+
+    사전 거름은 보관용 원문에 `REF`가 든 행뿐이다(대소문자 무시, 정확한 판정은 AST로 한다). 읽기
+    전용 질의 하나이며 새 표·열이 없다(05 §2-8 R6 방안 (a)).
+    """
+    stmt = (
+        select(dataset_columns.c.dataset_id, formulas.c.column_id, formulas.c.ast)
+        .join(dataset_columns, dataset_columns.c.id == formulas.c.column_id)
+        .where(dataset_columns.c.kind == "formula", formulas.c.expression.icontains("REF"))
+        .order_by(dataset_columns.c.dataset_id, formulas.c.column_id)
+    )
+    return [(int(r.dataset_id), int(r.column_id), r.ast) for r in session.execute(stmt)]
+
+
 def load_deps(session: Session, dataset_id: int) -> dict[int, tuple[int, ...]]:
     """데이터셋의 의존(계산 열 -> 직접 읽는 열 번호, 오름차순)."""
     stmt = (

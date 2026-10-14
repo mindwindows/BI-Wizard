@@ -53,6 +53,11 @@ describe("messages", () => {
   it("셀 오류 문구는 D1 우선, 없으면 기본 문구", () => {
     expect(cellErrorText("E2", { E2: "서버" })).toBe("서버");
     expect(cellErrorText("E2", undefined)).toBe(DEFAULT_CELL_ERRORS.E2);
+    // FU-3: E4 기본 문구(07 §3-1)와 서버 문구 우선
+    expect(cellErrorText("E4", undefined)).toBe(
+      "이 행의 기준 날짜가 속한 연도의 기준값이 등록되어 있지 않아 계산하지 못했습니다. 기준값 화면에서 그 연도 값을 추가하세요.",
+    );
+    expect(cellErrorText("E4", { E4: "서버 E4" })).toBe("서버 E4");
     expect(cellErrorText("E9", {})).toBe("계산할 수 없는 값입니다.");
   });
 

@@ -8,6 +8,7 @@ import { DashboardAdminPage } from "./features/dashboard/DashboardAdminPage";
 import { DashboardsPage } from "./features/dashboard/DashboardsPage";
 import { DatasetCreatePage } from "./features/dataset/DatasetCreatePage";
 import { DatasetListPage } from "./features/dataset/DatasetListPage";
+import { ReferencePage } from "./features/reference/ReferencePage";
 import { AdminStatusPage } from "./features/status/AdminStatusPage";
 import { WorkspacePage } from "./features/dataset/workspace/WorkspacePage";
 import { Home } from "./pages/Home";
@@ -35,6 +36,7 @@ export const routes: RouteObject[] = [
       { path: "datasets/new", element: <DatasetCreatePage /> },
       { path: "datasets/:datasetId", element: <WorkspacePage /> },
       { path: "checks", element: <ChecksPage /> },
+      { path: "reference-values", element: <ReferencePage /> },
       { path: "admin/permissions", element: <PermissionsPage /> },
       { path: "dashboards", element: <DashboardsPage /> },
       { path: "admin/dashboards", element: <DashboardAdminPage /> },

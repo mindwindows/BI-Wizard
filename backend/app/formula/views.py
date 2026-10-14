@@ -27,8 +27,10 @@ from sqlalchemy.sql.expression import TableClause
 from app.dataset.service import DefinitionView
 from app.db_metadata import DYNAMIC_SCHEMA
 from app.ddl import column_name, dataset_table_name, error_column_name, error_view_name, view_name
+from app.ddl.reference_lookup import ReferenceLookup
 from app.formula.api import CompileResult, ConstProbe, compile_formula
 from app.formula.columns import ColumnInfo
+from app.formula.context import ReferenceEnv
 from app.formula.errors import FormulaIssue
 from app.formula.literals import LITERALS, render_literal_sql
 from app.formula.nodes import ast_from_json
@@ -68,6 +70,9 @@ class ViewPlan:
     def_hash: str
     echo_dv: tuple[tuple[sa.Select, tuple[str, ...]], ...]
     echo_de: tuple[tuple[sa.Select, tuple[str, ...]], ...]
+    # `dv_`·`de_`의 `REF` 서브쿼리가 쓸 수 있는 (항목 번호, 기준 날짜 열 번호). 뷰 게이트가 SQL
+    # 모양과 독립적으로 대조한다(06 §3-4).
+    references: tuple[ReferenceLookup, ...] = ()
 
 
 def source_table(defn: DefinitionView) -> TableClause:
@@ -118,6 +123,8 @@ def compile_all(
     infos: Sequence[ColumnInfo],
     sources: Mapping[int, Any],
     probe: ConstProbe | None,
+    *,
+    env: ReferenceEnv,
 ) -> dict[int, CompileResult]:
     """모든 계산 열을 저장된 AST에서 다시 컴파일한다(열 이름·태그·참조한 수식의 변화를 반영).
 
@@ -136,7 +143,7 @@ def compile_all(
             )
         text = render_text(info.formula, infos)
         result = compile_formula(
-            text, infos, column_id=info.id, source_columns=sources, const_probe=probe
+            text, infos, column_id=info.id, source_columns=sources, const_probe=probe, env=env
         )
         if not result.ok:
             raise FormulaCompileFailure(info.id, info.name, result.issues)
@@ -198,9 +205,14 @@ def build_plan(
         ensure_ascii=False,
         separators=(",", ":"),
     )
+    references = sorted(
+        {use for result in results.values() for use in result.reference_uses},
+        key=lambda r: (r.item_id, r.base_column_id),
+    )
     return ViewPlan(
         dataset_id=defn.dataset_id,
         results=results,
+        references=tuple(references),
         dv=dv,
         de=de,
         def_hash=hashlib.sha256(payload.encode("utf-8")).hexdigest(),

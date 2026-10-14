@@ -1,15 +1,19 @@
 import type { Column } from "../dataset/types";
+import type { ReferenceItem } from "../reference/types";
 import type { FormulaErrorItem, FunctionInfo } from "./types";
 
-/** 자동완성이 열려야 하는 자리: 함수 이름 / `[` 안의 열 이름 / SUMTAG("…") 안의 태그. */
+/** 자동완성이 열려야 하는 자리: 함수 이름 / `[` 안의 열 이름 / SUMTAG("…") 안의 태그 / REF("…") 안의 기준값 항목 이름(FU-3). */
 export interface CompletionContext {
-  kind: "function" | "column" | "tag";
+  kind: "function" | "column" | "tag" | "reference";
   /** 바꿀 범위 [from, to) */
   from: number;
   to: number;
   /** 사용자가 지금까지 친 글자 */
   query: string;
 }
+
+/** 글자 상수 안의 `""`(따옴표 하나)를 풀어 쓴다. */
+const unquote = (raw: string) => raw.replace(/""/g, '"');
 
 const IDENT_TAIL = /[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -44,7 +48,13 @@ export function completionContext(textValue: string, caret: number): CompletionC
     return { kind: "column", from: bracketStart, to: end + (textValue[end] === "]" ? 1 : 0), query: textValue.slice(bracketStart + 1, end) };
   }
   if (inString) {
-    if (!/SUMTAG\s*\(\s*$/i.test(textValue.slice(0, stringStart))) return null;
+    const before = textValue.slice(0, stringStart);
+    const to = end + (textValue[end] === '"' ? 1 : 0);
+    // `REF("` 만 기준값이다. `SUMREF(`·`MYREF(` 같은 다른 이름의 끝은 해당 없음(앞 글자가 식별자 글자가 아니어야 한다).
+    if (/(^|[^A-Za-z0-9_])REF\s*\(\s*$/i.test(before)) {
+      return { kind: "reference", from: stringStart, to, query: unquote(textValue.slice(stringStart + 1, end)) };
+    }
+    if (!/SUMTAG\s*\(\s*$/i.test(before)) return null;
     return { kind: "tag", from: stringStart, to: end + (textValue[end] === '"' ? 1 : 0), query: textValue.slice(stringStart + 1, end) };
   }
   const match = IDENT_TAIL.exec(textValue.slice(0, end));
@@ -56,7 +66,7 @@ export function completionContext(textValue: string, caret: number): CompletionC
 }
 
 export interface Suggestion {
-  kind: "function" | "column" | "tag";
+  kind: "function" | "column" | "tag" | "reference";
   /** 목록에 보이는 이름 */
   label: string;
   /** 보조 설명(함수 모양, 열 종류) */
@@ -100,8 +110,19 @@ export function suggestTags(columns: Column[], query: string): Suggestion[] {
   return rank(tags, (t) => t, query).map((tag) => ({ kind: "tag", label: tag, detail: "구분 태그", insert: tag }));
 }
 
-export function suggestionsFor(context: CompletionContext | null, functions: FunctionInfo[], columns: Column[]): Suggestion[] {
+/** 기준값 항목 이름 후보(05 R1). 설명이 있으면 보조 설명으로 보인다. 이름은 불변이라 그대로 `"이름"`으로 넣는다. */
+export function suggestReferences(items: ReferenceItem[], query: string): Suggestion[] {
+  return rank(items, (item) => item.name, query).map((item) => ({
+    kind: "reference",
+    label: item.name,
+    detail: item.description ? item.description : "기준값",
+    insert: item.name,
+  }));
+}
+
+export function suggestionsFor(context: CompletionContext | null, functions: FunctionInfo[], columns: Column[], references: ReferenceItem[] = []): Suggestion[] {
   if (!context) return [];
+  if (context.kind === "reference") return suggestReferences(references, context.query);
   if (context.kind === "function") return context.query === "" ? [] : suggestFunctions(functions, context.query);
   if (context.kind === "column") return suggestColumns(columns, context.query);
   return suggestTags(columns, context.query);
@@ -125,7 +146,8 @@ export function applySuggestion(textValue: string, context: CompletionContext, s
     return hasParen ? { ...edited, caret: edited.caret + 1 } : edited;
   }
   if (suggestion.kind === "column") return replaceRange(textValue, context.from, context.to, `[${suggestion.insert}]`);
-  return replaceRange(textValue, context.from, context.to, `"${suggestion.insert}"`);
+  // 글자 상수 안의 `"`는 `""`로 쓴다(07 §4-2). 기준값 이름에는 `"`가 없지만 안전하게 처리한다.
+  return replaceRange(textValue, context.from, context.to, `"${suggestion.insert.replace(/"/g, '""')}"`);
 }
 
 /**

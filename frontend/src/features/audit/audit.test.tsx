@@ -99,6 +99,33 @@ describe("S10 목록", () => {
     expect(screen.getByRole("navigation", { name: "관리 메뉴" })).toBeTruthy();
   });
 
+  it("기준값 행(FU-3): 대상 종류 '기준값', 행위 이름, 정정의 이전→이후 요약", async () => {
+    open({
+      "GET /audit-logs": () =>
+        pageOf([
+          item(3, { action: "reference_value.update", target_type: "reference", target_id: 4, details: { target_name: "전기요금_A팀", year: 2026, value_from: "12.50", value_to: "13.00" } }),
+          item(2, { action: "reference_value.add", target_type: "reference", target_id: 4, details: { target_name: "전기요금_A팀", year: 2026, value: "12.50" } }),
+          item(1, { action: "reference.create", target_type: "reference", target_id: 4, details: { target_name: "전기요금_A팀", description_length: 0 } }),
+        ]),
+    });
+    await ready();
+    await screen.findByRole("table", { name: "감사 기록" });
+    expect(rows().map((r) => within(r).getAllByRole("cell").slice(2).map((c) => c.textContent))).toEqual([
+      ["기준값 정정", "기준값 #4 전기요금_A팀", "2026년 값 12.50→13.00 정정"],
+      ["기준값 연도 값 추가", "기준값 #4 전기요금_A팀", "2026년 값 추가 (12.50)"],
+      ["기준값 항목 추가", "기준값 #4 전기요금_A팀", "항목 만들기"],
+    ]);
+  });
+
+  it("대상 종류 '기준값'과 행위 '기준값 정정'으로 거른다(target_type=reference, action=reference_value.update)", async () => {
+    const { calls } = open({ "GET /audit-logs": () => pageOf([]) });
+    await ready();
+    fireEvent.change(field("대상 종류"), { target: { value: "reference" } });
+    fireEvent.change(field("행위"), { target: { value: "reference_value.update" } });
+    fireEvent.click(screen.getByRole("button", { name: "조회" }));
+    await waitFor(() => expect(lastQuery(calls)).toMatchObject({ target_type: "reference", action: "reference_value.update" }));
+  });
+
   it("행위자 표시: actor가 null이면 '서버 명령', actor가 있는데 이름이 비면 '사용자 #번호'", async () => {
     open({
       "GET /audit-logs": () =>
@@ -173,13 +200,13 @@ describe("S10 필터", () => {
     expect(lastQuery(calls)).toEqual({ from: "2026-10-01", to: "2026-10-13", actor_user_id: "7", target_type: "dataset", target_id: "12", action: "column.add", limit: "50", offset: "0" });
   });
 
-  it("행위자·행위·대상 종류 선택지는 한국어이고 행위는 17개다", async () => {
+  it("행위자·행위·대상 종류 선택지는 한국어이고 행위는 20개다", async () => {
     open({ "GET /audit-logs": () => pageOf([]) });
     await ready();
     const actions = [...(field("행위") as HTMLSelectElement).options].map((o) => o.textContent);
-    expect(actions).toHaveLength(18);
+    expect(actions).toHaveLength(21);
     expect(actions.slice(0, 5)).toEqual(["전체", "데이터셋 만들기", "데이터셋 설정 변경", "데이터셋 보관", "데이터셋 복구"]);
-    expect([...(field("대상 종류") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["전체", "팀", "사용자", "데이터셋", "대시보드"]);
+    expect([...(field("대상 종류") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["전체", "팀", "사용자", "데이터셋", "대시보드", "기준값"]);
     expect([...(field("행위자") as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["전체", "관리자 김", "박입력", "이퇴사 (사용 중지)"]);
   });
 

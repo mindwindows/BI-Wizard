@@ -303,6 +303,11 @@ def list_formula_columns(session: Session) -> list[RowMapping]:
     return repo.list_formula_columns(session)
 
 
+def list_dataset_briefs(session: Session, dataset_ids: list[int]) -> list[dict[str, Any]]:
+    """정정 영향 조회(R6)용: 번호 목록의 데이터셋 요약(이름·팀·상태, 이름순). 활성·보관 모두."""
+    return [dict(r) for r in repo.list_dataset_briefs(session, dataset_ids)]
+
+
 def get_column_dict(session: Session, dataset_id: int, column_id: int) -> dict[str, Any]:
     """응답용 열 한 개. 없으면 404."""
     column = repo.get_column(session, dataset_id, column_id)

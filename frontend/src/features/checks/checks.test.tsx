@@ -50,6 +50,29 @@ describe("S5 점검", () => {
     expect(within(rows[0]).getByRole("link", { name: "월별 매출" }).getAttribute("href")).toBe(`${BASE}/datasets/7`);
   });
 
+  it("E4(기준값 없음) 칸은 이유와 기준값 화면 링크를 보이고, 화면 머리에 E4 안내가 있다 (FU-3)", async () => {
+    await open("/checks?dataset=7&column=5", {
+      "GET /checks/formula-errors": () => json(200, { items: SUMMARIES, total: 2, limit: 50, offset: 0 }),
+      "GET /datasets/7/formula-errors": () =>
+        json(200, { items: [{ row_id: 9, period: "2027-01-01", column_id: 5, error: "E4", message: "이 행의 기준 날짜가 속한 연도의 기준값이 등록되어 있지 않아 계산하지 못했습니다." }, ...CELLS], total: 3, limit: 50, offset: 0 }),
+    });
+    const detail = await screen.findByRole("table", { name: "이익률 오류 칸 목록" });
+    const rows = within(detail).getAllByRole("row").slice(1);
+    expect(within(rows[0]).getAllByRole("cell").slice(0, 3).map((c) => c.textContent)).toEqual(["2027-01-01", "#9", "E4"]);
+    expect(within(rows[0]).getByRole("link", { name: "기준값 화면 열기" }).getAttribute("href")).toBe(`${BASE}/reference-values`);
+    expect(within(rows[1]).queryByRole("link", { name: "기준값 화면 열기" })).toBeNull(); // E1에는 없다
+    expect(screen.getByTestId("checks-e4-help").textContent).toContain("E4(기준값 없음)");
+  });
+
+  it("E4 이유 문구가 서버에서 비어 있으면 기본 E4 문구를 쓴다", async () => {
+    await open("/checks?dataset=7&column=5", {
+      "GET /checks/formula-errors": () => json(200, { items: SUMMARIES, total: 2, limit: 50, offset: 0 }),
+      "GET /datasets/7/formula-errors": () => json(200, { items: [{ row_id: 9, period: null, column_id: 5, error: "E4", message: "" }], total: 1, limit: 50, offset: 0 }),
+    });
+    const detail = await screen.findByRole("table", { name: "이익률 오류 칸 목록" });
+    expect(within(detail).getAllByRole("row")[1].textContent).toContain("기준값이 등록되어 있지 않아");
+  });
+
   it("목록 응답이 배열이어도 받는다", async () => {
     await open("/checks", { "GET /checks/formula-errors": () => json(200, SUMMARIES) });
     expect(await screen.findByRole("table", { name: "계산 오류 칸이 있는 열" })).toBeTruthy();

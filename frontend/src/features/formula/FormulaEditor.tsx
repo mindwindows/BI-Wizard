@@ -4,6 +4,8 @@ import { ErrorNotice } from "../../components";
 import { truncationText } from "../../errors";
 import { validateColumnName, validateTag } from "../dataset/rules";
 import { COLUMN_NAME_MAX, TAG_MAX, type Column } from "../dataset/types";
+import { listReferenceItems } from "../reference/api";
+import type { ReferenceItem } from "../reference/types";
 import { checkFormula, previewFormula } from "./api";
 import {
   applySuggestion,
@@ -16,7 +18,7 @@ import {
   type Suggestion,
 } from "./autocomplete";
 import { useFunctionCatalog } from "./catalog";
-import { FORMULA_RULES, cellErrorText, invalidErrorsOf, isCode, previewCell, resultTypeLabel, retryAfterOf } from "./messages";
+import { FORMULA_RULES, REFERENCE_MISSING_CODE, cellErrorText, invalidErrorsOf, isCode, previewCell, resultTypeLabel, retryAfterOf } from "./messages";
 import type { CheckResult, FormulaErrorItem, PreviewResult } from "./types";
 
 /** 저장 요청. expected_version은 작업공간이 붙인다. */
@@ -48,6 +50,10 @@ export interface FormulaEditorProps {
 export const ARCHIVED_SAVE_TEXT = "보관된 데이터셋이라 저장할 수 없습니다. 검사와 미리보기는 쓸 수 있습니다. 복구한 뒤 저장해 주세요.";
 export const DEFAULT_CHECK_DELAY_MS = 400;
 export const DEFAULT_PREVIEW_DELAY_MS = 600;
+
+/** 기준값 항목(R1) 읽기 상태. null = 아직 읽지 않았거나 읽는 중(`REF("` 안에 들어갔을 때만 읽는다). */
+type ReferenceLoad = { status: "ready"; items: ReferenceItem[]; total: number } | { status: "error" } | null;
+const REFERENCE_LIMIT = 200;
 
 type CheckState = { expr: string; result?: CheckResult; error?: unknown } | null;
 type PreviewStatus =
@@ -172,7 +178,19 @@ export function FormulaEditor(props: FormulaEditorProps) {
 
   // ---- 자동완성 --------------------------------------------------------------------------------------------------
   const context = useMemo(() => completionContext(expression, caret), [expression, caret]);
-  const suggestions = useMemo(() => suggestionsFor(context, catalog?.functions ?? [], refColumns), [context, catalog, refColumns]);
+  const wantsReferences = context?.kind === "reference";
+  const [referenceLoad, setReferenceLoad] = useState<ReferenceLoad>(null);
+  const referenceItems = useMemo(() => (referenceLoad?.status === "ready" ? referenceLoad.items : []), [referenceLoad]);
+  // 기준값 항목은 커서가 REF(" 안에 처음 들어갔을 때 한 번 읽는다(수식에 REF가 없으면 R1을 부르지 않는다). 실패하면 다시 읽기 버튼으로만 재시도한다.
+  useEffect(() => {
+    if (!wantsReferences || referenceLoad !== null) return;
+    const controller = new AbortController();
+    listReferenceItems({ limit: REFERENCE_LIMIT, offset: 0 }, controller.signal)
+      .then((page) => !controller.signal.aborted && setReferenceLoad({ status: "ready", items: page.items, total: page.total }))
+      .catch(() => !controller.signal.aborted && setReferenceLoad({ status: "error" }));
+    return () => controller.abort();
+  }, [wantsReferences, referenceLoad]);
+  const suggestions = useMemo(() => suggestionsFor(context, catalog?.functions ?? [], refColumns, referenceItems), [context, catalog, refColumns, referenceItems]);
   const contextKey = context ? `${context.kind}:${context.from}:${context.query}` : "";
   const open = suggestions.length > 0 && dismissedKey !== contextKey;
   const activeIndex = activeState.key === contextKey ? Math.min(activeState.index, suggestions.length - 1) : 0;
@@ -380,6 +398,21 @@ export function FormulaEditor(props: FormulaEditorProps) {
           <p className="muted suggest-more" data-testid="suggest-more">
             후보 {suggestions.length}개 — 목록을 스크롤하거나 ↑↓로 끝까지 고르고, 계속 입력해 좁힐 수 있습니다.
           </p>
+        ) : null}
+        {wantsReferences && dismissedKey !== contextKey ? (
+          <div className="muted hint" data-testid="reference-status">
+            {referenceLoad === null ? "기준값 항목을 불러오는 중…" : null}
+            {referenceLoad?.status === "error" ? (
+              <>
+                기준값 항목을 불러오지 못했습니다. 이름을 직접 입력해도 됩니다.{" "}
+                <button type="button" className="link-button" onClick={() => setReferenceLoad(null)}>
+                  다시 불러오기
+                </button>
+              </>
+            ) : null}
+            {referenceLoad?.status === "ready" && suggestions.length === 0 ? (referenceLoad.items.length === 0 ? "등록된 기준값 항목이 없습니다. 기준값 화면에서 먼저 항목을 추가해 주세요." : "일치하는 기준값 항목이 없습니다. 이름을 확인해 주세요.") : null}
+            {referenceLoad?.status === "ready" && referenceLoad.total > referenceLoad.items.length ? ` 항목이 많아 앞의 ${referenceLoad.items.length}개만 후보로 보입니다(전체 ${referenceLoad.total}개). 없는 이름은 직접 입력해 주세요.` : null}
+          </div>
         ) : null}
         {activeSuggestion?.fn ? (
           <p className="muted hint" data-testid="suggest-help">
@@ -637,7 +670,7 @@ function PreviewPanel({ trimmedEmpty, status, shown, stale, cellErrors, onRetry 
                       <td>{row.period ?? ""}</td>
                       <td>#{row.row_id}</td>
                       <td
-                        className={`preview-${cell.kind}`}
+                        className={`preview-${cell.kind}${cell.kind === "error" && cell.code === REFERENCE_MISSING_CODE ? " preview-error-e4" : ""}`}
                         title={cell.kind === "error" ? `계산 오류(${cell.code}): ${cellErrorText(cell.code, cellErrors)}` : cell.kind === "empty" ? "빈 값: 계산에 쓴 칸 중 비어 있는 칸이 있습니다." : cell.kind === "value" && cell.truncated ? `전체 값: ${cell.full}` : undefined}
                       >
                         {cell.kind === "error" ? (

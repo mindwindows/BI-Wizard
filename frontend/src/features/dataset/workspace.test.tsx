@@ -391,6 +391,22 @@ describe("Inspector 데이터셋 설정 (B4)", () => {
     expect(writes(calls)[0].body).toEqual({ expected_version: 3, base_date_column_id: null });
   });
 
+  it("REF를 쓰는 수식이 있어 해제가 422 BASE_DATE_IN_USE로 막히면 쉬운 안내와 열 이름을 보이고 설정은 그대로다 (FU-3)", async () => {
+    const { calls, fake } = await openWorkspace(makeDetail({ columns: SALES, base_date_column_id: 1 }));
+    fake.failNext(() => apiError(422, "BASE_DATE_IN_USE", "서버 문구", { column: { column_id: 5, display_name: "합계" } }));
+    openSettings();
+    expect(within(settings()).getByText(/REF\(기준값\)를 쓰는 수식이 있으면/)).toBeTruthy();
+    type(settings(), "기준 날짜 열", "");
+    fireEvent.click(within(settings()).getByRole("button", { name: "저장" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("REF를 쓰는 수식이 있어 기준 날짜 열을 해제할 수 없습니다. 먼저 그 수식을 고치거나 다른 날짜 열로 바꾸세요.");
+    expect(alert.textContent).toContain("'합계'");
+    expect(writes(calls)).toHaveLength(1);
+    expect(writes(calls)[0].body).toEqual({ expected_version: 3, base_date_column_id: null });
+    // 정의 버전이 바뀐 것이 아니므로 다시 읽지 않고, 선택은 그대로 둔다(사용자가 다른 날짜 열로 바꾸거나 취소할 수 있다)
+    expect((within(settings()).getByLabelText("기준 날짜 열") as HTMLSelectElement).value).toBe("");
+  });
+
   it("날짜 단위와 이름 변경은 바뀐 필드만 보낸다", async () => {
     const { calls } = await openWorkspace(detail());
     openSettings();
