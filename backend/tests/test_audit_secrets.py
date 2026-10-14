@@ -22,7 +22,8 @@ LOGIN_SECRET = "login-leak-9931"
 CELL_SECRETS = ("12345678", "23456789", "셀비밀값")
 FORMULA_SECRETS = ("7919.5", "424242", "수식상수비밀")
 RULE_SECRETS = ("9876543", "98765432", "옵션비밀1", "옵션비밀2", "규칙길이비밀")
-ALL_SECRETS = (LOGIN_SECRET, *CELL_SECRETS, *FORMULA_SECRETS, *RULE_SECRETS)
+DESCRIPTION_SECRET = "항목설명비밀문구"  # 기준값 항목 설명 원문은 길이만 기록한다(04 §5-1)
+ALL_SECRETS = (LOGIN_SECRET, *CELL_SECRETS, *FORMULA_SECRETS, *RULE_SECRETS, DESCRIPTION_SECRET)
 
 
 def walk(value: Any):
@@ -116,6 +117,25 @@ def run_workload(ctx: Ctx) -> None:
     ).json()
     call("admin", "PATCH", f"/api/dashboards/{dash['id']}", json={"is_active": False})
     call("admin", "POST", f"/api/dashboards/{dash['id']}/guest-token")
+    # FU-3 기준값: 항목 설명 원문은 감사에 남지 않고 연도 값(전역 설정값)만 남는다
+    item = call(
+        "admin",
+        "POST",
+        "/api/reference-items",
+        json={"name": "비밀 없는 항목", "description": DESCRIPTION_SECRET},
+    ).json()
+    value = call(
+        "admin",
+        "POST",
+        f"/api/reference-items/{item['id']}/values",
+        json={"year": 2026, "value": "3"},
+    ).json()
+    call(
+        "admin",
+        "PATCH",
+        f"/api/reference-items/{item['id']}/values/{value['id']}",
+        json={"value": "4"},
+    )
     call("admin", "POST", "/api/teams", json={"code": "team_new", "name": "새 팀"})
     call("admin", "PATCH", f"/api/users/{ctx.uid('viewer')}", json={"display_name": "새 이름"})
     # 서버 명령도 로그인 ID를 남기지 않는다
@@ -139,7 +159,7 @@ def test_no_secret_row_value_formula_rule_or_login_id_reaches_the_audit_log(ctx:
     run_workload(ctx)
     rows = audit_rows(ctx.db)
     actions = {r["action"] for r in rows}
-    # 이 작업이 17개 행위 모두 일으켰는지 확인한다(빈 검사가 되지 않게)
+    # 이 작업이 20개 행위 모두 일으켰는지 확인한다(빈 검사가 되지 않게)
     assert actions == set(ACTIONS), set(ACTIONS) - actions
     text = json.dumps(rows, ensure_ascii=False, default=str)
     for secret in ALL_SECRETS:

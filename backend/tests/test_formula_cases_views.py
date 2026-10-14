@@ -32,8 +32,9 @@ from tests.formula_api_helpers import add_column, err, make_dataset, post_formul
 from tests.formula_runner import values_equal
 
 REGISTRY = get_default_registry()
+# 환경 함수(`REF`)의 사례는 실제 기준값 표가 필요해 `test_reference_pg.py`가 돌린다.
 ALL_CASES: list[tuple[str, Case]] = [
-    (spec.name, case) for spec in REGISTRY.specs() for case in spec.cases
+    (spec.name, case) for spec in REGISTRY.specs() if spec.precheck is None for case in spec.cases
 ]
 TOLERANCE = Decimal("1E-9")
 
@@ -66,7 +67,9 @@ def test_cases_cover_the_dictionary_and_include_rejections_errors_and_values():
     kinds = {case.expect for _, case in ALL_CASES}
     assert kinds == {OK, ERROR, REJECT}
     assert len(ALL_CASES) >= 200
-    assert {name for name, _ in ALL_CASES} == {spec.name for spec in REGISTRY.specs()}
+    assert {name for name, _ in ALL_CASES} == {
+        spec.name for spec in REGISTRY.specs() if spec.precheck is None
+    }
 
 
 def test_every_non_rejected_case_gives_the_expected_value_or_error_through_real_views(db):

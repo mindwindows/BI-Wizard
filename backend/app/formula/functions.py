@@ -1147,7 +1147,23 @@ REF = FunctionSpec(
             base="기준일",
         ),
         reject('REF("전기요금")', "BASE_DATE_REQUIRED", refs=_REF_VALUES),
-        reject("REF([기준일])", "CONST_REQUIRED", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"),
+        reject(
+            "REF([이름열])",
+            "CONST_REQUIRED",
+            cols={**_REF_COLS, "이름열": "text"},
+            refs=_REF_VALUES,
+            base="기준일",
+            note="열 값은 직접 쓴 글자가 아니다",
+        ),
+        reject(
+            'REF("전기" & "요금")',
+            "CONST_REQUIRED",
+            cols=_REF_COLS,
+            refs=_REF_VALUES,
+            base="기준일",
+            note="계산식은 직접 쓴 글자가 아니다",
+        ),
+        reject("REF(1)", "ARG_TYPE", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"),
         reject("REF()", "ARG_COUNT", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"),
         reject(
             'REF("전기요금", 2026)', "ARG_COUNT", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"

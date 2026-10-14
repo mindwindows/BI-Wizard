@@ -33,6 +33,7 @@ from app.formula import LITERALS, compile_formula, get_default_registry, repo
 from app.formula.errors import CELL_ERROR_BY_NUMBER, CONSTANT_ERROR_REASONS_KO
 from app.formula.hook import apply_definition, make_probe
 from app.formula.literals import LITERALS as _LITERALS  # noqa: F401
+from app.formula.refenv import load_env
 from app.formula.views import build_column_infos, compile_all, source_columns, source_table
 from tests.conftest import Db
 from tests.formula_matrix import (
@@ -65,7 +66,11 @@ def db(pg_app_engine, pg_owner_engine, clean_pg):
 def test_matrix_is_generated_from_the_dictionary_for_every_entry():
     registry = get_default_registry()
     generated = {g.spec_name for g in all_groups()}
-    assert generated == {spec.name for spec in registry.specs()}, "사전 항목이 행렬에 빠졌다"
+    # 환경 함수(`REF`)는 기본 행렬 밖이다: 기준값 표·기준 날짜 열이 필요해 전용 묶음이 맡는다
+    # (`reference_bundle`, `test_reference_differential.py`).
+    plain = {spec.name for spec in registry.specs() if spec.precheck is None}
+    assert generated == plain, "사전 항목이 행렬에 빠졌다"
+    assert {spec.name for spec in registry.specs() if spec.precheck is not None} == {"REF"}
 
 
 def test_matrix_covers_all_value_variants_and_sources_for_two_argument_entries():
@@ -246,7 +251,9 @@ class Harness:
             stored = repo.load_formulas(session, dataset_id)
             infos = build_column_infos(defn, stored)
             ds = source_table(defn)
-            results = compile_all(infos, source_columns(defn, ds), make_probe(session))
+            results = compile_all(
+                infos, source_columns(defn, ds), make_probe(session), env=load_env(session, defn)
+            )
             ids = [cid for cid, _ in accepted]
             texts = dict(accepted)
             dv = sa.table(

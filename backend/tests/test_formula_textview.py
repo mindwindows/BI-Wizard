@@ -9,6 +9,7 @@ import pytest
 
 from app.formula import (
     ColumnInfo,
+    ReferenceEnv,
     ast_from_json,
     compile_formula,
     get_default_registry,
@@ -17,11 +18,11 @@ from app.formula import (
 from app.formula.cases import REJECT
 from app.formula.nodes import Call, Col, Num, ast_to_json
 from tests.formula_helpers import standard_columns
-from tests.formula_runner import case_columns
+from tests.formula_runner import case_columns, case_env
 
 
-def ast_of(expression, columns):
-    result = compile_formula(expression, columns, build_sql=False)
+def ast_of(expression, columns, env=None):
+    result = compile_formula(expression, columns, build_sql=False, env=env or ReferenceEnv())
     assert result.ok, [i.as_dict() for i in result.issues]
     return result.ast
 
@@ -75,9 +76,10 @@ def test_text_reads_back_to_the_same_ast_for_every_valid_case_expression():
             if case.expect == REJECT:
                 continue
             columns = case_columns(case)
-            ast = ast_of(case.expression, columns)
+            env = case_env(case, columns)
+            ast = ast_of(case.expression, columns, env)
             text = render_text(ast, columns)
-            again = ast_of(text, columns)
+            again = ast_of(text, columns, env)
             assert again == ast, (case.expression, text)
             assert ast_to_json(again) == ast_to_json(ast)
             assert render_text(again, columns) == text  # 정규 형태는 고정점

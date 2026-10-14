@@ -618,6 +618,9 @@ def migration_env(pg_env, pg_owner_engine, clean_pg):
     config = Config(str(BACKEND / "alembic.ini"))
     with pytest.MonkeyPatch.context() as mp:
         pg_env.apply(mp)
+        # 0008의 downgrade 시험은 0008이 맨 위일 때의 동작이다(0009는 test_reference_migration_pg).
+        # 시험 DB는 비어 있어(`clean_pg`) 0009 downgrade의 사전 점검을 통과한다.
+        command.downgrade(config, "0008")
         yield config
         command.upgrade(config, "head")  # 어떤 결과로 끝나도 head로 되돌려 다음 시험이 쓴다
     get_settings.cache_clear()
@@ -684,15 +687,15 @@ def test_downgrade_succeeds_without_such_rows_and_restores_the_old_checks(
 ):
     seed_dataset(pg_owner_engine)
     seed_audit(pg_owner_engine, "dataset.create")  # 옛 15개 행위의 감사 행은 있어도 된다
-    at_head = take_snapshot(pg_owner_engine)
+    at_0008 = take_snapshot(pg_owner_engine)
     command.downgrade(migration_env, "0007")
     assert _revision(pg_owner_engine) == "0007"
     at_0007 = take_snapshot(pg_owner_engine)
     # GRANT는 바뀌지 않는다: 권한(표·열·기본 권한)과 표 구조는 같고 CHECK 정의만 다르다
     for key in ("roles", "memberships", "schemas", "relations", "column_acl", "default_acl"):
-        assert at_0007[key] == at_head[key], key
+        assert at_0007[key] == at_0008[key], key
     changed = set()
-    for table, info in at_head["public_tables"].items():
+    for table, info in at_0008["public_tables"].items():
         old_checks = {n: d for n, d in at_0007["public_tables"][table]["checks"]}
         changed |= {(table, n) for n, d in info["checks"] if old_checks.get(n) != d}
     assert changed == {("datasets", "ck_datasets_status"), ("audit_log", "ck_audit_log_action")}
@@ -700,8 +703,8 @@ def test_downgrade_succeeds_without_such_rows_and_restores_the_old_checks(
     assert "'archived'" not in defs["ck_datasets_status"]
     assert "dataset.archive" not in defs["ck_audit_log_action"]
     assert defs["ck_audit_log_action"].count("::text") == 15
-    command.upgrade(migration_env, "head")
+    command.upgrade(migration_env, "0008")
     defs = _constraint_defs(pg_owner_engine)
     assert "'archived'" in defs["ck_datasets_status"]
     assert defs["ck_audit_log_action"].count("::text") == 17
-    assert take_snapshot(pg_owner_engine) == at_head  # 올리면 head와 완전히 같다
+    assert take_snapshot(pg_owner_engine) == at_0008  # 올리면 0008과 완전히 같다

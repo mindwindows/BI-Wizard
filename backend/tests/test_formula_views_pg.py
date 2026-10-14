@@ -28,6 +28,7 @@ from app.ddl.dynamic import RenderedSelect
 from app.formula import literals, repo
 from app.formula.hook import make_probe
 from app.formula.literals import LITERALS, render_literal_sql
+from app.formula.refenv import load_env
 from app.formula.views import (
     build_column_infos,
     build_plan,
@@ -160,7 +161,9 @@ def recompute_hash(db: Db, dataset_id: int) -> str:
         stored = repo.load_formulas(session, dataset_id)
         infos = build_column_infos(defn, stored)
         ds = source_table(defn)
-        results = compile_all(infos, source_columns(defn, ds), make_probe(session))
+        results = compile_all(
+            infos, source_columns(defn, ds), make_probe(session), env=load_env(session, defn)
+        )
         return build_plan(defn, ds, results).def_hash
 
 
@@ -416,7 +419,9 @@ def test_verification_checks_the_view_columns_after_creation(api, db, ds, monkey
 
     select = make_view_select(ds["id"], "값")
     real = dynamic._check_view_select
-    monkeypatch.setattr(dynamic, "_check_view_select", lambda s, i: [*real(s, i), "c_901"])
+    monkeypatch.setattr(
+        dynamic, "_check_view_select", lambda s, i, *rest: [*real(s, i, *rest), "c_901"]
+    )
     with pytest.raises(ddl.DdlVerificationError), db.engine.begin() as conn:
         ddl.create_view(conn, "dv", ds["id"], select, render=render_literal_sql)
 
@@ -435,7 +440,9 @@ def test_create_view_rejects_definitions_outside_the_allow_list(api, db, ds):
         "literal_column": sa.select(
             own.c.row_id.label("row_id"), sa.literal_column("1").label("c_1")
         ).select_from(own),
-        "서브쿼리": sa.select(
+        # FU-3: 서브쿼리는 `REF`의 한 가지 모양만 통과한다(대조는 test_ddl_reference_gate.py).
+        # 선언된 기준값 조회(`references`)가 없거나 모양이 다른 서브쿼리는 이 경로로도 거부된다.
+        "허용 모양이 아닌 서브쿼리": sa.select(
             own.c.row_id.label("row_id"), sa.select(own.c.row_id).scalar_subquery().label("c_1")
         ).select_from(own),
         "규칙 밖 열 이름": sa.select(own.c.row_id.label("evil")).select_from(own),
@@ -468,7 +475,7 @@ def test_view_ddl_errors_are_raised_without_the_sql_text_or_the_original_excepti
     )
     original = dynamic.run_ddl
 
-    def broken(conn, element):
+    def broken(conn, element, **_kwargs):
         raise leaking
 
     dynamic.run_ddl = broken

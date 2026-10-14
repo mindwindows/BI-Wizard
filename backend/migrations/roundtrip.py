@@ -9,11 +9,13 @@ docker compose --profile test run --rm --no-deps -e POSTGRES_HOST=postgres-test 
     python -m migrations.roundtrip
 ```
 순서: 스냅샷 A(base) -> upgrade head -> 스냅샷 B -> `alembic check` ->
+downgrade 0008(기준값 표 두 개가 사라지고 감사 CHECK 두 개만 옛 정의로) -> upgrade head(B와 같아야
+함) ->
 downgrade 0007(CHECK 두 개만 옛 정의로, 표·권한 그대로) -> upgrade head(B와 같아야 함) ->
 downgrade 0006(감사 기록 표만 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0005(등록 표·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
 downgrade 0004(수식·등록·감사 기록 표가 사라짐) -> upgrade head(B와 같아야 함) ->
-downgrade 0003(0003 표·권한은 남고 0004~0007 표·권한이 사라짐.
+downgrade 0003(0003 표·권한은 남고 0004~0007·0009 표·권한이 사라짐.
 0008은 표·권한 없이 CHECK 두 개만 교체) ->
 upgrade head(B와 같아야 함) -> downgrade base ->
 스냅샷 A'(A와 같아야 함) -> upgrade head -> 스냅샷 B'(B와 같아야 함).
@@ -350,20 +352,33 @@ SUPERSET_COLUMN_ACL = {
 # 0007: 읽기와 추가만(UPDATE·DELETE·TRUNCATE 없음, 열 단위 권한도 없음, 시퀀스 GRANT도 없음).
 AUDIT_TABLE_ACL = {"audit_log": "bi_app=ar/bi_owner"}
 AUDIT_COLUMN_ACL: set[tuple[str, str]] = set()
-STATIC_TABLE_ACL = {
+# 0009(FU-3): 읽기·추가는 표 단위, UPDATE는 열 단위(항목 설명, 값 열)뿐. DELETE·시퀀스 GRANT 없음,
+# `bi_readonly`·PUBLIC 직접 권한 없음(값은 `dv_` 뷰 경유로만 보인다).
+REFERENCE_TABLE_ACL = {
+    "reference_items": "bi_app=ar/bi_owner",
+    "reference_values": "bi_app=ar/bi_owner",
+}
+REFERENCE_COLUMN_ACL = {
+    ("reference_items", "description"),
+    ("reference_values", "number_value"),
+}
+# 0009 이전의 정적 표(0003~0007): 0009를 내렸을 때 남아야 하는 것.
+BEFORE_0009_TABLE_ACL = {
     **ACCESS_TABLE_ACL,
     **DATASET_TABLE_ACL,
     **FORMULA_TABLE_ACL,
     **SUPERSET_TABLE_ACL,
     **AUDIT_TABLE_ACL,
 }
-STATIC_COLUMN_ACL = (
+BEFORE_0009_COLUMN_ACL = (
     ACCESS_COLUMN_ACL
     | DATASET_COLUMN_ACL
     | FORMULA_COLUMN_ACL
     | SUPERSET_COLUMN_ACL
     | AUDIT_COLUMN_ACL
 )
+STATIC_TABLE_ACL = {**BEFORE_0009_TABLE_ACL, **REFERENCE_TABLE_ACL}
+STATIC_COLUMN_ACL = BEFORE_0009_COLUMN_ACL | REFERENCE_COLUMN_ACL
 
 
 def expect_static_privileges(
@@ -375,7 +390,7 @@ def expect_static_privileges(
 ) -> list[str]:
     """정적 표와 `bi_app` 권한(표·열 단위)이 head에는 정확히 있고 base에는 없는지 확인한다.
 
-    기본은 모든 정적 표(0003 + 0004 + 0005 + 0006 + 0007)다. 0008은 표·권한을 바꾸지 않고
+    기본은 모든 정적 표(0003 + 0004 + 0005 + 0006 + 0007 + 0009)다. 0008은 표·권한을 바꾸지 않고
     CHECK 두 개만 교체하므로 이 목록에 항목이 없다. `table_acl`/`column_acl`로 revision
     하나의
     표만
@@ -443,6 +458,34 @@ def expect_archive_checks(snapshot: Snapshot, *, archived: bool) -> list[str]:
     return problems
 
 
+def expect_reference_checks(snapshot: Snapshot, *, present: bool) -> list[str]:
+    """0009의 감사 CHECK 두 개: head에서는 기준값 행위·`reference` 대상이 허용되고 0008에서는
+    아니다.
+
+    제약 이름은 `op.f`로 한 번만 붙어야 한다. 기준값 표(`reference_items`·`reference_values`)의
+    존재와 두 CHECK 정의가 같이 움직이는지도 본다.
+    """
+    problems: list[str] = []
+    tables = snapshot["public_tables"]
+    checks = {c[0]: c[1] for c in tables["audit_log"]["checks"]}
+    for name, marker in (
+        ("ck_audit_log_action", "'reference_value.update'"),
+        ("ck_audit_log_target_type", "'reference'"),
+    ):
+        text = checks.get(name)
+        if text is None:
+            problems.append(f"audit_log.{name} 제약이 없다")
+        elif (marker in text) != present:
+            problems.append(f"{name} 정의가 기대와 다름(present={present}): {text}")
+    for table in ("reference_items", "reference_values"):
+        if (table in tables) != present:
+            problems.append(f"{table} 표가 {'없음' if present else '남아 있음'}")
+    doubled = [c[0] for c in tables["audit_log"]["checks"] if c[0].count("ck_") > 1]
+    if doubled:
+        problems.append(f"제약 이름이 이중으로 붙었다: {doubled}")
+    return problems
+
+
 def _current_revision(engine: Engine) -> str | None:
     with engine.connect() as conn:
         return MigrationContext.configure(conn).get_current_revision()
@@ -490,13 +533,48 @@ def main() -> int:
         step("alembic check", [f"{type(error).__name__}: {error}"])
 
     step("upgrade 후 0008 CHECK 정의", expect_archive_checks(head1, archived=True))
+    step("upgrade 후 0009 CHECK 정의와 기준값 표", expect_reference_checks(head1, present=True))
+
+    # 0009(기준값 표 두 개 + 감사 CHECK 두 개 교체) 한 단계만: 내리면 0008 상태(기준값 표가 사라지고
+    # 옛 CHECK), 올리면 head와 같다. 기준값을 읽는 뷰나 기준값 감사 행이 있을 때의 거부는
+    # pytest(PostgreSQL)가 확인한다.
+    command.downgrade(config, "0008")
+    step9 = take_snapshot(engine)
+    step(
+        "0009 downgrade 후 옛 CHECK 정의와 기준값 표 없음",
+        expect_reference_checks(step9, present=False),
+    )
+    step("0009 downgrade 후 0008 CHECK 정의 유지", expect_archive_checks(step9, archived=True))
+    step(
+        "0009 downgrade 후 0008 정적 표 권한 유지",
+        expect_static_privileges(
+            step9, granted=True, table_acl=BEFORE_0009_TABLE_ACL, column_acl=BEFORE_0009_COLUMN_ACL
+        ),
+    )
+    step(
+        "0009 downgrade 후 기준값 표 권한 없음",
+        expect_static_privileges(
+            step9,
+            granted=False,
+            table_acl=REFERENCE_TABLE_ACL,
+            column_acl=REFERENCE_COLUMN_ACL,
+        ),
+    )
+    step("0009 downgrade 후 bi_data 권한 유지", expect_privileges(step9, granted=True))
+    command.upgrade(config, "head")
+    step("0009 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
 
     # 0008(CHECK 두 개 교체) 한 단계만: 내리면 0007 상태(옛 정의), 올리면 head와 같다. 표·권한은
     # 바뀌지 않는다. 보관 행·보관 감사 행이 있을 때의 거부는 pytest(PostgreSQL)가 확인한다.
     command.downgrade(config, "0007")
     step8 = take_snapshot(engine)
     step("0008 downgrade 후 옛 CHECK 정의", expect_archive_checks(step8, archived=False))
-    step("0008 downgrade 후 정적 표 권한 유지", expect_static_privileges(step8, granted=True))
+    step(
+        "0008 downgrade 후 정적 표 권한 유지(0009도 내려가 기준값 표는 없다)",
+        expect_static_privileges(
+            step8, granted=True, table_acl=BEFORE_0009_TABLE_ACL, column_acl=BEFORE_0009_COLUMN_ACL
+        ),
+    )
     step("0008 downgrade 후 bi_data 권한 유지", expect_privileges(step8, granted=True))
     command.upgrade(config, "head")
     step("0008 재 upgrade 후 상태 복원", diff(normalize(head1), normalize(take_snapshot(engine))))
@@ -522,9 +600,12 @@ def main() -> int:
         ),
     )
     step(
-        "0007 downgrade 후 감사 기록 표 없음",
+        "0007 downgrade 후 감사 기록·기준값 표 없음",
         expect_static_privileges(
-            step7, granted=False, table_acl=AUDIT_TABLE_ACL, column_acl=AUDIT_COLUMN_ACL
+            step7,
+            granted=False,
+            table_acl={**AUDIT_TABLE_ACL, **REFERENCE_TABLE_ACL},
+            column_acl=AUDIT_COLUMN_ACL | REFERENCE_COLUMN_ACL,
         ),
     )
     step("0007 downgrade 후 bi_data 권한 유지", expect_privileges(step7, granted=True))
@@ -549,8 +630,8 @@ def main() -> int:
         expect_static_privileges(
             step6,
             granted=False,
-            table_acl={**SUPERSET_TABLE_ACL, **AUDIT_TABLE_ACL},
-            column_acl=SUPERSET_COLUMN_ACL | AUDIT_COLUMN_ACL,
+            table_acl={**SUPERSET_TABLE_ACL, **AUDIT_TABLE_ACL, **REFERENCE_TABLE_ACL},
+            column_acl=SUPERSET_COLUMN_ACL | AUDIT_COLUMN_ACL | REFERENCE_COLUMN_ACL,
         ),
     )
     step("0006 downgrade 후 bi_data 권한 유지", expect_privileges(step6, granted=True))
@@ -575,8 +656,15 @@ def main() -> int:
         expect_static_privileges(
             step5,
             granted=False,
-            table_acl={**FORMULA_TABLE_ACL, **SUPERSET_TABLE_ACL, **AUDIT_TABLE_ACL},
-            column_acl=FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL | AUDIT_COLUMN_ACL,
+            table_acl={
+                **FORMULA_TABLE_ACL,
+                **SUPERSET_TABLE_ACL,
+                **AUDIT_TABLE_ACL,
+                **REFERENCE_TABLE_ACL,
+            },
+            column_acl=(
+                FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL | AUDIT_COLUMN_ACL | REFERENCE_COLUMN_ACL
+            ),
         ),
     )
     step("0005 downgrade 후 bi_data 권한 유지", expect_privileges(step5, granted=True))
@@ -603,9 +691,14 @@ def main() -> int:
                 **FORMULA_TABLE_ACL,
                 **SUPERSET_TABLE_ACL,
                 **AUDIT_TABLE_ACL,
+                **REFERENCE_TABLE_ACL,
             },
             column_acl=(
-                DATASET_COLUMN_ACL | FORMULA_COLUMN_ACL | SUPERSET_COLUMN_ACL | AUDIT_COLUMN_ACL
+                DATASET_COLUMN_ACL
+                | FORMULA_COLUMN_ACL
+                | SUPERSET_COLUMN_ACL
+                | AUDIT_COLUMN_ACL
+                | REFERENCE_COLUMN_ACL
             ),
         ),
     )

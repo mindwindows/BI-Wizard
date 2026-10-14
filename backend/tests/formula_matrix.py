@@ -342,6 +342,8 @@ def all_groups() -> list[Group]:
     """사전의 모든 항목(연산자 포함)의 수식 묶음. 사전이 커지면 자동으로 커진다."""
     result: list[Group] = []
     for spec in get_default_registry().specs():
+        if spec.precheck is not None:
+            continue  # 환경 함수(`REF`): 전용 묶음(tests/reference_bundle.py)이 맡는다
         for group in spec_groups(spec):
             result.extend(chunks(group))
     return result

@@ -9,7 +9,7 @@ description: 포털의 팀·사용자·소속(정의 담당자/입력자) 관리
 관리자가 팀을 만들고, 사용자를 사전 등록하고, 사용자를 팀에 정의 담당자(`definer`) 또는 입력자(`entry`)로 넣고 빼며, 비활성화한다. 모든 사용자는 자기 정보와 소속 팀을 본다. 인증된 모든 사용자는 모든 팀의 데이터를 열람할 수 있고(별도 역할 값 없음), 관리자는 팀 소속 역할이 없으면 데이터셋 정의·입력 권한이 없다(06 §4-1).
 
 ## 2. 사용 조건 / 사전 요구사항
-- `local-environment` 통과(`migrate`가 최신 revision까지 적용. 이 Skill의 권한 표는 `0003`이고, 지금 head는 `0008`(CHECK 두 개 교체만, 표 추가 없음)이고 `0007`까지로 데이터셋 표, 수식 표(`formulas`·`formula_deps`), Superset 등록 표, 감사 기록 표(`audit_log`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
+- `local-environment` 통과(`migrate`가 최신 revision까지 적용. 이 Skill의 권한 표는 `0003`이고, 지금 head는 `0009`(FU-3: 기준값 표 `reference_items`·`reference_values`와 감사 CHECK 두 개 교체)이고 `0008`은 CHECK 두 개 교체만이고 `0007`까지로 데이터셋 표, 수식 표(`formulas`·`formula_deps`), Superset 등록 표, 감사 기록 표(`audit_log`)가 더 있다). backend는 시작 자가 점검을 통과해야 뜬다(`bi_app`의 위험한 속성, `bi_app`의 `public` CREATE 권한, `bi_data` 객체 종류 등. `skills/local-environment/SKILL.md` 7절).
 - 로그인 방식(미결정 8번)이 정해지기 전에는 **인증 스텁**으로만 신원을 만든다. 스텁은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local` 또는 `test`일 때만 켜진다(그 밖이면 backend가 시작하지 않는다).
 - 역할: A1·A2는 인증된 활성 사용자 누구나, A3~A9는 관리자만. 미등록 사용자는 403 `USER_NOT_REGISTERED`, 비활성 사용자는 403 `USER_INACTIVE`, 신원이 없으면 401 `UNAUTHENTICATED`. **사용자를 조회하는 중에 DB 연결·운영 오류가 나면 401이 아니라 503 `SERVICE_UNAVAILABLE`이다**(로그아웃과 구분하며 접근은 계속 닫혀 있다. 모든 보호 경로가 같다). 신원 어댑터 자체의 예외는 기존대로 401이다.
 - 최초 관리자는 아래 서버 명령으로 만든다(화면·API로는 만들 수 없다: 관리자가 한 명도 없기 때문).
@@ -111,14 +111,14 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 | --- | --- |
 | `from`, `to` | 날짜 `YYYY-MM-DD`, **한국 시간 기준 그날 포함**(`from`은 그날 00:00부터, `to`는 그날 24:00 전까지). 둘 다 없으면 전체 기간 |
 | `actor_user_id` | 행위자 사용자 번호(정수). 서버 명령(`create-admin`) 행은 행위자가 없어 이 필터로는 나오지 않는다 |
-| `target_type` | `team` · `user` · `dataset` · `dashboard` 중 하나 |
+| `target_type` | `team` · `user` · `dataset` · `dashboard` · `reference` 중 하나 |
 | `target_id` | 대상 번호(정수). **`target_type`과 함께만** 보낸다(번호는 종류마다 따로 매겨진다) |
-| `action` | 아래 17개 값 중 하나 |
+| `action` | 아래 20개 값 중 하나 |
 | `limit`, `offset` | 기본 50, 최대 200 / 0 이상(상한 없음) |
 
 응답 `200 {items, total, limit, offset}`. **정렬은 항상 최신순**(`occurred_at` 내림차순, 같으면 `id` 내림차순)이고 정렬 인자는 없다. `total`은 필터를 적용한 정확한 전체 건수다. 항목은 `{id, occurred_at(+09:00), actor{id, display_name} 또는 null, actor_source("user"|"cli"), action, target_type, target_id, details}`이다. `actor.display_name`은 조회 시점의 사용자 이름이다(이름을 바꾸면 이전 행에도 새 이름이 보인다). `details`는 행위마다 정해진 키만 있고 항상 `target_name`(대상 이름 스냅샷)이 있다.
 
-### 기록되는 행위 17개
+### 기록되는 행위 20개
 | `action` | 언제 | `details`(`target_name` 외) |
 | --- | --- | --- |
 | `dataset.create` | 데이터셋 만들기(B2) | `team_id`, `date_unit`, `def_version` |
@@ -138,6 +138,9 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 | `user.bootstrap_admin` | 서버 명령 `create-admin`으로 최초 관리자를 만듦 | `is_admin`(항상 true). 행위자 없음, `actor_source="cli"` |
 | `dashboard.create` | 대시보드 연결 등록(E4) | `embedded_uuid` |
 | `dashboard.update` | 대시보드 이름·활성 변경(E5). `is_active` true→false는 "연결 해제", false→true는 "다시 연결" | `changes{name, is_active}` |
+| `reference.create` | 기준값 항목 만들기(R2, FU-3). 대상은 `reference`이고 `target_id`는 항목 번호, `target_name`은 항목 이름 | `description_length` |
+| `reference_value.add` | 기준값 연도 값 추가(R3) | `year`, `value`(십진 글자) |
+| `reference_value.update` | 기준값 정정(R5). 같은 숫자면 기록 없음 | `year`, `value_from`, `value_to` |
 
 대상은 `target_type`·`target_id`로 가리킨다. 소속(`member.*`)은 `team`을 대상으로 하고 사용자는 `details.user_id`에 있다. 열·수식 변경은 `dataset`을 대상으로 하고 `details.column_id`가 열이다(데이터셋 하나의 정의 이력이 `target_type=dataset&target_id=<번호>` 한 번으로 모인다). 한 번의 요청은 **최대 한 건**이고(여러 필드를 바꿔도 `changes`에 함께), **실제로 바뀐 것이 없으면 한 건도 남지 않는다**(같은 값으로 저장, 빈 본문, 같은 역할 재요청, 이미 활성 관리자인 `create-admin` 재실행, 이미 같은 상태인 보관·복구 재요청). 실패한 요청(409·404·422·503)과 롤백된 요청도 남지 않는다.
 
@@ -180,7 +183,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 - 시작일·종료일: 그날을 포함한다(한국 시간). 둘 다 비우면 전체 기간. 시작일이 종료일보다 늦으면 조회하지 않고 알려 준다.
 - 행위자: 사용자 목록에서 고른다(사용 중지 사용자 포함). 목록을 못 읽으면 이 칸만 막히고 나머지 조건은 쓸 수 있다.
 - 대상 종류(팀·사용자·데이터셋·대시보드)를 먼저 고르면 대상 번호를 입력할 수 있다(1 이상의 정수). 종류를 바꾸면 번호가 비워진다.
-- 행위: 한국어 이름 17개 중 하나.
+- 행위: 한국어 이름 20개 중 하나.
 - 조건을 바꾼 뒤 **조회**를 눌러야 목록에 반영된다(첫 쪽부터). **필터 지우기**는 모든 조건을 비우고 다시 읽는다.
 - 쪽 이동은 "이전/다음"이며 "전체 N건 중 a–b"로 위치를 보여 준다. 새 기록이 쌓이는 동안 쪽을 넘기면 행이 한두 건 밀려 보일 수 있다(알려진 한계).
 
@@ -193,7 +196,7 @@ curl -b jar "http://localhost:<BACKEND_PORT>${APP_BASE_PATH}/api/audit-logs?from
 
 ## 6. 관련 UI / API / command / DB
 - UI: S1 포털 셸·접근 안내, S6 권한 관리, S10 감사 기록 목록(`docs/decisions/04-modules.md` §4). S1 `/`, `/access-denied`(경로는 `APP_BASE_PATH` 아래), S6 `/admin/permissions`, 구현 위치 `frontend/src/features/access/`
-- API: A1~A9(05 §2-1), F1 `GET /api/audit-logs`(05 §2-7, 코드는 `backend/app/audit/`: `actions.py`가 행위 17개와 `details` 허용 키의 유일한 출처, `service.py`의 `record`가 쓰기, `router.py`가 조회), DV1~DV3(05 §2-6). 코드는 `backend/app/access/`(router·service·repo), 스텁은 `backend/app/auth/stub.py`, 사용자 조회는 `backend/app/auth/db_reader.py`
+- API: A1~A9(05 §2-1), F1 `GET /api/audit-logs`(05 §2-7, 코드는 `backend/app/audit/`: `actions.py`가 행위 20개와 `details` 허용 키의 유일한 출처, `service.py`의 `record`가 쓰기, `router.py`가 조회), DV1~DV3(05 §2-6). 코드는 `backend/app/access/`(router·service·repo), 스텁은 `backend/app/auth/stub.py`, 사용자 조회는 `backend/app/auth/db_reader.py`
 - command: `python -m app.cli create-admin`, `python -m app.cli seed-stub-users` (`backend/app/cli.py`)
 - DB(`audit_log`, revision `0007_audit_log`, `bi_owner` 소유, `public`): `id bigint`(identity, 시퀀스 권한 불필요), `occurred_at`, `actor_user_id`(users 외래키, 서버 명령이면 NULL), `actor_source`, `action`, `target_type`, `target_id`(외래키 없음), `details jsonb`(객체, 4,000바이트 이하). CHECK 6개와 인덱스 3개. `bi_app`은 **SELECT·INSERT만**(UPDATE·DELETE·TRUNCATE 없음)이고 `bi_readonly`(Superset)와 PUBLIC에는 권한이 없다.
 - DB(`public`, revision `0003_users_teams_members`, `bi_owner` 소유): `users`(`login_id` 유일), `teams`(`code` 유일·불변·형식 CHECK, `name` 유일), `team_members`(PK `team_id`+`user_id`, `role` CHECK). `bi_app` 권한은 명시 GRANT뿐이다: 표 단위 SELECT·INSERT(`team_members`는 DELETE도), UPDATE는 열 단위(`users`: `display_name`·`is_admin`·`is_active`, `teams`: `name`·`is_active`, `team_members`: `role`). 불변 열(`login_id`, `code`, `team_id`, `user_id`)은 DB가 변경을 거부한다. `bi_readonly`(Superset)와 PUBLIC에는 아무 권한도 없다.
@@ -252,7 +255,7 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 (네트워크 이름은 compose 프로젝트 이름에 따른다: `docker network ls`. 이 시험은 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`*_PASSWORD`가 필요하다. 시험 DB는 새 DB여야 한다: 시험이 `users`·`teams`·`team_members`의 행을 지운다.)
 - 마이그레이션(위 pytest를 돌린 DB와 **다른 새 postgres-test**에서 따로 실행한다. 왕복 스크립트는 DB가 이미 `0003` 이상이면 "빈 테스트 DB에서만 실행하세요"로 중단한다): `python -m migrations.roundtrip`(`skills/local-environment/SKILL.md` 5절)이 upgrade → downgrade → upgrade와 `alembic check`, `0003`~`0007`의 표·열 단위 권한 상태(0007·0006·0005·0004 한 단계 내림 포함)를 확인한다. 왕복은 `0007`의 `DROP`(감사 기록 전체 삭제)을 포함하므로 **빈 시험 DB에서만** 한다.
 - 권한 매트릭스: `backend/tests/test_permission_matrix.py`가 A1~A9, B1~B6(`skills/dataset-definition`), C1~C4(`skills/data-entry`), D1~D10(`skills/formula-column`: 읽기 D1·D6·D7·D8, 정의(팀) D2~D5, 관리자 D9·D10), DV1~DV3 × 역할(+ B2의 비활성 팀 행: 정의 담당자 409 `TARGET_INACTIVE`, 그 밖 역할은 403·401로 권한 판정이 먼저)(관리자, 정의 담당자, 입력자, 다른 팀 구성원, 비소속 읽기, 비활성, 인증 없음)을 확인하고, 앱의 모든 보호 경로가 표에 있는지도 확인한다. 새 엔드포인트를 더하면 이 표에 행을 더해야 시험이 통과한다.
-- 감사 기록(FU-2a): `tests/test_audit_record.py`(허용 키 표·`record` 단위), `test_audit_hooks.py`(행위 17개 각각: 성공 1건·변경 없음 0건·대표 오류 0건·커밋/훅 실패 주입 0건·감사 INSERT 실패 주입 시 변경도 롤백), `test_audit_api.py`(F1: 권한·필터·정렬·페이지·422 필드 코드·경계), `test_audit_coverage.py`(기록 대상 표를 쓰는 service 함수가 행위 표에 있는지 소스 점검), `test_audit_secrets.py`(심은 로그인 ID·셀 값·수식 상수·규칙 값이 `details`에 없음), `test_audit_pg.py`(행위자 `users` 행 잠금 영향·경쟁에서 전이 한 건씩·직렬화 크기), `test_static_acl.py`(`bi_app` UPDATE·DELETE·TRUNCATE 거부, `bi_readonly` 접근 거부, 시퀀스 권한 없이 INSERT 성공, CHECK·FK), 권한 매트릭스에 F1.
+- 감사 기록(FU-2a): `tests/test_audit_record.py`(허용 키 표·`record` 단위), `test_audit_hooks.py`(행위 20개 각각: 성공 1건·변경 없음 0건·대표 오류 0건·커밋/훅 실패 주입 0건·감사 INSERT 실패 주입 시 변경도 롤백), `test_audit_api.py`(F1: 권한·필터·정렬·페이지·422 필드 코드·경계), `test_audit_coverage.py`(기록 대상 표를 쓰는 service 함수가 행위 표에 있는지 소스 점검), `test_audit_secrets.py`(심은 로그인 ID·셀 값·수식 상수·규칙 값이 `details`에 없음), `test_audit_pg.py`(행위자 `users` 행 잠금 영향·경쟁에서 전이 한 건씩·직렬화 크기), `test_static_acl.py`(`bi_app` UPDATE·DELETE·TRUNCATE 거부, `bi_readonly` 접근 거부, 시퀀스 권한 없이 INSERT 성공, CHECK·FK), 권한 매트릭스에 F1.
 - 수동: 위 스텁 curl로 관리자 로그인 후 팀 만들기 → 사용자 등록 → 소속 지정 → `/api/me`(해당 사용자)로 소속 확인, 마지막 관리자 해제 시 409.
 - 프런트:
   - `cd frontend && npm run typecheck && npm run lint && npm test && npm run build`
@@ -277,3 +280,4 @@ docker compose --profile test stop postgres-test && docker compose --profile tes
 - `formula-column`(FU-1d): (계산 열 만들기·고치기 `formula_column.*`은 감사 기록에 남고 수식 원문은 남지 않는다) 수식 검사·미리보기·계산 열 만들기·고치기는 정의(팀) 권한, 수식 보기·오류 칸 점검은 인증된 모두, 뷰 점검·다시 시도는 관리자(05 §4). 이 Skill의 인증 스텁·시험 절차를 쓴다
 - `dashboard-link`(FU-1e): (대시보드 연결 등록·변경 `dashboard.*`은 감사 기록에 남고 입장권 발급은 남지 않는다) 팀 이름 변경(A4)이 부르는 `DatasetSyncPort`를 구현해 Superset 가상 데이터셋 이름을 갱신하고(팀 단위, 그 팀의 데이터셋만), 대시보드 연결·입장권 발급(E1~E6, 권한 매트릭스에 포함)에 이 모듈의 신원·권한을 쓴다
 - `admin-cleanup`: 수동 `psql` 정리는 서비스를 거치지 않아 감사 기록에 남지 않는다(5-1 운영 주의)
+- `reference-values`(FU-3): 기준값 쓰기(R2·R3·R5)는 관리자 전용(403이 본문 검사보다 먼저)이며 감사 행위 3개를 남긴다. 감사 CHECK는 `0009`에서 20개·대상 5종으로 늘었고 `downgrade 0008`은 기준값 뷰나 새 감사 행이 있으면 거부한다.

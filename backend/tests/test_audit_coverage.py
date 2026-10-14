@@ -1,8 +1,8 @@
 """기록 대상 표를 쓰는 service 함수가 감사 표에 있는지 점검한다(04 §5-1 시험 단정, 소스 정적 분석).
 
 기록 대상 표(`users` `teams` `team_members` `datasets` `dataset_columns`
-`superset_dashboards`)를 쓰는 함수는 다음 중 하나여야 한다.
-- 04 §5-1 표의 17개 행위를 기록하는 service 함수(함수 안에 그 행위 이름이 정확히 한 번 있다)
+`superset_dashboards` `reference_items` `reference_values`)를 쓰는 함수는 다음 중 하나여야 한다.
+- 04 §5-1 표의 20개 행위를 기록하는 service 함수(함수 안에 그 행위 이름이 정확히 한 번 있다)
 - 정의 변경 진입점(`apply_definition_change`, B4·B5·B6·D4·D5가 한 곳에서 기록한다)
 - 정의 변경 진입점 안에서만 불리는 helper(진입점의 기록에 포함된다)
 - 제외 목록: 시험용 사용자 시드, 버전을 올리지 않는 뷰 재생성(`bump=False`)
@@ -27,6 +27,8 @@ RECORDED_TABLES = {
     "datasets",
     "dataset_columns",
     "superset_dashboards",
+    "reference_items",
+    "reference_values",
 }
 WRITE_FUNCTIONS = {"insert", "update", "delete", "pg_insert", "sqlite_insert"}
 
@@ -49,6 +51,9 @@ RECORDERS = {
     "user.bootstrap_admin": "access.service.create_first_admin",
     "dashboard.create": "superset.service.create_dashboard",
     "dashboard.update": "superset.service.update_dashboard",
+    "reference.create": "reference.service.create_item",
+    "reference_value.add": "reference.service.add_value",
+    "reference_value.update": "reference.service.update_value",
 }
 ENTRY_POINT = "dataset.definition.apply_definition_change"
 # 정의 변경 진입점 안에서만 불리는 helper: 진입점의 기록에 포함된다(따로 기록하지 않는다)
@@ -235,6 +240,7 @@ def test_only_the_service_layer_records_and_only_via_the_audit_module():
         "dataset.service",
         "dataset.definition",
         "superset.service",
+        "reference.service",
     }, callers
     # formula·entry는 audit을 직접 부르지 않는다(04 §2-1). 진입점에 서술(AuditSpec)만 넘긴다.
     for module in modules:

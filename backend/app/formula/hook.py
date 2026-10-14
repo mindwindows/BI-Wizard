@@ -98,6 +98,8 @@ def failure_to_error(failure: FormulaCompileFailure, *, edited_column_id: int | 
         return formula_circular(list(circular.path))
     if (
         edited_column_id is None
+        and failure.column_id
+        is not None  # 저장된 열의 재컴파일 실패(새 열 저장의 사전 검사는 아니다)
         and failure.issues
         and all(i.code == "BASE_DATE_REQUIRED" for i in failure.issues)
     ):

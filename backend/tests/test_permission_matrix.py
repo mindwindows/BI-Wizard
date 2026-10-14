@@ -1,5 +1,5 @@
 """권한 매트릭스 자동 시험(05 §4, 03b 3-6 BY4): 엔드포인트와 역할의 곱.
-A1~A9, B1~B8, C1~C4, D1~D10, E1~E6, F1, DV1~DV3.
+A1~A9, B1~B8, C1~C4, D1~D10, E1~E6, F1, R1~R6(FU-3), DV1~DV3.
 
 역할: 관리자, 정의 담당자(A팀), 입력자(A팀), 다른 팀 구성원(B팀), 비소속 읽기, 비활성, 인증 없음.
 - 읽기(reader): 인증된 활성 사용자 누구나(타 팀 포함).
@@ -26,6 +26,8 @@ from app.db_metadata import (
     datasets,
     formula_deps,
     formulas,
+    reference_items,
+    reference_values,
     superset_dashboards,
     superset_datasets,
     team_members,
@@ -35,6 +37,7 @@ from app.db_metadata import (
 from app.main import create_app
 from tests.api_helpers import World, make_caller
 from tests.conftest import Db
+from tests.reference_helpers import add_item, add_value
 
 ROLES = ["admin", "definer", "entry", "other", "viewer", "inactive", None]
 READERS = {"admin", "definer", "entry", "other", "viewer"}  # 인증된 활성 사용자
@@ -405,6 +408,68 @@ ENDPOINTS: list[Endpoint] = [
     ),
     # F1(FU-2a): 감사 기록 조회는 관리자 전용이다(05 §4, 06 §4-1). 권한 검사가 쿼리 검증보다 먼저다.
     ("F1", "GET", "/api/audit-logs", lambda w: "/api/audit-logs", lambda w: None, 200, ADMIN, SAME),
+    # R1~R6(FU-3, 05 §2-8): 기준값 읽기는 모두, 추가·정정·영향 조회(R6)는 관리자 전용이다.
+    # 데이터셋과 무관하므로 보관 상태에서도 평소와 같다. 403이 본문 검증(422)보다 먼저다.
+    (
+        "R1",
+        "GET",
+        "/api/reference-items",
+        lambda w: "/api/reference-items",
+        lambda w: None,
+        200,
+        READER,
+        SAME,
+    ),
+    (
+        "R2",
+        "POST",
+        "/api/reference-items",
+        lambda w: "/api/reference-items",
+        lambda w: {"name": "새 항목", "description": "설명"},
+        201,
+        ADMIN,
+        SAME,
+    ),
+    (
+        "R3",
+        "GET",
+        "/api/reference-items/{item_id}/values",
+        lambda w: f"/api/reference-items/{w.reference_item_id}/values",
+        lambda w: None,
+        200,
+        READER,
+        SAME,
+    ),
+    (
+        "R4",
+        "POST",
+        "/api/reference-items/{item_id}/values",
+        lambda w: f"/api/reference-items/{w.reference_item_id}/values",
+        lambda w: {"year": 2030, "value": "1.5"},
+        201,
+        ADMIN,
+        SAME,
+    ),
+    (
+        "R5",
+        "PATCH",
+        "/api/reference-items/{item_id}/values/{value_id}",
+        lambda w: f"/api/reference-items/{w.reference_item_id}/values/{w.reference_value_id}",
+        lambda w: {"value": "99"},
+        200,
+        ADMIN,
+        SAME,
+    ),
+    (
+        "R6",
+        "GET",
+        "/api/reference-items/{item_id}/usage",
+        lambda w: f"/api/reference-items/{w.reference_item_id}/usage",
+        lambda w: None,
+        200,
+        ADMIN,
+        SAME,
+    ),
 ]
 
 
@@ -423,6 +488,8 @@ def mworld(db: Db, world: World) -> World:
     formula_id = db.add_formula_column(
         dataset_id, "계산 열", ast, expression="[기존 열] + 1", position=1, deps=(column_id,)
     )
+    reference_item_id = add_item(db, "기존 항목", world.ids["admin"])  # R3~R6 대상
+    reference_value_id = add_value(db, reference_item_id, 2026, "12.5", world.ids["admin"])
     with db.writer.begin() as conn:  # E5·E6 대상: 연결된 대시보드 하나
         dashboard_id = conn.execute(
             sa.insert(superset_dashboards)
@@ -439,6 +506,8 @@ def mworld(db: Db, world: World) -> World:
         row_id=1,
         formula_id=formula_id,
         dashboard_id=dashboard_id,
+        reference_item_id=reference_item_id,
+        reference_value_id=reference_value_id,
     )
 
 
@@ -526,6 +595,8 @@ def _snapshot(db: Db):
         db.rows(formula_deps, formula_deps.c.column_id, formula_deps.c.depends_on_column_id),
         db.rows(superset_datasets, superset_datasets.c.dataset_id),
         db.rows(superset_dashboards, superset_dashboards.c.id),
+        db.rows(reference_items, reference_items.c.id),
+        db.rows(reference_values, reference_values.c.id),
         db.rows(audit_log, audit_log.c.id),  # 거부된 요청은 감사 기록도 남기지 않는다
         dynamic,
     )

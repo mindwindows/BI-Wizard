@@ -24,6 +24,8 @@ from app.db_metadata import (
     datasets,
     formula_deps,
     formulas,
+    reference_items,
+    reference_values,
     superset_dashboards,
     superset_datasets,
     team_members,
@@ -48,6 +50,8 @@ TABLES = {
     "superset_datasets": superset_datasets,
     "superset_dashboards": superset_dashboards,
     "audit_log": audit_log,
+    "reference_items": reference_items,
+    "reference_values": reference_values,
 }
 # bi_app의 표 단위 권한(has_table_privilege). UPDATE는 열 단위라 표 단위로는 없다.
 TABLE_PRIVILEGES = {
@@ -65,6 +69,9 @@ TABLE_PRIVILEGES = {
     "superset_dashboards": {"SELECT", "INSERT"},
     # 0007: 읽기와 추가만(UPDATE·DELETE·TRUNCATE 없음, 열 단위 UPDATE도 없다).
     "audit_log": {"SELECT", "INSERT"},
+    # 0009: 읽기·추가만(DELETE·TRUNCATE 없음). UPDATE는 열 단위(항목 설명, 값 열)다.
+    "reference_items": {"SELECT", "INSERT"},
+    "reference_values": {"SELECT", "INSERT"},
 }
 ALL_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
 # bi_app이 UPDATE할 수 있는 열(06 §2). 나머지 열은 불변이다.
@@ -89,6 +96,10 @@ UPDATABLE = {
     },
     "superset_dashboards": {"name", "is_active"},
     "audit_log": set(),
+    # 0009: 이름·연도·항목·작성 기록은 불변(정정은 값 열만. 설명 수정 엔드포인트는 후속이고
+    # GRANT만 선승인됐다).
+    "reference_items": {"description"},
+    "reference_values": {"number_value"},
 }
 
 
@@ -150,6 +161,8 @@ def test_immutable_columns_are_exactly_the_ones_without_update_privilege():
     assert immutable["superset_datasets"] == {"dataset_id"}
     assert immutable["superset_dashboards"] == {"id", "embedded_uuid", "created_at"}
     assert immutable["audit_log"] == all_columns["audit_log"]  # 추가 전용: 어느 열도 고칠 수 없다
+    assert immutable["reference_items"] == {"id", "name", "created_by", "created_at"}
+    assert immutable["reference_values"] == {"id", "item_id", "year", "created_by", "created_at"}
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -1181,7 +1194,9 @@ def test_audit_check_constraints_accept_the_boundary_and_every_action(
         c.execute(_audit_row(details={"k": "x" * (4000 - OVERHEAD + 1)}))
     assert sqlstate(error.value) == CHECK_VIOLATION and "details_size" in str(error.value.orig)
     with pg_owner_engine.connect() as c:
-        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == 18
+        assert c.execute(select(func.count()).select_from(audit_log)).scalar_one() == (
+            len(ACTIONS) + 1
+        )
 
 
 def test_audit_actor_must_exist_and_target_id_has_no_foreign_key(

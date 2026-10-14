@@ -10,7 +10,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
@@ -34,9 +35,9 @@ _VALUE_COLUMNS = (
 )
 
 
-def _insert_fn(session: Session):
-    """방언에 맞는 `insert`(PostgreSQL이 운영, SQLite는 시험)."""
-    return postgresql.insert if session.get_bind().dialect.name == "postgresql" else sqlite.insert
+def _is_postgresql(session: Session) -> bool:
+    """방언 구분(PostgreSQL이 운영, SQLite는 시험): `ON CONFLICT`의 `insert`가 방언마다 다르다."""
+    return session.get_bind().dialect.name == "postgresql"
 
 
 # --- 읽기 ----
@@ -151,9 +152,12 @@ def insert_item(
     session: Session, *, name: str, description: str | None, created_by: int
 ) -> RowMapping | None:
     """`INSERT … ON CONFLICT (name) DO NOTHING RETURNING`. 같은 이름이 있으면 None(409)."""
+    if _is_postgresql(session):
+        stmt = pg_insert(reference_items)
+    else:
+        stmt = sqlite_insert(reference_items)
     stmt = (
-        _insert_fn(session)(reference_items)
-        .values(name=name, description=description, created_by=created_by)
+        stmt.values(name=name, description=description, created_by=created_by)
         .on_conflict_do_nothing(index_elements=[reference_items.c.name])
         .returning(*_ITEM_COLUMNS)
     )
@@ -163,10 +167,13 @@ def insert_item(
 def insert_value(
     session: Session, *, item_id: int, year: int, value: Decimal, created_by: int
 ) -> RowMapping | None:
-    """`INSERT … ON CONFLICT (item_id, year) DO NOTHING RETURNING`. 같은 연도가 있으면 None(409)."""
+    """`INSERT … ON CONFLICT (item_id, year) DO NOTHING RETURNING`. 같은 연도면 None(409)."""
+    if _is_postgresql(session):
+        stmt = pg_insert(reference_values)
+    else:
+        stmt = sqlite_insert(reference_values)
     stmt = (
-        _insert_fn(session)(reference_values)
-        .values(item_id=item_id, year=year, number_value=value, created_by=created_by)
+        stmt.values(item_id=item_id, year=year, number_value=value, created_by=created_by)
         .on_conflict_do_nothing(
             index_elements=[reference_values.c.item_id, reference_values.c.year]
         )

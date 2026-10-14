@@ -78,6 +78,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
   - 409 `TARGET_INACTIVE` + `details.field=team` — B2에서 비활성 팀에는 데이터셋을 만들 수 없다(03b 19-1 결정 1). **권한 판정(그 팀의 정의 담당자)이 먼저**라서 정의 담당자가 아니면 팀이 비활성이어도 403이다. 팀을 다시 사용 중으로 바꾸려면 관리자가 A4(`permission-management`)를 쓴다. 이미 있는 데이터셋의 열 편집·행 입력은 이 규칙의 대상이 아니다.
   - 422 `VALIDATION_ERROR` + `details.fields[{field, code, message}]` — 필드 코드 `REQUIRED`·`TOO_LONG`·`BAD_FORMAT`·`RESERVED`·`OUT_OF_RANGE`. 규칙 오류의 `field`는 `rules.min`처럼 키까지 가리킨다. 기준 날짜 열이 원본 `date` 열이 아니거나 다른 데이터셋의 열이면 `base_date_column_id` `BAD_FORMAT`.
   - 422 `DATASET_HAS_ROWS` — 행이 있어 날짜 단위·기준 날짜 열을 바꿀 수 없음
+  - 422 `BASE_DATE_IN_USE` (FU-3) — `REF`를 쓰는 수식이 있는 데이터셋의 기준 날짜 열을 `null`로 해제하려 함(`details.column_id`·`display_name`은 막힌 계산 열). 먼저 그 수식을 고치거나 다른 날짜 열로 바꾼다. 판정은 정의 변경 훅이 저장된 수식을 다시 컴파일할 때 `BASE_DATE_REQUIRED`만 실패하면 변환한다(기준 날짜 열을 고르는 변경과 새 계산 열 저장은 해당 없음).
   - 422 `COLUMN_LOCKED` — 열 `type`·`kind` 변경 시도
   - 503 `DEFINITION_BUSY` + `details.retry_after`(2초) — 정의 변경 락 대기가 1초를 넘음. 같은 요청을 다시 보내면 된다.
   - 403 `FORBIDDEN`, 404 `NOT_FOUND`(없는 데이터셋·열, 다른 데이터셋의 열), 401/403 인증 오류
@@ -273,3 +274,4 @@ curl -b jar -X POST "$BASE/datasets/<번호>/restore"
 - `dashboard-link`(FU-1e): 정의가 바뀐 뒤 `DatasetSyncPort`로 Superset 가상 데이터셋 이름·열 표시 이름을 동기화한다. 열 표시 이름은 Superset에서 `c_<번호>` 열의 이름이 되고(전체 열 한 번에 갱신), 이름 변경(B4)·열 추가(B5)·열 이름 변경(B6)도 같은 경로로 반영된다
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검 대응
+- `reference-values`(FU-3): `REF`가 기준 날짜 열의 연도로 기준값을 읽으므로 기준 날짜 열이 필요하다. 해제하려 하면 `BASE_DATE_IN_USE`. 데이터셋 목록은 R6 `usage`가 쓴다(`list_dataset_briefs`).
