@@ -1,6 +1,6 @@
 # Gate 진행 상태
 
-## 다음 세션 인계 (2026-10-14 FU-2a·FU-2b 완료·main 반영(PR #7·#8) 기준으로 갱신)
+## 다음 세션 인계 (2026-10-14 FU-3(기준값) 완료·PR 병합 전, FU-1·FU-2a·FU-2b는 main 반영(PR #5·#7·#8))
 
 ### 세션 시작 시 첫 확인
 - `git fetch origin` 뒤 `git log -1`이 `origin/harness/setup` 최신 커밋과 같은지 확인한다. **다르면 다른 작업 전에 동기화(`git checkout -B harness/setup origin/<최신>` 등)부터 사용자에게 승인받는다.** 로컬에 미반영 커밋이 없는지 먼저 확인하고, 강제 push는 하지 않는다.
@@ -9,12 +9,13 @@
 - 작업 브랜치는 계속 `harness/setup`이다. `claude/sharp-goldberg-hzsd6c` 브랜치는 건드리지 않는다.
 
 ### 현재 상태 (FU-1·FU-2a·FU-2b 완료, 모두 `main` 병합)
+- **FU-3(기준값 `REF`, 2026-10-14) 구현·검증 완료(PR 병합 전):** 결정 `docs/decisions/03b` 32절(결과 32-5). revision `0009`(`reference_items`·`reference_values`, 열 단위 GRANT, 감사 CHECK 교체, `DROP_APPROVED` 사용자 승인 2026-10-14), reference 모듈 R1~R6, 수식 `REF("이름")`·셀 오류 E4(연도 정확 일치, 이월 없음, 숫자만), 뷰 안 B(상관 스칼라 서브쿼리, 게이트는 `public.reference_values` 1표·열 고정·`item_id` 정수 상수·자기 `ds_` 기준 날짜 열의 연도만), 감사 20개, S11 기준값 화면·`REF("` 자동완성·E4 "기준값 없음" 표시, `BASE_DATE_IN_USE`, `skills/reference-values`, 스크린샷 `docs/screens/fu3/` 9장. 관리자는 쓰인 연도 값도 정정할 수 있고 정정은 뷰 재생성 없이 즉시 반영된다(Superset 차트도 0.25초 안, 캐시 없음). 최종 QA 독립 전체 검증(커밋 `440e3de`, 약 50분): 실제 PG 전체 pytest 5,301 passed·116 skipped(SQLite 전용)·0 failed, 기존 차분 7,353 수식 불일치 0, 새 REF 차분 643 수식·8,568칸 불일치 0, vitest 754 passed·0 skipped, 왕복·downgrade 거부 3경로·Superset 스모크 STRIP true·false·게이트 부정 20개 모양·정정 뷰 불변·DDL 0건·교착 0, 메모리 약 484MiB, 503 0건. 알려진 한계: 글자 기준값 제외, 이름 변경·삭제·설명 수정·고정 연도 인수 후속, 대량 행 REF 성능 미측정.
 - **FU-2b(데이터셋 보관·복구, 2026-10-14) 구현·검증 완료:** 결정 `docs/decisions/03b` 30절(결과 30-3). revision `0008`(CHECK 두 개 교체만, 새 열·표·GRANT 없음, `DROP_APPROVED` 사용자 승인 2026-10-14), B7 archive·B8 restore, `DATASET_ARCHIVED`(409), 감사 17개, 시작 대조에 보관 포함, S2 보기 필터·배지·확인창·작업공간 읽기 전용 배너, 스크린샷 `docs/screens/fu2b/` 10장, `skills/dataset-definition` 보관·복구 절. 보관의 뜻은 "입력·정의 동결 + 포털 목록 숨김, Superset 공개 유지(데이터를 감추려면 영구 삭제 단위 필요)". 최종 QA 독립 전체 검증(커밋 `8d89d34`, PostgreSQL 16.10, 약 54분): 실제 PG 전체 pytest 4574 passed·skip 106(SQLite 전용 103 + repo 파일 없는 3건 따로 38 passed)·pg 변형 skip 0, 차분 7,353 수식 불일치 0, vitest 694 passed·0 skipped, 왕복·downgrade 거부·Superset 스모크 STRIP true·false·쓰기 라우트 26개 순회(8개 409)·뷰·`ds_` 해시 불변·CREATE/ALTER/DROP 0건, 메모리 약 482MiB, 503 0건. 알려진 한계: 보관 중 오류 칸은 D7에 안 보임, 비활성 팀 복구는 팀 재활성화 → `definer` 지정 → 복구 경로. 행 보관·열·수식 보관·영구 삭제·30일 `DROP`은 후속.
 - **FU-2a(감사 로그, 2026-10-13) 구현·검증 완료:** 결정 `docs/decisions/03b` 29절. revision `0007`(`audit_log`, 인덱스 3·CHECK 6, `bi_app`은 SELECT·INSERT만), `audit` 모듈, 관리자 전용 `GET /audit-logs`(F1), 기록 훅 15개(정의 변경·팀·소속·사용자·대시보드 연결), 프런트 S10, `skills/permission-management` 5-1절, 스크린샷 `docs/screens/fu2a/` 8장. 최종 QA 독립 전체 검증(커밋 `81cb582`, PostgreSQL 16.10): 실제 PG 전체 pytest 3858 passed·skip 106(전부 SQLite 전용 또는 이미지에 repo 파일이 없는 3건, 따로 38 passed)·pg 변형 skip 0, 차분 7,353 수식 불일치 0, vitest 663 passed·4 skipped(빌드 전 dist 검사 skip, 빌드 뒤 static-checks 13 passed), Superset 스모크 STRIP true·false 7/7, 15개 행위 각 1건·변경 없음/실패 0건, `bi_app` UPDATE·DELETE·TRUNCATE와 `bi_readonly` 접근 42501, 비밀값 0건, 메모리 합계 약 508MiB, 5개 흐름 동시 열 추가 503 0건. 전체 검증 소요 약 44분(QA 보고). **사용자 승인(2026-10-14):** 0007 `downgrade()`의 `drop_table`(03b 29-3)과 `seed-stub-users` 기록 제외(03b 29-5). 승인 반영 뒤 마지막 제품 커밋 `e1e7485` 기준 QA 독립 전체 재검증 통과(실제 PG 3861 passed·skip 103 전부 SQLite 전용, 차분 불일치 0, 왕복·Superset 스모크 STRIP true·false·`seed-stub-users` 감사 0건 포함, 상세 03b 29-5).
 - **브랜치:** `harness/setup`. `main`에 직접 커밋·푸시하지 않는다. FU-1(PR #5)·FU-2a(PR #7)·FU-2b(PR #8)는 모두 `main`에 병합됐다(`main` 최신 `baa1527`, 이 정리 단계 PR은 번호를 PR 목록에서 확인). **PR 병합은 "Create a merge commit"으로만 하고 "Delete branch"는 누르지 않는다. PR이 열려 있는 동안 `harness/setup`에 push한 커밋은 그 PR에 포함되므로, 다음 단위 커밋은 이전 PR이 병합된 뒤 `harness/setup`을 `origin/main`으로 fast-forward 한 다음에 시작한다**(`CLAUDE.md`).
 - **Gate ①~③ 승인**(③은 FU-1 범위). **Gate ④: FU-1(1a 권한 관리, 1b 데이터셋·열 정의, 1c 입력 그리드, 1d 수식 열, 1e Superset 등록·임베딩) 구현·검증 완료.** 결정 기록은 `docs/decisions/03b` 15~28절.
 - **검증 요약:** 전체 검증(마지막 커밋 `96a5974`, QA 독립): 실제 PG 전체 pytest 3310 passed·pg 변형 skip 0, 차분 7,353 수식 불일치 0, 프런트 616 passed, STRIP true·false Superset 스모크, 비밀값 검사, 메모리 약 0.5~0.6GB(8GB 예산 안), 연결 풀 상향 효과(5개 흐름 동시 열 추가 503 0건). 이후 범위 재검증(스크립트·문서만 변경, 제품 영향 경로 변경 0건): PR 본문에 최종 커밋과 증명이 있다.
-- **환경:** backend `bi_app`, migrate `bi_owner`(슈퍼유저 접속 없음), revision 0001~0008, `superset-init`이 역할·권한 적용, 연결 풀 `bi_app` 10+5(코드 상수), 컨테이너 Env는 `.env` 등급으로 허용(`deploy-coordination.md` 46번).
+- **환경:** backend `bi_app`, migrate `bi_owner`(슈퍼유저 접속 없음), revision 0001~0009, `superset-init`이 역할·권한 적용, 연결 풀 `bi_app` 10+5(코드 상수), 컨테이너 Env는 `.env` 등급으로 허용(`deploy-coordination.md` 46번).
 - **에이전트 모델:** 7개 모두 sonnet, 호출 시 모델을 바꾸지 않는다.
 
 ### 새 세션 시작 방법

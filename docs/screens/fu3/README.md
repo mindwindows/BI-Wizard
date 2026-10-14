@@ -1,6 +1,6 @@
 # FU-3 화면 스크린샷 (S11 기준값, 수식 편집기 REF 자동완성, E4 칸, S5 점검)
 
-- 촬영일: 2026-10-15(서버 시계 기준), backend HEAD `123c16d` + frontend 작업 트리(커밋 전). 이미지는 현재 소스에서 새로 빌드했다.
+- 촬영일: 2026-10-15(서버 시계 기준), backend HEAD `123c16d` + frontend 작업 트리(커밋 전; 그 작업 트리는 이후 커밋 `440e3de`(제품 코드 최종)에 포함됐다). 이미지는 현재 소스에서 새로 빌드했다.
 - 환경: 로컬 compose(프로젝트명 `fu3shot`, 포털 `127.0.0.1:36280`), `APP_BASE_PATH=/bi-wizard`, `APP_PROXY_STRIP_PREFIX=false`, 새 DB, Superset 없이 `postgres`·`db-bootstrap`·`migrate`·`backend`·`frontend`만. 임시 env는 `_workspace/qa/`(Git 제외)의 더미 값뿐이다.
 - 비밀값 대조: 촬영 스크립트가 모든 화면의 DOM 글자·HTML을 임시 env의 비밀성 값과 토큰 모양에 대조해 발견 **0건**이었다. 모든 PNG를 눈으로도 확인했다.
 
