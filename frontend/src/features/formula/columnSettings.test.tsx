@@ -212,8 +212,8 @@ describe("계산 열 위/아래 이동", () => {
     fireEvent.click(btn("위로 이동"));
     await waitFor(() => expect(patches).toHaveLength(2));
     expect(patches.map((p) => [p.path.split("/").at(-1), p.body])).toEqual([
-      ["7", { expected_version: 3, position: 9 }],
-      ["6", { expected_version: 4, position: 8 }],
+      ["6", { expected_version: 3, position: 8 }],
+      ["7", { expected_version: 4, position: 9 }],
     ]);
     expect((await within(inspector()).findByRole("status")).textContent).toBe("열 순서를 바꿨습니다.");
     expect(order()).toEqual(["이익", "기준일", "매출", "비용", "메모", "비율", "문구"]);

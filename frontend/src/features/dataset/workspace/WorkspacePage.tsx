@@ -157,6 +157,7 @@ function Workspace({ datasetId }: { datasetId: number }) {
         if (from < 0 || to < 0 || to >= order.length) return "더 옮길 곳이 없습니다.";
         [order[from], order[to]] = [order[to], order[from]];
         const positions = new Map(columns.map((c) => [c.id, c.position]));
+        let done = 0;
         try {
           // B6에는 한 번에 순서를 바꾸는 호출이 없다. 지금 쓰는 위치 번호 자리를 새 순서대로 다시 나눠 주고,
           // 번호가 달라지는 열만 한 건씩 고친다(번호가 모두 다르면 이웃한 두 열만 서로 바뀐다: 2회).
@@ -165,10 +166,13 @@ function Workspace({ datasetId }: { datasetId: number }) {
           const unique = new Set(slots).size === slots.length;
           for (const [index, id] of order.entries()) {
             const target = unique ? slots[index] : index;
-            if (positions.get(id) !== target) await patchColumn(id, { position: target });
+            if (positions.get(id) !== target) {
+              await patchColumn(id, { position: target });
+              done += 1;
+            }
           }
         } catch (error) {
-          await refetch(); // 일부만 바뀌었을 수 있으니 실제 순서를 다시 읽어 보여 준다.
+          if (done > 0) await refetch(); // 일부만 바뀌었으니 실제 순서를 다시 읽어 보여 준다(버전 충돌이면 run이 읽는다).
           throw error;
         }
         void refetch();
