@@ -595,3 +595,23 @@ PR #6(회고)이 병합돼 `origin/main`(`ce6038c`)에 `da3da70`이 포함됨을
 - **0007 `downgrade()`의 `op.drop_table("audit_log")` 승인.** `DROP_APPROVED`를 "DROP 확인: 사용자 승인 (2026-10-14, 03b 29-3 답 …)"으로 고쳤고, 대기 고정 시험(`test_pending_drop_confirmations_are_exactly_the_known_ones`)을 "대기 항목 없음"(`test_no_pending_drop_confirmations`)으로 바꿨다. 승인은 downgrade의 `DROP`에 한한다. upgrade에는 여전히 `DROP`이 없다. `skills/permission-management`에 경고 "0007 아래로 downgrade하면 `audit_log`가 모두 삭제됨. 실행 전 백업 필수"를 추가했다. 운영에서 downgrade를 하지 않는 원칙(D5, 수정 revision으로 대응)은 그대로다.
 - **`seed-stub-users`(개발·시험 전용)를 감사 기록 대상에서 제외하는 것을 승인.** 근거: 이 명령은 `AUTH_STUB_ENABLED=true`이고 `APP_ENV`가 명시적으로 `local`/`test`인 설정에서만 실행되며(그 밖은 거부, `bi-review` 7-5), 운영 DB에서는 스텁 신원이 비활성이라 운영 기록 대상이 될 수 없다. 04 §5-1의 [제안] 표지를 승인으로 고쳤다.
 - **승인 반영 뒤 전체 재검증(QA 독립, 커밋 `e1e7485`, PostgreSQL 16.10, 실패 0·미실행 0, 소요 약 2시간):** `81cb582..e1e7485` diff는 9개 파일(`backend/tests/test_migrations.py`, 0007 revision 독스트링, `migrations/roundtrip.py` 주석, 문서 6개)이며 제품 코드 로직 변경은 0건이다. 실제 PG 전체 pytest **3861 passed, 103 skipped(전부 SQLite 전용), 0 failed**(pg 변형 skip 0; `test_no_pending_drop_confirmations`·`test_0007_drop_is_only_in_downgrade_never_in_upgrade`·`test_drop_requires_recorded_user_approval` 통과), 차분 수식 7,353개·비교 1,353,335칸·불일치 0·DB 예외 0, 프런트 lint·typecheck 통과·빌드 뒤 vitest 666 passed·1 skipped(repo 파일 없는 컨테이너 한정)·static-checks 13 passed·Enterprise 0, 마이그레이션 왕복(`migrations.roundtrip`)·`alembic check`·heads 1개(0007)·별도 빈 DB의 `upgrade head → downgrade 0006 → upgrade head`(ACL `bi_owner=arwdDxt, bi_app=ar`, 시퀀스 ACL 없음, 스냅샷 동일), `ci-validate-env.sh`·`test-ci-validate-env.sh` 156건 실패 0·ruff 통과, 빈 볼륨 스택 기동과 Superset 스모크 STRIP false·true 7/7(차트 6종 렌더), 15개 행위 각 1건·변경 없음/실패 0건·`bi_app` UPDATE·DELETE·TRUNCATE와 `bi_readonly` 접근 거부·비밀 표식 0건, **`seed-stub-users` 실행 전후 `audit_log` 건수 변화 0**, 비밀값 검사(Cmd·Args 기준) 0건, 메모리 부하 중 합계 약 537MiB(`mem_limit` 4.75GiB·8GB 예산 안), 5개 흐름 동시 열 추가 503 0건. `skills/permission-management`의 downgrade 경고(표와 기록이 모두 삭제됨)가 실제 동작(`to_regclass`가 NULL)과 일치한다.
+
+## 30. FU-2b(데이터셋 보관·복구) 설계 결정과 착수 (2026-10-14, 사용자 결정 2026-10-14)
+설계 제안(architect 조사, 코드 근거 확인)의 결정 11건을 모두 권장안으로 확정했다. 범위는 데이터셋 보관·복구뿐이다(제외: 행 보관, 열·수식 보관, 영구 삭제, 30일 뒤 `DROP`). `ds_`·`dv_`·`de_` 표와 뷰는 건드리지 않는 설계다.
+### 30-1. 확정 결정
+1. **보관의 뜻(D1):** "입력·정의 동결 + 포털 목록 숨김, Superset 공개 유지". 보관해도 `dv_` 뷰는 `bi_readonly`에 공개되고 Superset 가상 데이터셋과 차트는 남는다. **데이터를 감추려면 영구 삭제 단위가 따로 필요하다.** 사용자 Skill과 화면 확인창 문구에 이 뜻과 한계를 적는다. Superset 등록은 유지한다(Q4).
+2. **권한(D3):** 보관·복구는 그 팀의 `definer`만 한다. 관리자 예외 코드는 넣지 않는다. 구현 첫 단계에서 "관리자가 비활성 팀에도 `definer`를 지정할 수 있는지"를 실측하고, 가능하면 그것을 복구 경로로 관리자 Skill에 적고 불가능하면 알려진 한계로 기록한다.
+3. **비활성 팀·사용자 소유 데이터셋(D3-1):** 팀 활성 여부를 보지 않고 보관·복구할 수 있다. Q3 본체는 미결로 둔다.
+4. **마이그레이션 `0008` 승인:** `drop_constraint` 4개(upgrade·downgrade의 `ck_datasets_status`, `ck_audit_log_action` 교체)를 **"DROP 확인: 사용자 승인 (2026-10-14)"** 로 기록한다(대기 표시 없이 구현). downgrade는 보관 행이나 새 감사 행(`dataset.archive`·`dataset.restore`)이 있으면 거부하고 아무것도 바꾸지 않는다. `ck_datasets_status`는 `IN ('active','archived')`, `ck_audit_log_action`은 17개 값.
+5. **새 열 없음:** `archived_at` 없이 `status`만 쓴다. 보관 시각·행위자는 감사 기록에서 얻는다.
+6. **계약:** 새 오류 코드 `DATASET_ARCHIVED`(409), 엔드포인트 B7(`POST /datasets/{id}/archive`)·B8(`POST /datasets/{id}/restore`), 감사 행위 `dataset.archive`·`dataset.restore` 추가(15 → 17).
+7. **시작 대조(D1-1):** 시작 시 뷰·Superset 대조에 보관 데이터셋도 포함한다.
+8. **보관 중 읽기:** 수식 검사·미리보기(D2·D3)와 조회는 허용한다.
+9. **이름 충돌(D2, Q8):** 이름 점유는 계속한다(`UNIQUE(team_id, name)` 유지). 이름 충돌 409 메시지에 "보관된 데이터셋과 같은 이름"을 덧붙인다.
+10. **`def_version`과 확인창:** `def_version`은 올리지 않는다(D5). 확인창은 이름 입력 없는 단순 확인창이다(D9). 이미 같은 상태인 재요청은 200, 감사 0건(D6). 목록은 `GET /datasets?status=active|archived|all`, 기본 `active`(D7).
+11. **일정:** 구독 종료(10/18) 전 PR 목표는 10/17. 승인은 이 절로 갈음한다.
+### 30-2. 진행 지시
+- 구현 첫 단계 확인: `op.f` 이름 동작과 CHECK 교체의 잠금·소요를 실제 PostgreSQL에서 확인한다(제안과 다르면 멈춰 보고). 코드 함정 3개(`DatasetStatus` Literal, `lock_dataset`의 `status` 조회, `test_static_acl.py`)를 반영한다.
+- 검증: 마지막 커밋 기준 전체 재검증(실제 PG 전체 pytest, 차분 전수, 프런트 전체, Superset 스모크 STRIP true·false, 비밀값 검사, 마이그레이션 왕복). 설계 제안의 시험 계획 전부, 특히 ① 보관·복구 전후 뷰 정의 해시와 `ds_` 행 해시가 같고 `CREATE`·`ALTER`·`DROP`이 0건, ② 모든 쓰기 라우트 순회에서 보관 상태면 409.
+- 스크린샷 `fu2b-{화면}-{상태}.png`(1920×1080): S2 보기 필터·배지, 보관 확인창, 보관 중 읽기 전용 배너, 이름 충돌 안내, 복구.
+- 통과 시 `harness/setup` → `main` 새 PR(병합 금지). 실패하거나 새 환경변수·새 의존성·기준과 다른 설정·위 승인 범위를 넘는 권한이나 `DROP`이 필요하면 그 자리에서 멈춘다.
