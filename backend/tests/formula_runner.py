@@ -23,6 +23,7 @@ from app.formula import (
     LITERALS,
     ColumnInfo,
     FunctionRegistry,
+    ReferenceEnv,
     compile_formula,
     get_default_registry,
     render_literal_sql,
@@ -43,6 +44,16 @@ def case_columns(case: Case) -> list[ColumnInfo]:
         ColumnInfo(index, name, column_type, tag=case.tags.get(name))
         for index, (name, column_type) in enumerate(case.cols.items(), start=1)
     ]
+
+
+def case_env(case: Case, columns: Sequence[ColumnInfo]) -> ReferenceEnv:
+    """사례의 기준값 환경(07 §3-2): 항목 이름 -> 임시 번호(1부터)와 기준 날짜 열 번호.
+
+    `REF` 사례가 아니면 빈 환경이다(`REF`를 쓰지 않는 수식은 환경을 읽지 않는다).
+    """
+    ids = {name: index for index, name in enumerate(case.refs, start=1)}
+    base = next((c.id for c in columns if c.name == case.base), None) if case.base else None
+    return ReferenceEnv(item_ids=ids, base_date_column_id=base)
 
 
 def _typed_value(column_type: str, value: Any) -> Any:
@@ -138,6 +149,7 @@ def execute_case(
         registry=registry,
         source_columns=case_sources(case, columns, typed_cast=typed_cast),
         const_probe=make_probe(connection) if use_probe else None,
+        env=case_env(case, columns),
     )
     if not result.ok or case.expect == REJECT:
         return result, None, None
@@ -185,6 +197,8 @@ def run_cases_on(
     failures: list[str] = []
     total = 0
     for spec in registry.specs():
+        if spec.precheck is not None:
+            continue  # 환경 함수(`REF`)는 실제 기준값 표가 필요해 전용 시험이 돌린다
         for case in spec.cases:
             total += 1
             try:
@@ -218,6 +232,7 @@ def differential_check(
         registry=registry,
         source_columns=case_sources(case, columns, typed_cast=True, via_literals=True),
         const_probe=make_probe(connection),
+        env=case_env(case, columns),
     )
     if not result.ok:
         return None if case.expect == REJECT else f"컴파일 실패 {result.issues}"
@@ -264,7 +279,12 @@ def fuzz_check(
             subquery = _row_subquery(row, columns)
             sources = {c.id: subquery.c[c.name] for c in columns}
             result = compile_formula(
-                expression, columns, registry=registry, source_columns=sources, const_probe=probe
+                expression,
+                columns,
+                registry=registry,
+                source_columns=sources,
+                const_probe=probe,
+                env=ReferenceEnv(),
             )
             if not result.ok:
                 rejected += 1

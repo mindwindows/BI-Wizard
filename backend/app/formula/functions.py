@@ -14,17 +14,19 @@ from __future__ import annotations
 
 import datetime
 import functools
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.ddl.reference_lookup import reference_value_subquery
 from app.formula.cases import Case, err, ok, reject
-from app.formula.context import Compiled, ConvertContext
-from app.formula.errors import FormulaError, make_issue
-from app.formula.literals import BOOLEAN, DATE, NUMBER, TEXT
+from app.formula.columns import ColumnInfo
+from app.formula.context import Compiled, ConvertContext, ReferenceEnv
+from app.formula.errors import FormulaError, FormulaIssue, make_issue
+from app.formula.literals import BOOLEAN, DATE, NUMBER, TEXT, text_constant_problem
 from app.formula.nodes import Call, Col, Node, Text, call
 from app.formula.registry import (
     TYPE_VARIABLE,
@@ -1044,12 +1046,139 @@ DATE_FN = FunctionSpec(
 )
 
 
+# --- 기준값 `REF("이름")` (FU-3, 07 §2-2·§3-2, 03b 32) ----
+# 환경 함수(K6 원칙의 예외 한 번): 기준값 항목 이름 -> 번호와 기준 날짜 열을
+# `ReferenceEnv`로 받는다.
+# 인수는 직접 쓴 글자 상수 하나(항목 이름 50자 이하), 결과는 숫자다. 행의 기준 날짜와 **같은 연도**
+# 값만 쓰고(이월 없음) 값이 없으면 빈 값 + 셀 오류 E4다.
+
+REF_NAME = "REF"
+REF_MAX_NAME_LENGTH = 50  # 06 §2-2: 기준값 항목 이름 길이 상한(`reference_items`와 같다)
+
+
+def _ref_precheck(
+    node: Call,
+    targs: Sequence[Any],
+    env: ReferenceEnv,
+    columns: Mapping[int, ColumnInfo],
+) -> list[FormulaIssue]:
+    """C0: 기준 날짜 열이 없거나 이름이 없는 항목이면 오류(둘 다 해당하면 두 오류 모두)."""
+    issues: list[FormulaIssue] = []
+    base = columns.get(env.base_date_column_id) if env.base_date_column_id is not None else None
+    if base is None or base.kind != "raw" or base.type != "date":
+        issues.append(make_issue("BASE_DATE_REQUIRED", node.start, node.end))
+    if len(targs) == 1 and targs[0].kind == "text":
+        name = targs[0].value
+        # 글자 상수 규칙을 어긴 이름은 TEXT_CONSTANT_INVALID가 이미 알렸다.
+        if text_constant_problem(name) is None and name not in env.item_ids:
+            from app.formula.analyze import Analysis
+
+            suggest = Analysis._suggest(name, sorted(env.item_ids), quote="'{}'")
+            issues.append(
+                make_issue("REF_UNKNOWN", targs[0].start, targs[0].end, name=name, suggest=suggest)
+            )
+    return issues
+
+
+def _ref(ctx: ConvertContext, a: Sequence[Compiled]) -> Compiled:
+    """값 = 상관 스칼라 서브쿼리 하나, 오류 = 값이 없으면 4(`CASE WHEN (같은 서브쿼리) IS NULL`)."""
+    env = ctx.env
+    if env is None or env.base_date_column_id is None:
+        raise RuntimeError("REF 변환에는 기준값 환경과 기준 날짜 열이 필요하다(구현 오류).")
+    name = a[0].const
+    item_id = env.item_ids[name]  # C0(precheck)가 이름을 확인했다. 없으면 KeyError(구현 오류)
+    value = reference_value_subquery(
+        ctx.lit.reference_id(item_id), ctx.source(env.base_date_column_id)
+    )
+    return Compiled(value, sa.case((value.is_(None), ctx.lit.code("E4"))), NUMBER)
+
+
+_REF_COLS = {"기준일": "date"}
+_REF_VALUES = {"전기요금": {2025: "10", 2026: "12.5"}}
+
+REF = FunctionSpec(
+    name=REF_NAME,
+    signature=(Param("이름", TEXT, const=ConstRule("text", max_length=REF_MAX_NAME_LENGTH)),),
+    returns=NUMBER,
+    null_policy="custom",
+    to_sql_custom=_ref,
+    precheck=_ref_precheck,
+    reads_row=True,
+    excel_diff="엑셀에는 없는 이름입니다(엑셀의 상수 칸이나 VLOOKUP에 해당). 그 행의 기준 날짜와 "
+    "같은 연도의 기준값만 쓰고 전년 값을 이어 쓰지 않습니다.",
+    help_ko=(
+        'REF("이름"): 기준값 화면에 등록한 항목에서, 그 행의 기준 날짜가 속한 연도의 값을 '
+        "가져옵니다. "
+        "그 연도 값이 없으면 빈 값이 되고 오류 E4로 점검 화면에 나옵니다. "
+        "기준 날짜 열이 있는 데이터셋에서만 쓸 수 있고 결과는 숫자입니다."
+    ),
+    cases=(
+        ok(
+            'REF("전기요금")',
+            "12.5",
+            cols=_REF_COLS,
+            row={"기준일": datetime.date(2026, 3, 1)},
+            refs=_REF_VALUES,
+            base="기준일",
+        ),
+        ok(
+            'REF("전기요금")',
+            "10",
+            cols=_REF_COLS,
+            row={"기준일": datetime.date(2025, 12, 31)},
+            refs=_REF_VALUES,
+            base="기준일",
+            note="같은 연도 값만 쓴다(연도 경계)",
+        ),
+        err(
+            'REF("전기요금")',
+            "E4",
+            cols=_REF_COLS,
+            row={"기준일": datetime.date(2027, 1, 1)},
+            refs=_REF_VALUES,
+            base="기준일",
+            note="2026년 값이 있어도 이월하지 않는다",
+        ),
+        reject(
+            'REF("없는항목")',
+            "REF_UNKNOWN",
+            cols=_REF_COLS,
+            refs=_REF_VALUES,
+            base="기준일",
+        ),
+        reject('REF("전기요금")', "BASE_DATE_REQUIRED", refs=_REF_VALUES),
+        reject(
+            "REF([이름열])",
+            "CONST_REQUIRED",
+            cols={**_REF_COLS, "이름열": "text"},
+            refs=_REF_VALUES,
+            base="기준일",
+            note="열 값은 직접 쓴 글자가 아니다",
+        ),
+        reject(
+            'REF("전기" & "요금")',
+            "CONST_REQUIRED",
+            cols=_REF_COLS,
+            refs=_REF_VALUES,
+            base="기준일",
+            note="계산식은 직접 쓴 글자가 아니다",
+        ),
+        reject("REF(1)", "ARG_TYPE", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"),
+        reject("REF()", "ARG_COUNT", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"),
+        reject(
+            'REF("전기요금", 2026)', "ARG_COUNT", cols=_REF_COLS, refs=_REF_VALUES, base="기준일"
+        ),
+    ),
+)
+
+
 _ALL_SPECS = (
     ADD, SUBTRACT, MULTIPLY, DIVIDE, NEGATE,
     EQUAL, NOT_EQUAL, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL,
     CONCAT, IF, AND, OR, NOT, IFERROR,
     ROUND, ROUNDUP, ROUNDDOWN, ABS, MIN, MAX, SUM, SUMTAG,
     LEFT, RIGHT, LEN, TRIM, YEAR, MONTH, DATE_FN,
+    REF,
 )  # fmt: skip
 
 

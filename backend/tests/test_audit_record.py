@@ -1,6 +1,6 @@
 """`audit.record`와 허용 키 표(`audit.actions`)의 단위 시험(04 §5-1, 06 §2-1).
 
-- 행위 17개의 허용 키 표가 04 §5-1 표와 같다(키 이름이 곧 계약이다).
+- 행위 20개의 허용 키 표가 04 §5-1 표와 같다(키 이름이 곧 계약이다).
 - 목록 밖 키·빠진 키·틀린 형·긴 글자·알 수 없는 행위자는 구현 오류(`AuditRecordError`)이고 DB에
   아무것도 쓰지 않는다. 자르거나 고쳐 쓰지 않는다.
 - 가장 긴 값으로 채워도 `details`가 4,000바이트 안이다(DB CHECK는 안전망일 뿐 정상 경로에서
@@ -72,6 +72,10 @@ DOC_KEYS = {
     "user.bootstrap_admin": ({"is_admin"}, None),
     "dashboard.create": ({"embedded_uuid"}, None),
     "dashboard.update": (set(), {"name", "is_active"}),
+    # FU-3: 기준값(포털 전역 설정값)은 행 값이 아니다. 설명 원문은 기록하지 않고 길이만 남긴다.
+    "reference.create": ({"description_length"}, None),
+    "reference_value.add": ({"year", "value"}, None),
+    "reference_value.update": ({"year", "value_from", "value_to"}, None),
 }
 TARGET_TYPES = {
     "dataset.create": "dataset",
@@ -91,6 +95,9 @@ TARGET_TYPES = {
     "user.bootstrap_admin": "user",
     "dashboard.create": "dashboard",
     "dashboard.update": "dashboard",
+    "reference.create": "reference",
+    "reference_value.add": "reference",
+    "reference_value.update": "reference",
 }
 
 
@@ -124,8 +131,8 @@ def user_actor(user_id: int = 1) -> CurrentUser:
 # --- 허용 키 표 ----
 
 
-def test_there_are_seventeen_actions_in_the_order_of_the_check_constraint():
-    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(ACTIONS) == 17
+def test_there_are_twenty_actions_in_the_order_of_the_check_constraint():
+    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(ACTIONS) == 20
 
 
 @pytest.mark.parametrize("action", AUDIT_ACTIONS)
@@ -160,11 +167,22 @@ def test_no_action_allows_a_forbidden_key():
         "message",
         "last_error",
     )
+    # 06 §2-1 ③ 예외: 기준값 항목의 연도 값은 포털 전역 설정값이며 행 값이 아니다. 이 세 키는 기준값
+    # 행위 두 개에서만 허용하고 다른 행위·키에는 쓸 수 없다.
+    reference_value_keys = {
+        "reference_value.add": {"value"},
+        "reference_value.update": {"value_from", "value_to"},
+    }
     for action, spec in ACTIONS.items():
         names = {*spec.keys, *(spec.changes or {})}
-        for name in names:
+        exempt = reference_value_keys.get(action, set())
+        for name in names - exempt:
             assert name not in forbidden, (action, name)
             assert "password" not in name and "token" not in name and "secret" not in name
+        assert exempt <= names, action
+        assert not (
+            names & {"value", "value_from", "value_to"} and action not in reference_value_keys
+        ), action
         # 규칙 값은 불리언(rules_changed)으로만, 수식은 열 번호와 해시로만 남는다
         assert all(
             kind in {INT, INT_OR_NULL, STR, STR_OR_NULL, BOOL} for kind in spec.keys.values()

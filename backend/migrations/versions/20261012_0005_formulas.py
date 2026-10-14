@@ -12,7 +12,9 @@
   (태그나 수식이 바뀌면 의존 목록을 다시 쓴다). `formulas`에는 DELETE가 없다(FU-1에는 삭제가 없다).
   `bi_readonly`에는 아무것도 주지 않는다(정적 표는 Superset에 공개하지 않는다).
 - 모든 SQL은 보간 없는 고정 문자열이다(D3). `bi_data`의 동적 객체(`dv_*`, `de_*`)는 건드리지
-  않는다. 뷰가 정적 표를 읽지 않아(자기 `ds_*`만 읽는다, 06 §3-4) downgrade가 뷰에 막히지 않는다.
+  않는다. 뷰가 정적 표를 읽지 않아(0009 전까지는 자기 `ds_*`만 읽는다, 06 §3-4)
+  downgrade가 뷰에 막히지 않는다.
+  (0009부터 `REF` 뷰는 `reference_values`도 읽어 그 downgrade가 막힌다.)
 
 downgrade는 표를 외래키 역순으로 지운다(`DROP TABLE`, 표에 붙은 권한도 함께 사라진다). 이 DROP은
 `tests/test_migrations.py`의 `DROP_APPROVED`에 기록된 D2 안전장치 대상이다. 운영 중 문제는

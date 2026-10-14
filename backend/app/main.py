@@ -37,6 +37,7 @@ from app.formula.router import router as formula_router
 from app.formula.rowview import FormulaRowView
 from app.formula.status import ViewStatus
 from app.health import router as health_router
+from app.reference.router import router as reference_router
 from app.superset.router import router as superset_router
 from app.superset.runtime import SupersetServices, build_superset_services
 
@@ -58,6 +59,7 @@ PROTECTED_ROUTERS: tuple[APIRouter, ...] = (
     formula_router,
     superset_router,
     audit_router,
+    reference_router,
 )
 DEV_ROUTERS: tuple[APIRouter, ...] = (stub_router,)
 

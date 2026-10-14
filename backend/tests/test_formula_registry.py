@@ -33,15 +33,17 @@ FU1_FUNCTIONS = {
     "IF", "AND", "OR", "NOT", "IFERROR", "ROUND", "ROUNDUP", "ROUNDDOWN", "ABS", "MIN", "MAX",
     "SUM", "LEFT", "RIGHT", "LEN", "TRIM", "YEAR", "MONTH", "DATE", "SUMTAG",
 }  # fmt: skip
+# FU-3이 더한 함수(기준값, 환경 함수).
+FU3_FUNCTIONS = {"REF"}
 FU1_OPERATORS = {"+", "-", "*", "/", "=", "<>", "<", "<=", ">", ">=", "&", "neg"}
 
 
 def test_default_registry_has_exactly_the_fu1_function_set():
     registry = get_default_registry()
-    assert set(registry.function_names()) == FU1_FUNCTIONS
+    assert set(registry.function_names()) == FU1_FUNCTIONS | FU3_FUNCTIONS
     operators = {s.name for s in registry.specs() if s.kind == "operator"}
     assert operators == FU1_OPERATORS
-    assert len(registry.specs()) == len(FU1_FUNCTIONS) + len(FU1_OPERATORS)
+    assert len(registry.specs()) == len(FU1_FUNCTIONS | FU3_FUNCTIONS) + len(FU1_OPERATORS)
 
 
 def test_every_entry_is_complete():

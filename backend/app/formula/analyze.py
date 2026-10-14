@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.formula.columns import ColumnInfo, is_supported_column_type
+from app.formula.context import ReferenceEnv
 from app.formula.cycles import MAX_CHAIN_DEPTH, analyze_graph
 from app.formula.errors import FormulaError, FormulaIssue, make_issue
 from app.formula.literals import (
@@ -126,8 +127,10 @@ class Analysis:
         root_id: int,
         root_tag: str | None,
         root_name: str,
+        env: ReferenceEnv | None = None,
     ) -> None:
         self.registry = registry
+        self.env = env
         self.columns = list(columns)
         self.by_id = {c.id: c for c in self.columns}
         self.by_name = {c.name: c for c in self.columns}
@@ -325,11 +328,14 @@ class Analysis:
             return TNode("bad", UNKNOWN, start=node.start, end=node.end)
         self.functions_used.add(spec.name)
         result_type = self._check_call(node, spec, targs, issues)
+        if spec.precheck is not None:
+            issues.extend(self._run_precheck(node, spec, targs))
         depth = 1 + max((t.depth for t in targs), default=0)
         if depth > MAX_EXPANDED_DEPTH:
             issues.append(make_issue("TOO_DEEP", node.start, node.end, max=MAX_EXPANDED_DEPTH))
             return TNode("bad", UNKNOWN, start=node.start, end=node.end)
-        const = all(t.const for t in targs) and spec.rewrite is None
+        # 행 데이터를 읽는 식(`REF`)은 인수가 상수여도 상수 부분식이 아니다(상수 오류 검사 대상 밖).
+        const = all(t.const for t in targs) and spec.rewrite is None and not spec.reads_row
         height = 1 + max((t.height for t in targs), default=0) if const else 0
         return TNode(
             "call",
@@ -343,6 +349,18 @@ class Analysis:
             const=const,
             height=height,
         )
+
+    def _run_precheck(
+        self, node: Call, spec: FunctionSpec, targs: tuple[TNode, ...]
+    ) -> Sequence[FormulaIssue]:
+        """환경 함수(`REF`)의 C0 검사. 환경이 없으면 구현 오류다(조용히 통과시키지 않는다)."""
+        assert spec.precheck is not None  # noqa: S101
+        if self.env is None:
+            raise RuntimeError(
+                f"{spec.name}은(는) 기준값 환경(ReferenceEnv) 없이 컴파일할 수 없다"
+                "(컴파일 호출 지점이 env를 넘기지 않았다: 구현 오류)."
+            )
+        return spec.precheck(node, targs, self.env, self.by_id)
 
     def _check_call(
         self, node: Call, spec: FunctionSpec, targs: tuple[TNode, ...], issues: list[FormulaIssue]

@@ -34,6 +34,7 @@ from app.ddl.names import (
     period_index_name,
     view_name,
 )
+from app.ddl.reference_lookup import ReferenceLookup, reference_value_subquery
 
 __all__ = [
     "ALLOWED_DDL_ELEMENTS",
@@ -46,6 +47,7 @@ __all__ = [
     "DdlNameError",
     "DdlNotAllowedError",
     "DdlVerificationError",
+    "ReferenceLookup",
     "add_period_rules",
     "add_raw_column",
     "check_dynamic_name",
@@ -60,6 +62,7 @@ __all__ = [
     "error_view_name",
     "period_check_name",
     "period_index_name",
+    "reference_value_subquery",
     "run_ddl",
     "view_column_names",
     "view_name",

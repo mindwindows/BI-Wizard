@@ -7,10 +7,12 @@ import {
   markSegments,
   suggestColumns,
   suggestFunctions,
+  suggestReferences,
   suggestTags,
   suggestionsFor,
   toUtf16Index,
 } from "./autocomplete";
+import type { ReferenceItem } from "../reference/types";
 import type { FunctionInfo } from "./types";
 
 const fn = (name: string): FunctionInfo => ({ name, signature: `${name}(값)`, returns: "숫자", help_ko: "도움말", excel_diff: "" });
@@ -45,6 +47,59 @@ describe("completionContext", () => {
   it("닫힌 [..]·\"..\" 뒤는 다시 일반 자리", () => {
     expect(completionContext('"abc" & LE', 10)).toEqual({ kind: "function", from: 8, to: 10, query: "LE" });
     expect(completionContext("[매출] & LE", 11)?.kind).toBe("function");
+  });
+});
+
+const ref = (name: string, description: string | null = null): ReferenceItem => ({
+  id: 1,
+  name,
+  description,
+  value_count: 0,
+  year_min: null,
+  year_max: null,
+  created_by: { id: 1, display_name: "관리자" },
+  created_at: "2026-10-14T09:00:00+09:00",
+});
+
+describe('REF(" 기준값 이름 자리 (FU-3)', () => {
+  it('REF(" 안은 기준값 자리이고 닫는 따옴표까지 바꿀 범위에 넣는다', () => {
+    expect(completionContext('REF("', 5)).toEqual({ kind: "reference", from: 4, to: 5, query: "" });
+    expect(completionContext('REF("전', 6)).toEqual({ kind: "reference", from: 4, to: 6, query: "전" });
+    expect(completionContext('ref( "전기")', 8)).toEqual({ kind: "reference", from: 5, to: 9, query: "전기" });
+    expect(completionContext('[매출] * REF("전', 13)).toEqual({ kind: "reference", from: 11, to: 13, query: "전" });
+  });
+
+  it("다른 함수 이름의 끝이 REF인 경우(SUMREF, MYREF)와 열 이름·일반 글자 상수는 기준값 자리가 아니다", () => {
+    expect(completionContext('SUMREF("전', 10)).toBeNull();
+    expect(completionContext('MY_REF("전', 10)).toBeNull();
+    expect(completionContext('IF("전', 6)).toBeNull();
+    expect(completionContext("[REF(전", 7)?.kind).toBe("column");
+  });
+
+  it("글자 상수의 따옴표 두 개(\"\")는 한 글자로 풀어 질의한다", () => {
+    expect(completionContext('REF("a""b', 9)?.query).toBe('a"b');
+  });
+
+  it("이름 앞부분이 같은 것을 먼저, 포함은 그다음. 설명이 없으면 '기준값'을 보조 설명으로 쓴다", () => {
+    const items = [ref("가스요금_A팀"), ref("전기요금_A팀", "A팀 전기 단가"), ref("전기요금_B팀"), ref("환율")];
+    expect(suggestReferences(items, "전기").map((s) => s.label)).toEqual(["전기요금_A팀", "전기요금_B팀"]);
+    expect(suggestReferences(items, "_a").map((s) => s.label)).toEqual(["가스요금_A팀", "전기요금_A팀"]);
+    expect(suggestReferences(items, "").map((s) => s.detail)).toEqual(["기준값", "A팀 전기 단가", "기준값", "기준값"]);
+    expect(suggestReferences(items, "zzz")).toEqual([]);
+  });
+
+  it("suggestionsFor는 reference 자리에서 항목 후보를 돌려주고 항목이 없으면 빈 목록이다", () => {
+    const ctx = completionContext('REF("', 5);
+    expect(suggestionsFor(ctx, FUNCTIONS, [], [ref("환율")]).map((s) => s.kind)).toEqual(["reference"]);
+    expect(suggestionsFor(ctx, FUNCTIONS, [])).toEqual([]);
+  });
+
+  it('고르면 REF("이름") 모양의 글자 상수가 되고 이미 닫힌 따옴표와 겹치지 않는다', () => {
+    const pick = suggestReferences([ref("전기요금_A팀")], "전")[0];
+    const open = 'REF("전';
+    expect(applySuggestion(open, completionContext(open, open.length)!, pick)).toEqual({ text: 'REF("전기요금_A팀"', caret: 13 });
+    const closed = 'REF("전")';
+    expect(applySuggestion(closed, completionContext(closed, 6)!, pick)).toEqual({ text: 'REF("전기요금_A팀")', caret: 13 });
   });
 });
 

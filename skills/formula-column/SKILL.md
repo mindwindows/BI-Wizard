@@ -41,7 +41,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 ## 4. 출력
 ### 4-1. 라이브러리 (`backend/app/formula/api.py`)
 - `compile_formula(...)` -> `CompileResult`: `ok`, `issues[{code, message, start, end}]`, `result_type`, `ast`(열 번호 참조; `ast_json`/`ast_hash`가 저장용), `deps`(`formula_deps`), `source_columns`, `sumtag_columns`, `functions_used`, `node_count`, **`value`(값 식)·`error`(오류 식)** SQLAlchemy 표현식.
-- 값 식은 오류 칸이면 NULL, 오류 식은 정상·빈 값이면 NULL이고 오류면 셀 오류 코드(smallint 1~3 = `E1` 0으로 나눔, `E2` 글자 길이 범위, `E3` 날짜 범위; 문구는 `CELL_ERROR_MESSAGES_KO`). 오류가 날 수 없는 식은 `error=None`.
+- 값 식은 오류 칸이면 NULL, 오류 식은 정상·빈 값이면 NULL이고 오류면 셀 오류 코드(smallint 1~4 = `E1` 0으로 나눔, `E2` 글자 길이 범위, `E3` 날짜 범위, `E4` 기준값 없음[FU-3 `REF`]; 문구는 `CELL_ERROR_MESSAGES_KO`). 오류가 날 수 없는 식은 `error=None`.
 - 의미 규칙(07 §3): 빈 값은 0이 아니라 결과도 빈 값(`MIN`·`MAX`·`SUM`·`SUMTAG` 포함 전파), 글자 `=`·`<>`는 대소문자 무시, 숫자-글자·날짜-글자 자동 변환 없음, `IF`는 고른 쪽만, `IFERROR`는 오류 칸일 때만 대체값(빈 값은 그대로), 평가 순서는 인수 오류 > 인수 빈 값 > 자기 조건.
 - 모든 상수는 `CAST(… AS 형)`이다. 같은 표현식을 그대로 실행하면 미리보기(바인드), `render_literal_sql`로 렌더하면 뷰 정의와 같은 글자다.
 
@@ -56,7 +56,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 - 오류 코드(05 §3): 422 `FORMULA_INVALID`(`details.errors[]`는 D2와 같은 모양), 422 `FORMULA_CIRCULAR`(`details.path` = 열 **이름** 문자열 배열 `["가","나","가"]`), 422 `FORMULA_RUNTIME_ERROR`(DB 예외·시간 초과를 하나로 정규화), 409 `DEFINITION_VERSION_MISMATCH`(`details.current_version`)·`ALREADY_EXISTS`(`details.field=display_name`), 503 `DEFINITION_BUSY`(`details.retry_after`), 429 `PREVIEW_BUSY`(`details.retry_after`, 응답 헤더 `Retry-After`).
 
 ### 4-3. 저장되는 곳
-- `formulas`(열마다 수식 하나: 보관용 원문 `expression`, 열 번호 참조 `ast`, `ast_hash`), `formula_deps`(계산 열이 읽는 열, `SUMTAG`는 펼친 구체 열). **계산 열은 원본 표 `ds_<번호>`에 저장되지 않는다.** `bi_data.dv_<번호>`(`team`, `row_id`, 열 번호 오름차순 `c_<번호>`: 원본·계산 열; 오류 칸은 NULL)와 `bi_data.de_<번호>`(`row_id`, 계산 열마다 `e_<번호>` smallint: NULL = 정상 또는 빈 값, 1~3 = 셀 오류 코드)가 데이터셋마다 생긴다(수식이 없어도 `dv_`는 `team`·`row_id`만으로 만든다). `datasets.def_hash` = 두 뷰 정의(리터럴 렌더)의 sha256.
+- `formulas`(열마다 수식 하나: 보관용 원문 `expression`, 열 번호 참조 `ast`, `ast_hash`), `formula_deps`(계산 열이 읽는 열, `SUMTAG`는 펼친 구체 열). **계산 열은 원본 표 `ds_<번호>`에 저장되지 않는다.** `bi_data.dv_<번호>`(`team`, `row_id`, 열 번호 오름차순 `c_<번호>`: 원본·계산 열; 오류 칸은 NULL)와 `bi_data.de_<번호>`(`row_id`, 계산 열마다 `e_<번호>` smallint: NULL = 정상 또는 빈 값, 1~4 = 셀 오류 코드)가 데이터셋마다 생긴다(수식이 없어도 `dv_`는 `team`·`row_id`만으로 만든다). `datasets.def_hash` = 두 뷰 정의(리터럴 렌더)의 sha256.
 
 ## 5. 실행 방법
 - **사람(화면)**:
@@ -87,7 +87,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 
 #### 입력 그리드의 계산 열 (S4 가운데)
 - 머리글: 계산 열은 기울임 + 앞에 `ƒ` 표시 + 아래 선(입력 열과 구별). 칸: 이탤릭 + 왼쪽 세로 선(계산 열 표지)의 읽기 전용, 값이 있는 칸만 회색 배경, 붙여넣기 범위에 걸치면 막힌다. 칸을 두 번 누르거나 Enter/F2/글자 입력을 하면 "계산 열은 수식으로 계산되어 직접 고칠 수 없습니다. 수식은 Inspector에서 고칠 수 있습니다."가 5초간 나온다.
-- **오류 칸**: 붉은 배경의 "오류" + 작은 코드(E1/E2/E3). 칸 위에 올리면 이유가 나온다(문구는 `GET /api/formulas/functions`의 `cell_errors`; 못 읽으면 기본 문구). **빈 칸(계산 결과가 빈 값)은 입력 열과 같은 빗금 배경**(계산 열 표지 세로 선은 유지)이라 오류 칸과 다르게 보인다.
+- **오류 칸**: 붉은 배경의 "오류" + 작은 코드(E1/E2/E3). **E4(기준값 없음, FU-3)는 붉은 "오류"가 아니라 "기준값 없음" 라벨의 주황 점선으로 구별 표시**되고 점검 화면(S5)에서 기준값 화면 링크가 있다. 칸 위에 올리면 이유가 나온다(문구는 `GET /api/formulas/functions`의 `cell_errors`; 못 읽으면 기본 문구). **빈 칸(계산 결과가 빈 값)은 입력 열과 같은 빗금 배경**(계산 열 표지 세로 선은 유지)이라 오류 칸과 다르게 보인다.
 
 #### S5 점검 (`/checks`, 읽기 권한이면 누구나)
 1. 상단 메뉴 **점검**. 계산 오류 칸이 있는 열만 `데이터셋 / 팀 / 계산 열 / 오류 칸 수` 표로 나온다(`GET /api/checks/formula-errors`, 50개씩 쪽 이동). 오류가 없으면 "계산 오류 칸이 없습니다".
@@ -137,7 +137,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 ### 동작 요약 (구현 사실)
 - **정의 변경 한 트랜잭션**(04 §5): `datasets` 행 `FOR NO KEY UPDATE`(`lock_timeout` 1초) -> `def_version` 확인 -> 열 변경(D4는 계산 열 행 추가, D5는 결과 형 갱신) -> **훅** -> `def_hash` 기록 -> 커밋. 훅은 ① 저장된 모든 수식을 현재 열 이름·태그로 **다시 컴파일**(열 이름 변경은 AST가 번호 참조라 통과, 태그 변경은 `SUMTAG` 펼침·순환·`TAG_EMPTY`에 반영, 참조한 수식의 결과 형이 바뀌어 깨지는 수식은 422로 거부하고 전부 롤백), ② 새 수식·바뀐 의존·바뀐 결과 형(`dataset_columns.type`)을 쓰고, ③ 뷰 정의와 해시를 만든다. **해시가 같고 뷰가 있으면 DDL을 건너뛴다**(열 이름·순서·데이터셋 이름 변경은 뷰를 다시 만들지 않는다). 열이 끝에만 늘면 `CREATE OR REPLACE VIEW`, 열 제거·형 변경이면 `DROP VIEW` + `CREATE VIEW`(`CASCADE` 없음; 실제 PostgreSQL에서 `CREATE OR REPLACE`가 형 변경에 `42P16`을 내는 것을 확인했고 그 경우 지우고 다시 만든다).
 - **런타임 DDL은 `bi_app`으로 실행**한다. `bi_data` 소유자는 `bi_owner`(스키마), `ds_`/`dv_`/`de_`의 소유자는 `bi_app`, `bi_readonly`는 `dv_`·`de_`·`ds_`를 읽을 수만 있고 변경·삭제·생성은 모두 거부되며 `bi_app`은 `public`에 만들 수 없다(시험으로 확인).
-- **완화책 3가지**(07 §4-3, X-26): ① 엔진 연결 때 `startup_params={"standard_conforming_strings": "on"}`로 세션 설정을 고정(`app/db.py`; 시작 자가 점검이 `on`인지 다시 확인) ② 역슬래시·제어문자·NUL·서식 문자 거부(C0와 리터럴 렌더러) ③ 뷰를 만든 직후 같은 트랜잭션에서 뷰 열 이름·개수를 읽어 확인하고, 뷰 정의에 들어간 모든 글자 상수를 같은 렌더러로 `SELECT`해 입력과 같은지 비교한다(어긋나면 `DdlVerificationError`로 롤백). 뷰 정의 SELECT는 `ddl` 게이트가 먼저 확인한다(자기 `ds_<번호>` 하나만 읽음, `text()`·`literal_column`·서브쿼리 없음, **허용 목록 `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음(`pg_sleep` 등 거부)**, 바인드는 숫자·글자·참거짓·날짜뿐이며 **글자 바인드의 NUL·역슬래시·제어·서식 문자는 게이트가 한 번 더 거부**, 출력 열 이름은 번호 규칙). **렌더 글자와 `CreateView`가 그리는 정의의 대조는 어떤 DB 문장도 실행하기 전에** 한다(렌더 함수가 정의를 바꿔 돌려주면 DB에 닿기 전에 `DdlVerificationError`). 확인 질의(`RenderedSelect`)는 렌더된 글자가 `SELECT CAST('…' AS TEXT) AS k0, …` 모양이고 값이 입력 상수와 같을 때만 **실행 전에** 통과하므로 임의 SQL을 돌려주는 render 함수를 주입해도 실행되지 않는다(`RenderedSelect`는 `ddl` 밖에서, `literal_column`은 `ddl`·`formula` 밖에서 쓰지 못하게 AST 시험이 지킨다). 뷰 정의 SQL에는 수식 상수가 들어 있으므로 **DB 오류는 SQL 없이(`DdlExecutionError`, SQLSTATE만) 올려 로그·응답에 상수가 남지 않는다.**
+- **완화책 3가지**(07 §4-3, X-26): ① 엔진 연결 때 `startup_params={"standard_conforming_strings": "on"}`로 세션 설정을 고정(`app/db.py`; 시작 자가 점검이 `on`인지 다시 확인) ② 역슬래시·제어문자·NUL·서식 문자 거부(C0와 리터럴 렌더러) ③ 뷰를 만든 직후 같은 트랜잭션에서 뷰 열 이름·개수를 읽어 확인하고, 뷰 정의에 들어간 모든 글자 상수를 같은 렌더러로 `SELECT`해 입력과 같은지 비교한다(어긋나면 `DdlVerificationError`로 롤백). 뷰 정의 SELECT는 `ddl` 게이트가 먼저 확인한다(자기 `ds_<번호>`가 유일한 FROM, `text()`·`literal_column` 없음, 서브쿼리는 `REF`의 기준값 부분 질의 하나뿐이며 모양이 정확히 같아야 함[10절], **허용 목록 `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음(`pg_sleep` 등 거부)**, 바인드는 숫자·글자·참거짓·날짜뿐이며 **글자 바인드의 NUL·역슬래시·제어·서식 문자는 게이트가 한 번 더 거부**, 출력 열 이름은 번호 규칙). **렌더 글자와 `CreateView`가 그리는 정의의 대조는 어떤 DB 문장도 실행하기 전에** 한다(렌더 함수가 정의를 바꿔 돌려주면 DB에 닿기 전에 `DdlVerificationError`). 확인 질의(`RenderedSelect`)는 렌더된 글자가 `SELECT CAST('…' AS TEXT) AS k0, …` 모양이고 값이 입력 상수와 같을 때만 **실행 전에** 통과하므로 임의 SQL을 돌려주는 render 함수를 주입해도 실행되지 않는다(`RenderedSelect`는 `ddl` 밖에서, `literal_column`은 `ddl`·`formula` 밖에서 쓰지 못하게 AST 시험이 지킨다). 뷰 정의 SQL에는 수식 상수가 들어 있으므로 **DB 오류는 SQL 없이(`DdlExecutionError`, SQLSTATE만) 올려 로그·응답에 상수가 남지 않는다.**
 - **뷰 정의 게이트의 SQLAlchemy 부품 거부**(`app/ddl/dynamic.py` `_check_node_parts`·`_check_bind_value`, 1e 0단계, 뷰 정의 `_check_view_select`·확인 질의 `_check_echo_select`·`run_ddl`의 `CreateView` 직접 실행 모두): 사용자 정의 연산자(`custom_op`, `col.op("…")`), `EXTRACT` 단위가 `VIEW_ALLOWED_EXTRACT_FIELDS`(`year`·`month`·`day`) 밖인 것, callable 바인드(`callable_`; 값은 `effective_value`로 검사), 숫자 바인드의 비유한 값(`NaN`·무한대)·38자리 초과·알려진 모양 밖은 거부한다. 지수 표기(`1E+3`, `1E-8`)는 `ROUND` 계열의 10의 거듭제곱 상수가 이렇게 렌더되고 뷰 해시가 달라지므로 38자리 안에서 허용한다. 시험은 `test_formula_units.py`.
 - **한도 문구**: 수식 한도에 걸릴 때 화면에 나오는 쉬운 말과 사용자가 할 일은 `skills/dataset-definition/SKILL.md`의 '수식 한도에 걸릴 때 나오는 쉬운 말' 절에 있고, `tests/test_formula_limit_messages_doc.py`가 `errors.py`와 대조한다.
 - **읽기 전용·시간 제한·동시 제한**: D2~D3·D6~D8은 트랜잭션별 `transaction_read_only=on`과 `statement_timeout=5초`(`set_config`)로 실행한다. 미리보기는 사용자당 동시 1건, 미리보기·오류 칸 조회(D7·D8)·계산 열이 있는 데이터셋의 행 조회(C1)는 전역 동시 2건(풀 10+5 중 일반 요청용 연결을 충분히 남기는 보수값, 상향 여부는 후속)이고 넘으면 429 `PREVIEW_BUSY`다(기다리지 않고 바로 거절). 모두 코드 상수이며 새 환경변수는 없다.
@@ -159,7 +159,7 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 | PREVIEW_BUSY (429) | "지금 계산 요청이 많습니다…(약 N초 뒤)". 미리보기는 한 번 자동 재시도 후 버튼, S5는 다시 시도 버튼 |
 | ALREADY_EXISTS (409, field=display_name) | "같은 이름의 열이 이미 있습니다." |
 | VALIDATION_ERROR (422) | 열 이름·길이·예약어 등 필드 문구(1b와 같음) |
-| 셀 오류 E1 / E2 / E3 | D1 `cell_errors` 문구. 기본: E1 0으로 나누어 계산할 수 없습니다 / E2 글자 길이 범위를 벗어났습니다 / E3 날짜 범위를 벗어났습니다 |
+| 셀 오류 E1 / E2 / E3 / E4 | D1 `cell_errors` 문구. 기본: E1 0으로 나누어 계산할 수 없습니다 / E2 글자 길이 범위를 벗어났습니다 / E3 날짜 범위를 벗어났습니다 / E4 기준값이 없습니다(그 연도 값이 등록되어 있지 않습니다) |
 
 #### 계산 열 값 표시(03b 21-1 결정 2, 화면 표시만)
 - 계산 열(숫자) 칸 표시: 소수 최대 6자리, 끝자리 0 제거, 천 단위 쉼표. 반올림은 0에서 먼 쪽(7번째 자리 5 이상이면 올림, 음수도 크기 기준).
@@ -230,3 +230,14 @@ description: 같은 행 수식으로 계산 열을 만들고 고치는 기능의
 - `local-environment`: `/api/health`의 `views`·`views_failed_count`, 시작 자가 점검(`standard_conforming_strings`), 마이그레이션 왕복.
 - `admin-cleanup`: 잘못 만든 계산 열·뷰를 관리자가 수동으로 정리하는 절차(`formulas`·`formula_deps`·`dv_`·`de_`).
 - `dashboard-link`(FU-1e): `dv_<번호>` 뷰가 Superset 가상 데이터셋의 원천이다(고정 SQL `SELECT * FROM bi_data.dv_<번호>`). 계산 열이 추가·수정되어 커밋되면 같은 요청이 동기화를 요청하고, Superset 열 표시 이름에 계산 열 이름이 `c_<번호>`로 붙는다.
+
+## 10. FU-3: `REF` 기준값 함수 (03b 32절, 05 §2-9, 07, 06 §6 `0009`)
+- 문법: `REF("항목이름")`. 인수는 **직접 쓴 글자 상수 하나**(열·계산식·숫자는 `CONST_REQUIRED`/`ARG_TYPE`: `REF(1)`은 `ARG_TYPE`, `REF([열])`·`REF("a" & "b")`는 `CONST_REQUIRED`). 이름은 1~50자, `[` `]` `"` 금지(`reference-values` Skill). 결과는 숫자다.
+- 의미: 그 행의 **기준 날짜 열의 연도**와 연도가 정확히 같은 값을 읽는다. 없으면 이월 없이 오류 칸 `E4`(값 NULL, `de_` 코드 4). 기준 날짜 값이 빈 칸이면 결과도 빈 값이다(E4 아님). 연도 확정은 `EXTRACT(year FROM ds_N.c_base)`다.
+- 저장 시 검사(C0): `REF_UNKNOWN`(없는 항목 이름), `BASE_DATE_REQUIRED`(데이터셋에 기준 날짜 열이 없음). 둘 다 위치(start·end)와 함께 422 `FORMULA_INVALID`. 기준 날짜 열을 해제하려는데 REF 수식이 있으면 `BASE_DATE_IN_USE`(`dataset-definition` Skill).
+- 구현: 라이브러리는 `compile_formula(..., env=ReferenceEnv(item_ids, base_date_column_id))`. `FunctionSpec.precheck`가 이름을 항목 번호로 풀고(`Literals.reference_id`), `reads_row=True`라 상수 부분식으로 접히지 않는다. `env` 없이 `REF`를 만나면 `RuntimeError`(호출 지점 6곳: 저장 컴파일, 미리보기, 전체 재컴파일 `compile_all`, 시작 대조, 정합 점검, 수식 검사 API가 모두 `env`를 넘긴다). `CompileResult.reference_uses`는 사용한 항목 번호다.
+- 뷰: 안 B. `public.reference_values`를 읽는 **상관 스칼라 부분 질의**(`item_id = CAST(n AS INTEGER)`, `year = CAST(EXTRACT(year FROM ds_N.c_base) AS INTEGER)`)다. 뷰 게이트는 부분 질의를 바깥 SELECT의 열 식 안에서만 허용하고, 컴파일한 글자와 바인드 값이 `ReferenceLookup`에서 만든 기대 모양과 정확히 같을 때만 통과시킨다(다른 표·다른 열·`WHERE`·`UNION` 등은 거부, 게이트 음성 시험 66건).
+- R6: `GET /api/reference-items/{id}/usage`(관리자 전용)는 저장된 AST를 파이썬으로 훑어 항목을 쓰는 수식·데이터셋을 돌려준다(`backend/app/formula/usage.py`). 정정 확인창이 쓴다.
+- 기준값을 정정하면 뷰는 다시 만들지 않는다(값은 조회 시점에 읽는다). 이미 입력된 행의 결과와 Superset 차트는 다음 조회부터 바뀐다(Superset 캐시가 있으면 그 시간만큼 늦다).
+- 시험: `tests/test_formula_*`(REF 사례·C0·게이트), `test_ddl_reference_gate.py`, `test_reference_pg.py`, `test_reference_env_calls.py`(6곳이 `env`를 넘기는지 AST로 점검), `test_reference_differential.py`(+`reference_bundle.py`): 미리보기(바인드)·뷰(리터럴)·파이썬 독립 기준값 세 갈래 비교. 요약은 시험 출력 끝의 "REF 차분 시험 요약". 기존 차분 매트릭스는 `precheck` 함수를 건너뛴다(REF는 따로).
+- `reference-values`(FU-3): `REF`가 읽는 기준값 항목·연도 값의 등록·정정과 권한.

@@ -27,6 +27,7 @@ from app.dataset import service as dataset_service
 from app.formula import repo
 from app.formula.hook import FORCE_KEY, is_postgresql, make_probe
 from app.formula.literals import LiteralError
+from app.formula.refenv import load_env
 from app.formula.status import ViewStatus
 from app.formula.views import (
     FormulaCompileFailure,
@@ -73,7 +74,9 @@ def view_needs_rebuild(session: Session, dataset_id: int) -> bool:
         ds = source_table(defn)
         probe = make_probe(session) if is_postgresql(session) else None
         try:
-            results = compile_all(infos, source_columns(defn, ds), probe)
+            results = compile_all(
+                infos, source_columns(defn, ds), probe, env=load_env(session, defn)
+            )
             plan = build_plan(defn, ds, results)
         except (FormulaCompileFailure, LiteralError):
             return True  # 잠금 아래에서 다시 계산하면 같은 오류가 사유로 남는다

@@ -25,6 +25,7 @@ from tests.formula_helpers import (
     standard_columns,
     with_formulas,
 )
+from tests.formula_runner import case_columns, case_env
 
 
 def issues_of(expression, columns=None, **kwargs):
@@ -664,7 +665,8 @@ def _all_message_texts() -> dict[str, str]:
         for case in spec.cases:
             if case.expect != "reject":
                 continue
-            result = compile_formula(case.expression, standard_columns())
+            columns = case_columns(case) if spec.precheck is not None else standard_columns()
+            result = compile_formula(case.expression, columns, env=case_env(case, columns))
             for issue in result.issues:
                 texts[f"{issue.code}: {case.expression}"] = issue.message
         texts[f"help {spec.name}"] = spec.help_ko

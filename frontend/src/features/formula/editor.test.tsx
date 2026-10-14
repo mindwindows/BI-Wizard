@@ -195,6 +195,108 @@ describe("함수·열 자동완성", () => {
   });
 });
 
+const REFERENCE_ITEMS = {
+  items: [
+    { id: 1, name: "전기요금_A팀", description: "A팀 전기 단가", value_count: 2, year_min: 2025, year_max: 2026, created_by: { id: 1, display_name: "관리자" }, created_at: "2026-10-14T09:00:00+09:00" },
+    { id: 2, name: "환율", description: null, value_count: 0, year_min: null, year_max: null, created_by: { id: 1, display_name: "관리자" }, created_at: "2026-10-14T09:00:00+09:00" },
+  ],
+  total: 2,
+  limit: 200,
+  offset: 0,
+};
+const refCalls = (calls: RecordedCall[]) => calls.filter((c) => c.method === "GET" && c.path === "/reference-items");
+
+describe('REF(" 기준값 이름 자동완성 (FU-3)', () => {
+  it("REF(\" 안에서 항목 이름과 설명이 후보로 뜨고, 고르면 REF(\"이름\")이 된다. R1은 limit=200으로 읽는다", async () => {
+    const { calls } = mount({ handlers: { "GET /reference-items": () => json(200, REFERENCE_ITEMS) } });
+    typeExpr('[매출] * REF("');
+    const list = await screen.findByRole("listbox");
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(2));
+    const options = within(list).getAllByRole("option").map((o) => o.textContent);
+    expect(options[0]).toContain("전기요금_A팀");
+    expect(options[0]).toContain("A팀 전기 단가");
+    expect(options[1]).toContain("환율");
+    expect(options[1]).toContain("기준값");
+    expect(Object.fromEntries(refCalls(calls)[0].query.entries())).toEqual({ limit: "200", offset: "0" });
+    typeExpr('[매출] * REF("전', 13);
+    expect(within(await screen.findByRole("listbox")).getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(box().value).toBe('[매출] * REF("전기요금_A팀"');
+    expect(refCalls(calls)).toHaveLength(1); // 한 번만 읽는다
+  });
+
+  it("REF가 없는 수식에서는 R1을 부르지 않는다", async () => {
+    const { calls } = mount({ handlers: { "GET /reference-items": () => json(200, REFERENCE_ITEMS) } });
+    typeExpr('SUMTAG("');
+    await screen.findByRole("listbox");
+    typeExpr("[매");
+    await sleep(60);
+    expect(refCalls(calls)).toHaveLength(0);
+  });
+
+  it("함수 이름 자동완성에 REF가 보이고(D1 함수 목록) 도움말 목록에도 있다", async () => {
+    mount();
+    typeExpr("RE");
+    const list = await screen.findByRole("listbox");
+    expect(within(list).getAllByRole("option").map((o) => o.textContent)).toContain('REF REF("이름")');
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(box().value).toBe("REF(");
+    fireEvent.click(screen.getByText("수식 도움말"));
+    expect(await screen.findByText('REF("이름")')).toBeTruthy();
+    expect(screen.getByText(/전년 값을 이월하지 않으며/)).toBeTruthy();
+  });
+
+  it("항목이 하나도 없으면 안내를 보인다(등록은 기준값 화면)", async () => {
+    mount({ handlers: { "GET /reference-items": () => json(200, { items: [], total: 0, limit: 200, offset: 0 }) } });
+    typeExpr('REF("');
+    expect((await screen.findByTestId("reference-status")).textContent).toContain("등록된 기준값 항목이 없습니다");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("항목 읽기가 실패해도 편집은 계속되고 다시 불러오기로 복구한다", async () => {
+    let attempts = 0;
+    mount({
+      handlers: {
+        "GET /reference-items": () => {
+          attempts += 1;
+          return attempts === 1 ? apiError(503, "SERVICE_UNAVAILABLE") : json(200, REFERENCE_ITEMS);
+        },
+      },
+    });
+    typeExpr('REF("');
+    expect((await screen.findByTestId("reference-status")).textContent).toContain("이름을 직접 입력해도 됩니다");
+    fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
+    expect(within(await screen.findByRole("listbox")).getAllByRole("option")).toHaveLength(2);
+    expect(attempts).toBe(2);
+  });
+
+  it("전체가 읽은 개수보다 많으면 일부만 보임을 알린다", async () => {
+    mount({ handlers: { "GET /reference-items": () => json(200, { ...REFERENCE_ITEMS, total: 350 }) } });
+    typeExpr('REF("');
+    await screen.findByRole("listbox");
+    expect((await screen.findByTestId("reference-status")).textContent).toContain("앞의 2개만 후보로 보입니다(전체 350개)");
+  });
+
+  it("D2의 REF_UNKNOWN·BASE_DATE_REQUIRED 오류를 쉬운 말과 위치 표시로 보인다", async () => {
+    const result: CheckResult = {
+      ok: false,
+      result_type: null,
+      refs: [],
+      errors: [
+        { code: "REF_UNKNOWN", message: "'없는값' 기준값 항목을 찾을 수 없습니다. 기준값 화면에 등록된 이름인지 확인하세요.", start: 4, end: 9 },
+        { code: "BASE_DATE_REQUIRED", message: "REF는 기준 날짜 열이 있는 데이터셋에서만 쓸 수 있습니다. 먼저 데이터셋 설정에서 기준 날짜 열을 지정하세요.", start: 0, end: 10 },
+      ],
+    };
+    mount({ handlers: { "POST /datasets/7/formulas/check": () => json(200, result) } });
+    typeExpr('REF("없는값")');
+    const alert = await screen.findByRole("alert", { name: "수식 오류" });
+    expect(alert.textContent).toContain("'없는값' 기준값 항목을 찾을 수 없습니다");
+    expect(alert.textContent).toContain("먼저 데이터셋 설정에서 기준 날짜 열을 지정하세요");
+    expect(alert.querySelectorAll("mark.formula-bad").length).toBeGreaterThan(0);
+    expect((screen.getByRole("button", { name: "계산 열 추가" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
 describe("수식 검사(D2)와 오류 위치", () => {
   it("입력이 멈춘 뒤 한 번만 검사한다(디바운스). 새 열이면 column_id를 보내지 않는다", async () => {
     const { calls } = mount();
@@ -394,6 +496,28 @@ describe("미리보기(D3)", () => {
     const alert = await screen.findByRole("alert", { name: "수식 오류" });
     expect(alert.textContent).toContain("알 수 없는 열 [가나]입니다.");
     expect(alert.querySelector("mark")?.textContent).toBe("[가나]");
+  });
+});
+
+describe("미리보기의 E4 (FU-3)", () => {
+  it("E4 칸은 다른 오류와 구별되는 표시(preview-error-e4)와 서버 문구를 보인다. 서버 문구가 없으면 기본 E4 문구를 쓴다", async () => {
+    const preview: PreviewResult = {
+      ...PREVIEW_OK,
+      rows: [
+        { row_id: 3, period: "2027-03-01", value: null, error: "E4" },
+        { row_id: 2, period: "2026-02-01", value: null, error: "E1" },
+      ],
+      error_count: 2,
+    };
+    mount({ handlers: { "POST /datasets/7/formulas/preview": () => json(200, preview) } });
+    typeExpr('REF("환율")');
+    const table = await screen.findByRole("table", { name: "미리보기 결과" });
+    const cells = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[2]);
+    expect(cells[0].className).toBe("preview-error preview-error-e4");
+    expect(cells[0].textContent).toContain("E4");
+    expect(cells[0].textContent).toContain("서버 문구: 기준값이 없습니다.");
+    expect(cells[1].className).toBe("preview-error"); // E1은 그대로
+    expect(cells[0].getAttribute("title")).toContain("계산 오류(E4)");
   });
 });
 

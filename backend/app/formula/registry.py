@@ -28,7 +28,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,8 +36,8 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.formula.cases import ERROR, OK, REJECT, Case
 from app.formula.columns import ColumnInfo
-from app.formula.context import Compiled, ConvertContext
-from app.formula.errors import CELL_ERROR_MESSAGES_KO
+from app.formula.context import Compiled, ConvertContext, ReferenceEnv
+from app.formula.errors import CELL_ERROR_MESSAGES_KO, FormulaIssue
 from app.formula.literals import BOOLEAN, DATE, NUMBER, TEXT
 from app.formula.nodes import Call, Node
 
@@ -53,6 +53,11 @@ ToSql = Callable[[ConvertContext, Sequence[Compiled]], ColumnElement[Any]]
 ToSqlCustom = Callable[[ConvertContext, Sequence[Compiled]], Compiled]
 Condition = Callable[[ConvertContext, Sequence[Compiled]], ColumnElement[Any]]
 Rewrite = Callable[[Call, Callable[[str], Sequence[ColumnInfo]]], Node]
+# 환경을 읽는 C0 검사(`REF`, 07 §2-1 K6 예외의 확장점): (호출 노드, 형이 붙은 인수 트리들, 환경, 열
+# 목록) -> 오류 목록. 인수 개수·형 검사가 끝난 뒤에 부른다.
+Precheck = Callable[
+    [Call, Sequence[Any], ReferenceEnv, Mapping[int, ColumnInfo]], Sequence[FormulaIssue]
+]
 
 
 class RegistryError(ValueError):
@@ -106,6 +111,11 @@ class FunctionSpec:
     native_null: bool = False
     self_guarded: bool = False
     sqlite: bool = False
+    # 환경 함수(07 §2-1 K6 예외, FU-3): `precheck`는 C0에서 환경(`ReferenceEnv`)을 읽어 오류를
+    # 내고 `to_sql_custom`은 `ctx.env`를 읽는다. `reads_row`는 인수가 모두 상수여도 행 데이터를
+    # 읽는 식이라 상수 부분식(C0 상수 검사 대상)이 아니라는 표시다.
+    precheck: Precheck | None = None
+    reads_row: bool = False
 
     # --- 인수 개수 ----
     @property
@@ -192,6 +202,10 @@ def spec_problems(spec: FunctionSpec) -> list[str]:
         problems.append(f"{who}: null_policy=custom은 to_sql_custom과 함께여야 한다.")
     if spec.rewrite is not None and spec.error_when:
         problems.append(f"{who}: rewrite 항목은 error_when을 쓰지 않는다.")
+    if spec.precheck is not None and spec.to_sql_custom is None:
+        problems.append(f"{who}: precheck는 to_sql_custom과 함께 쓴다(환경 함수).")
+    if spec.precheck is not None and not spec.reads_row:
+        problems.append(f"{who}: 환경 함수는 reads_row=True여야 한다(상수 부분식이 아니다).")
     if not spec.excel_diff.strip():
         problems.append(f"{who}: excel_diff가 비었다(차이가 없으면 '같음'이라고 쓴다).")
     if not spec.help_ko.strip():

@@ -3,7 +3,8 @@
 - `metadata`: `public` schema의 **정적 표**(팀, 사용자, 데이터셋 정의 등)만 등록한다.
   권한 관리 표(`users`, `teams`, `team_members`, revision 0003), 데이터셋·열 정의 표(0004),
   수식 표(`formulas`, `formula_deps`, 0005), Superset 등록 표(`superset_datasets`,
-  `superset_dashboards`, 0006)가 있다. 표를 추가하면
+  `superset_dashboards`, 0006), 감사 기록 표(`audit_log`, 0007), 기준값 표(`reference_items`,
+  `reference_values`, 0009)가 있다. 표를 추가하면
   revision(`backend/migrations/versions/`)과 함께 여기에 모델을 추가한다. 쓰기 책임은 소유
   모듈(04 §2-2)이 지고, 이 파일은 정의만 둔다(04 §2-1 core). 동적 객체(`bi_data` schema의
   `ds_<번호>` 표, `dv_<번호>`·`de_<번호>` 뷰)는 런타임 DDL 모듈이 만들며 이 `MetaData`에
@@ -31,6 +32,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    Numeric,
     PrimaryKeyConstraint,
     Table,
     Text,
@@ -215,7 +217,7 @@ superset_dashboards = Table(
 
 # --- 감사 기록 표(06 §2-1, revision 0007) ----
 # 행위 목록의 원본은 04 §5-1이다. 새 행위는 값 한 줄 + 이 CHECK 교체(새 revision) + `app/audit`의
-# 허용 키 표 한 줄 + 시험이다. `app/audit/actions.py`가 같은 17개 이름을 쓰는지 시험이 대조한다.
+# 허용 키 표 한 줄 + 시험이다. `app/audit/actions.py`가 같은 20개 이름을 쓰는지 시험이 대조한다.
 AUDIT_ACTIONS = (
     "dataset.create",
     "dataset.update",
@@ -234,8 +236,12 @@ AUDIT_ACTIONS = (
     "user.bootstrap_admin",
     "dashboard.create",
     "dashboard.update",
+    # FU-3(`0009`): 기준값 항목 추가·연도 값 추가·정정(17 -> 20).
+    "reference.create",
+    "reference_value.add",
+    "reference_value.update",
 )
-AUDIT_TARGET_TYPES = ("team", "user", "dataset", "dashboard")
+AUDIT_TARGET_TYPES = ("team", "user", "dataset", "dashboard", "reference")
 AUDIT_ACTOR_SOURCES = ("user", "cli")
 # 감사 `details`의 크기 안전망(바이트). 앱 규칙은 허용 키·길이 상한으로 이보다 훨씬 작게 지킨다.
 AUDIT_DETAILS_MAX_BYTES = 4000
@@ -293,6 +299,44 @@ Index(
     audit_log.c.target_id,
     audit_log.c.occurred_at.desc(),
     audit_log.c.id.desc(),
+)
+
+# --- 기준값 표(06 §2-2, revision 0009) ----
+# 전역 기준값: 항목(`reference_items`)마다 연도별 숫자 값 하나(`reference_values`). 열 단위 UPDATE
+# 권한(값 열·설명 열만)과 불변 열은 revision의 GRANT가 강제한다. 범위·정규식 CHECK는 PostgreSQL
+# 전용(`char_length`, 무한대 비교)이라 SQLite 시험용 create_all에서는 만들지 않는다(`ddl_if`).
+REFERENCE_NAME_MAX_LENGTH = 50  # ck_reference_items_name_length와 같은 값(시험이 대조한다)
+REFERENCE_DESCRIPTION_MAX_LENGTH = 200  # 앱 검증(DB 제약 없음)
+REFERENCE_YEAR_MIN = 1900  # ck_reference_values_year와 같은 값
+REFERENCE_YEAR_MAX = 9999
+
+reference_items = Table(
+    "reference_items",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("name", Text, nullable=False),  # 불변(이름 변경 없음)
+    Column("description", Text, nullable=True),
+    Column("created_by", Integer, ForeignKey("users.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("name"),
+    CheckConstraint("char_length(name) BETWEEN 1 AND 50", name="name_length").ddl_if(**_PG_ONLY),
+)
+
+reference_values = Table(
+    "reference_values",
+    metadata,
+    Column("id", Integer, Identity(), primary_key=True),
+    Column("item_id", Integer, ForeignKey("reference_items.id"), nullable=False),
+    Column("year", Integer, nullable=False),
+    Column("number_value", Numeric, nullable=False),
+    Column("created_by", Integer, ForeignKey("users.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    UniqueConstraint("item_id", "year"),
+    CheckConstraint("year BETWEEN 1900 AND 9999", name="year"),
+    # NaN은 PostgreSQL에서 모든 수보다 크게 비교되므로 NaN·±Infinity를 함께 거른다.
+    CheckConstraint(
+        "number_value > '-Infinity' AND number_value < 'Infinity'", name="finite"
+    ).ddl_if(**_PG_ONLY),
 )
 
 # 동적 객체가 놓이는 schema(이름은 코드 상수).

@@ -24,6 +24,8 @@ const MESSAGES: Record<string, string> = {
   DEFINITION_BUSY: "다른 작업이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
   DATASET_HAS_ROWS: "이미 입력된 행이 있어 날짜 단위와 기준 날짜 열은 바꿀 수 없습니다. 행이 없는 데이터셋에서만 바꿀 수 있습니다.",
   DATASET_ARCHIVED: "보관된 데이터셋은 고칠 수 없습니다. 복구한 뒤 다시 시도하세요.",
+  // FU-3 C-6(05 §3): 기준 날짜 열 해제(B4)가 REF를 쓰는 수식 때문에 막힘. details.column이 있으면 열 이름을 덧붙인다.
+  BASE_DATE_IN_USE: "REF를 쓰는 수식이 있어 기준 날짜 열을 해제할 수 없습니다. 먼저 그 수식을 고치거나 다른 날짜 열로 바꾸세요.",
   COLUMN_LOCKED: "열의 타입과 종류는 바꿀 수 없습니다. 다른 타입이 필요하면 새 열을 추가해 주세요.",
   FORMULA_CIRCULAR: "이 변경으로 계산 열이 서로를 참조하는 순환이 생깁니다. 구분 태그나 수식을 확인해 주세요.",
   FORMULA_INVALID: "수식에 고칠 곳이 있어 저장하지 않았습니다. 표시된 위치의 안내를 확인해 주세요.",
@@ -62,6 +64,10 @@ const FIELD_LABELS: Record<string, string> = {
   target_type: "대상 종류",
   target_id: "대상 번호",
   action: "행위",
+  // FU-3 기준값(R2·R4·R5)
+  description: "설명",
+  year: "연도",
+  value: "값",
 };
 
 const FIELD_CODE_PHRASES: Record<string, string> = {
@@ -80,6 +86,7 @@ const EXISTS_BY_FIELD: Record<string, string> = {
   name: "같은 이름이 이미 있습니다.",
   login_id: "같은 로그인 ID의 사용자가 이미 있습니다.",
   display_name: "같은 이름의 열이 이미 있습니다.",
+  year: "이 연도의 값이 이미 있습니다. 값을 바꾸려면 정정을 쓰세요.",
   embedded_uuid: "이미 연결된 임베드 번호입니다. 목록에서 해제된 항목이 있으면 '다시 연결'을 쓰세요.",
 };
 
@@ -149,6 +156,10 @@ export function describeApiError(error: unknown): string {
     // 05 §3 details.path: 열 이름 경로 (예: ["A", "B", "A"] -> "A → B → A")
     const path = isRecord(error.details) && Array.isArray(error.details.path) ? error.details.path.filter((n): n is string => typeof n === "string") : [];
     return path.length > 0 ? `${MESSAGES.FORMULA_CIRCULAR} (순환 경로: ${path.join(" → ")})` : MESSAGES.FORMULA_CIRCULAR;
+  }
+  if (error.code === "BASE_DATE_IN_USE") {
+    const column = isRecord(error.details) && isRecord(error.details.column) ? error.details.column.display_name : undefined;
+    return typeof column === "string" && column !== "" ? `${MESSAGES.BASE_DATE_IN_USE} (REF를 쓰는 열: '${column.slice(0, 60)}')` : MESSAGES.BASE_DATE_IN_USE;
   }
   if (error.code === "DEFINITION_BUSY" || error.code === "WRITE_BUSY" || error.code === "PREVIEW_BUSY" || error.code === "GUEST_TOKEN_RATE_LIMITED") {
     const retry = isRecord(error.details) ? error.details.retry_after : undefined;

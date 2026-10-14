@@ -27,6 +27,8 @@ from app.db_metadata import (
     formula_deps,
     formulas,
     metadata,
+    reference_items,
+    reference_values,
     superset_dashboards,
     superset_datasets,
     team_members,
@@ -267,6 +269,8 @@ def clear_static_tables(engine: Engine) -> None:
     drop_dynamic_tables(engine)
     with engine.begin() as conn:
         conn.execute(delete(audit_log))  # users를 가리키는 외래키가 있어 먼저 지운다(bi_owner 전용)
+        conn.execute(delete(reference_values))  # 값 -> 항목 -> 사용자 순(외래키)
+        conn.execute(delete(reference_items))
         conn.execute(delete(superset_datasets))
         conn.execute(delete(superset_dashboards))
         conn.execute(update(datasets).values(base_date_column_id=None))  # 순환 FK 해제
@@ -522,8 +526,29 @@ def world(db: Db) -> World:
     return build_world(db)
 
 
+def _reference_summary(terminalreporter) -> None:
+    """`REF` 차분 묶음(FU-3, 07 §6) 요약."""
+    try:
+        from tests.test_reference_differential import SUMMARY
+    except Exception:  # pragma: no cover - 수집 실패는 다른 곳에서 드러난다
+        return
+    if not SUMMARY:
+        return
+    terminalreporter.section("REF 차분 묶음 요약(미리보기 vs 뷰 vs 파이썬 독립 기대값)")
+    for line in (
+        f"수식 {SUMMARY['formulas']}개(통과 {SUMMARY['accepted']}, C0 거부 {SUMMARY['rejected']}), "
+        f"데이터셋 {SUMMARY['datasets']}개, 행 {SUMMARY['rows']}개, 데이터셋당 수식 "
+        f"{SUMMARY['formulas_per_dataset']}개",
+        f"비교한 칸 {SUMMARY['cells']}개(정정 전 {SUMMARY['cells_before_correction']}, 빈 값 "
+        f"{SUMMARY['blank_cells']}개, 오류 칸 {SUMMARY['error_cells']})",
+        f"불일치 {SUMMARY['mismatches']}건, DB 예외 {SUMMARY['exceptions']}건",
+    ):
+        terminalreporter.write_line(line)
+
+
 def pytest_terminal_summary(terminalreporter) -> None:
     """차분 시험(07 §6) 결과 요약을 항상 출력한다(`-q`에서도 보인다)."""
+    _reference_summary(terminalreporter)
     try:
         from tests.test_formula_differential import SUMMARY
     except Exception:  # pragma: no cover - 수집 실패는 다른 곳에서 드러난다

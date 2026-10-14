@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app import ddl
 from app.core.errors import (
     FieldErrorCode,
+    base_date_in_use,
     formula_circular,
     formula_invalid,
     validation_failed,
@@ -41,6 +42,7 @@ from app.dataset.service import DefinitionView
 from app.formula import repo
 from app.formula.api import CompileResult, ConstProbe
 from app.formula.literals import render_literal_sql
+from app.formula.refenv import load_env
 from app.formula.repo import StoredFormula
 from app.formula.status import ViewStatus
 from app.formula.views import (
@@ -94,6 +96,16 @@ def failure_to_error(failure: FormulaCompileFailure, *, edited_column_id: int | 
     circular = next((i for i in failure.issues if i.code == "CIRCULAR"), None)
     if circular is not None:
         return formula_circular(list(circular.path))
+    if (
+        edited_column_id is None
+        and failure.column_id
+        is not None  # 저장된 열의 재컴파일 실패(새 열 저장의 사전 검사는 아니다)
+        and failure.issues
+        and all(i.code == "BASE_DATE_REQUIRED" for i in failure.issues)
+    ):
+        # 편집 중인 열이 없는 정의 변경(B4)에서 저장된 `REF` 열이 기준 날짜 열이 없어 실패했다:
+        # 기준 날짜 열 해제 차단(03b 32-3 C-6, 05 B4). 훅의 전체 재컴파일이 처음 걸린 열만 알린다.
+        return base_date_in_use(failure.column_id, failure.column_name)
     errors = []
     for issue in failure.issues:
         item = issue.as_dict()
@@ -149,10 +161,22 @@ def apply_views(session: Session, defn: DefinitionView, plan: ViewPlan, *, force
     ):
         return False
     ddl.create_view(
-        conn, "dv", defn.dataset_id, plan.dv, render=render_literal_sql, echo=plan.echo_dv
+        conn,
+        "dv",
+        defn.dataset_id,
+        plan.dv,
+        render=render_literal_sql,
+        echo=plan.echo_dv,
+        references=plan.references,
     )
     ddl.create_view(
-        conn, "de", defn.dataset_id, plan.de, render=render_literal_sql, echo=plan.echo_de
+        conn,
+        "de",
+        defn.dataset_id,
+        plan.de,
+        render=render_literal_sql,
+        echo=plan.echo_de,
+        references=plan.references,
     )
     return True
 
@@ -175,8 +199,9 @@ def apply_definition(session: Session, dataset_id: int, *, status: ViewStatus | 
     ds = source_table(defn)
     postgresql = is_postgresql(session)
     probe = make_probe(session) if postgresql else None
+    env = load_env(session, defn)
     try:
-        results = compile_all(infos, source_columns(defn, ds), probe)
+        results = compile_all(infos, source_columns(defn, ds), probe, env=env)
     except FormulaCompileFailure as failure:
         raise failure_to_error(
             failure, edited_column_id=pending.column_id if pending is not None else None

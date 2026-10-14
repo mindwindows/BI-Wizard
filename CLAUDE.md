@@ -15,6 +15,7 @@
 **핵심 규칙**
 - 미결정 사항(브리프 5절)은 사용자에게 묻고, 답을 받은 뒤 진행한다.
 - **새 환경변수, 새 의존성, 운영 가이드 기준선과 다른 설정, 권한을 넓히는 변경, 에이전트 모델 변경은 적용 전에 사용자 승인을 받는다.** 권한을 줄이거나 비밀·로그 노출을 막는 보안 강화 변경만 적용 후 보고를 허용하며, 보고서에 "적용 후 보고 항목" 목록으로 따로 표시한다. (에이전트 정의 모델: 모든 에이전트가 sonnet이다. 2026-10-11 사용자 승인으로 env-engineer·qa-engineer·frontend-dev를 haiku에서 sonnet으로 바꿨다. 호출 시 모델 변경은 금지)
+- **승인된 계약(`docs/decisions/05`·`06`)의 동작 변경(오류 우선순위, 응답 코드, 판정 순서 포함)은 구현 전에 멈추고 사용자 확인을 받는다.** 구현 중 발견했다면 구현을 멈추고 보고한다(사후 승인에 기대지 않는다). 근거: `docs/decisions/03b` 31절의 B5 사례(검증 422를 잠금 아래로 옮겨 낡은 버전 409가 먼저 나오게 된 일을 사후 승인함, 사용자 결정 2026-10-14).
 - 파괴적 명령(`.env` 삭제, `rm -rf`, `git clean -fdx`, `git reset --hard`, `docker compose down -v`)은 실행하지 않는다. 필요하면 먼저 묻는다.
 - `main`에 직접 커밋하거나 푸시하지 않는다.
 - **PR 병합은 "Create a merge commit"으로만 한다(Squash, Rebase 금지). 병합 뒤 "Delete branch"는 누르지 않는다.** PR이 열려 있는 동안 `harness/setup`에 push하는 커밋은 모두 그 PR에 포함된다. 다음 단위 커밋은 이전 PR이 병합된 뒤 `harness/setup`을 `origin/main`으로 fast-forward 한 다음에 시작한다(근거: 사용자 지시 2026-10-13).
@@ -44,3 +45,4 @@
 | 2026-10-12 | EW-5~7 반영: 하네스 문구 추가 정리(`architect`·`modularize`에서 2·3·6·7·9~11번을 결정됨으로, 8번만 미결정), `qa-verification` 정리 명령을 `--profile test down`(실행 중 전체 스택 종료) → `stop`·`rm -f postgres-test`로 수정, `env-bootstrap`에 입장권 유효 시간 가드 추가 | `.claude/agents/architect.md`, `.claude/skills/modularize`, `qa-verification`, `env-bootstrap` | EW-7 reviewer(M1, R2)·EW-6 QA 지적 반영 |
 | 2026-10-12 | 1e 착수 승인(`docs/decisions/03b` 23절): 운영 런타임 라이선스 원칙에 이름 예외 1건(`certifi` MPL-2.0, `httpx` 필수 전이 의존성, 수정·재배포 금지) 추가, 훅 embedded uuid 대조는 H0(실측 2건이 모두 참일 때만 종결) | `.claude/skills/bi-review` | 사용자 결정(2026-10-12, 1e 설계 점검 결과 검토) |
 | 2026-10-13 | 브랜치·PR 규칙 추가: 병합은 merge commit만(Squash·Rebase 금지), Delete branch 금지, PR이 열린 동안의 push는 그 PR에 포함되며 다음 단위는 병합 뒤 `origin/main` fast-forward 후 시작 | `CLAUDE.md`, `docs/retrospective/fu1-harness-operations.md` | 사용자 지시(2026-10-13) |
+| 2026-10-14 | 사전 확인 규칙 추가: 승인된 계약(05·06)의 동작 변경(오류 우선순위, 응답 코드, 판정 순서 포함)은 구현 전에 멈추고 확인 | `CLAUDE.md` | 사용자 결정(2026-10-14), `docs/decisions/03b` 31절 B5 사례 |

@@ -7,10 +7,14 @@ from migrations.roundtrip import (
     ACCESS_TABLE_ACL,
     AUDIT_COLUMN_ACL,
     AUDIT_TABLE_ACL,
+    BEFORE_0009_COLUMN_ACL,
+    BEFORE_0009_TABLE_ACL,
     DATASET_COLUMN_ACL,
     DATASET_TABLE_ACL,
     FORMULA_COLUMN_ACL,
     FORMULA_TABLE_ACL,
+    REFERENCE_COLUMN_ACL,
+    REFERENCE_TABLE_ACL,
     STATIC_COLUMN_ACL,
     STATIC_TABLE_ACL,
     SUPERSET_COLUMN_ACL,
@@ -19,6 +23,7 @@ from migrations.roundtrip import (
     expect_archive_checks,
     expect_bootstrap_state,
     expect_privileges,
+    expect_reference_checks,
     expect_static_privileges,
     normalize,
 )
@@ -124,6 +129,7 @@ def _static_snapshot(
     formula: bool = True,
     superset: bool = True,
     audit: bool = True,
+    reference: bool = True,
 ) -> dict:
     """정적 표와 `bi_app` 권한이 있는 가짜 스냅샷."""
     snap = _snapshot(granted=True)
@@ -140,6 +146,8 @@ def _static_snapshot(
         groups.append((SUPERSET_TABLE_ACL, SUPERSET_COLUMN_ACL))
     if audit:
         groups.append((AUDIT_TABLE_ACL, AUDIT_COLUMN_ACL))
+    if reference:
+        groups.append((REFERENCE_TABLE_ACL, REFERENCE_COLUMN_ACL))
     for tables, columns in groups:
         for name, acl in tables.items():
             relations.append(["public", name, "r", "bi_owner", [acl, "bi_owner=arwdDxt/bi_owner"]])
@@ -162,6 +170,8 @@ def test_static_privileges_cover_access_dataset_formula_and_superset_tables():
         "superset_datasets",
         "superset_dashboards",
         "audit_log",
+        "reference_items",
+        "reference_values",
     }
     assert STATIC_COLUMN_ACL == (
         ACCESS_COLUMN_ACL
@@ -169,7 +179,20 @@ def test_static_privileges_cover_access_dataset_formula_and_superset_tables():
         | FORMULA_COLUMN_ACL
         | SUPERSET_COLUMN_ACL
         | AUDIT_COLUMN_ACL
+        | REFERENCE_COLUMN_ACL
     )
+    assert STATIC_TABLE_ACL == {**BEFORE_0009_TABLE_ACL, **REFERENCE_TABLE_ACL}
+    assert STATIC_COLUMN_ACL == BEFORE_0009_COLUMN_ACL | REFERENCE_COLUMN_ACL
+    # 기준값 표(0009): 읽기·추가(표 단위)와 UPDATE(열 단위: 설명, 값)뿐. DELETE 없음, 불변 열은 열
+    # 단위 UPDATE 밖이다(`name`·`item_id`·`year`·`created_*`).
+    assert REFERENCE_TABLE_ACL == {
+        "reference_items": "bi_app=ar/bi_owner",
+        "reference_values": "bi_app=ar/bi_owner",
+    }
+    assert REFERENCE_COLUMN_ACL == {
+        ("reference_items", "description"),
+        ("reference_values", "number_value"),
+    }
     # 감사 기록 표: 읽기와 추가만(a, r). UPDATE·DELETE·TRUNCATE·열 단위 권한이 없다(06 §2-1).
     assert AUDIT_TABLE_ACL == {"audit_log": "bi_app=ar/bi_owner"}
     assert AUDIT_COLUMN_ACL == set()
@@ -216,7 +239,14 @@ def test_static_privileges_cover_access_dataset_formula_and_superset_tables():
 def test_static_privileges_expected_at_head_and_absent_at_base():
     head = _static_snapshot(access=True, dataset=True)
     assert expect_static_privileges(head, granted=True) == []
-    base = _static_snapshot(access=False, dataset=False, formula=False, superset=False, audit=False)
+    base = _static_snapshot(
+        access=False,
+        dataset=False,
+        formula=False,
+        superset=False,
+        audit=False,
+        reference=False,
+    )
     assert expect_static_privileges(base, granted=False) == []
     assert expect_static_privileges(base, granted=True)
     assert expect_static_privileges(head, granted=False)
@@ -245,7 +275,9 @@ def test_static_privileges_per_revision_for_the_0004_step():
 
 def test_static_privileges_per_revision_for_the_0005_step():
     """0005 한 단계: 0004 상태에서는 수식 표만 없다."""
-    mid = _static_snapshot(access=True, dataset=True, formula=False, superset=False, audit=False)
+    mid = _static_snapshot(
+        access=True, dataset=True, formula=False, superset=False, audit=False, reference=False
+    )
     assert (
         expect_static_privileges(
             mid,
@@ -283,7 +315,9 @@ def test_static_privileges_detect_wrong_acl_and_extra_column_grant():
 
 def test_static_privileges_per_revision_for_the_0006_step():
     """0006 한 단계: 0005 상태에서는 Superset 등록 표만 없다."""
-    mid = _static_snapshot(access=True, dataset=True, formula=True, superset=False, audit=False)
+    mid = _static_snapshot(
+        access=True, dataset=True, formula=True, superset=False, audit=False, reference=False
+    )
     assert (
         expect_static_privileges(
             mid,
@@ -308,7 +342,7 @@ def test_static_privileges_per_revision_for_the_0006_step():
 
 def test_static_privileges_per_revision_for_the_0007_step():
     """0007 한 단계: 0006 상태에서는 감사 기록 표만 없다."""
-    mid = _static_snapshot(access=True, dataset=True, audit=False)
+    mid = _static_snapshot(access=True, dataset=True, audit=False, reference=False)
     assert (
         expect_static_privileges(
             mid,
@@ -388,4 +422,88 @@ def test_archive_checks_detect_a_check_left_in_the_wrong_state():
 def test_archive_checks_detect_a_doubled_constraint_name():
     """`op.f`를 쓰지 않아 이름이 `ck_datasets_ck_datasets_status`처럼 이중으로 붙은 경우."""
     problems = expect_archive_checks(_checks_snapshot(archived=True, doubled=True), archived=True)
+    assert any("이중" in p for p in problems) and any("제약이 없다" in p for p in problems)
+
+
+def test_static_privileges_per_revision_for_the_0009_step():
+    """0009 한 단계: 0008 상태에서는 기준값 표 두 개만 없다."""
+    mid = _static_snapshot(access=True, dataset=True, reference=False)
+    assert (
+        expect_static_privileges(
+            mid,
+            granted=True,
+            table_acl=BEFORE_0009_TABLE_ACL,
+            column_acl=BEFORE_0009_COLUMN_ACL,
+        )
+        == []
+    )
+    assert (
+        expect_static_privileges(
+            mid, granted=False, table_acl=REFERENCE_TABLE_ACL, column_acl=REFERENCE_COLUMN_ACL
+        )
+        == []
+    )
+    assert expect_static_privileges(mid, granted=True)  # 기본 기대는 기준값 표가 없으면 틀렸다
+    head = _static_snapshot(access=True, dataset=True)
+    assert expect_static_privileges(
+        head, granted=False, table_acl=REFERENCE_TABLE_ACL, column_acl=REFERENCE_COLUMN_ACL
+    )
+
+
+def test_static_privileges_detect_widened_reference_acl():
+    """`bi_app`에 DELETE가 붙거나 UPDATE 열이 늘거나 `bi_readonly`가 읽을 수 있으면 잡는다."""
+    for widened in ("bi_app=ard/bi_owner", "bi_app=arwd/bi_owner", "bi_app=a/bi_owner"):
+        snap = _static_snapshot(access=True, dataset=True)
+        for row in snap["relations"]:
+            if row[1] == "reference_values":
+                row[4][0] = widened
+        problems = expect_static_privileges(snap, granted=True)
+        assert any("reference_values 표 ACL" in p for p in problems)
+    snap = _static_snapshot(access=True, dataset=True)
+    for row in snap["relations"]:
+        if row[1] == "reference_items":
+            row[4].append("bi_readonly=r/bi_owner")
+    assert any("reference_items 표 ACL" in p for p in expect_static_privileges(snap, granted=True))
+    snap = _static_snapshot(access=True, dataset=True)
+    snap["column_acl"].append(["public", "reference_values", "year", ["bi_app=w/bi_owner"]])
+    assert any("열 단위" in p for p in expect_static_privileges(snap, granted=True))
+
+
+def _reference_snapshot(*, present: bool, doubled: bool = False) -> dict:
+    """0009의 감사 CHECK 두 개와 기준값 표 존재 여부만 가진 최소 스냅샷."""
+    actions = "'dataset.create'::text, 'reference.create'::text, 'reference_value.update'::text"
+    types = "'team'::text, 'dataset'::text, 'reference'::text"
+    if not present:
+        actions = "'dataset.create'::text"
+        types = "'team'::text, 'dataset'::text"
+    prefix = "ck_audit_log_" if doubled else ""
+    tables: dict = {
+        "audit_log": {
+            "checks": [
+                [f"{prefix}ck_audit_log_action", f"(action = ANY (ARRAY[{actions}]))"],
+                ["ck_audit_log_target_type", f"(target_type = ANY (ARRAY[{types}]))"],
+            ]
+        }
+    }
+    if present:
+        tables["reference_items"] = {"checks": []}
+        tables["reference_values"] = {"checks": []}
+    return {"public_tables": tables}
+
+
+def test_reference_checks_expected_at_head_and_old_definition_at_0008():
+    assert expect_reference_checks(_reference_snapshot(present=True), present=True) == []
+    assert expect_reference_checks(_reference_snapshot(present=False), present=False) == []
+    # 표나 CHECK가 어긋난 채 남은 경우를 잡는다
+    assert expect_reference_checks(_reference_snapshot(present=False), present=True)
+    assert expect_reference_checks(_reference_snapshot(present=True), present=False)
+    stale = _reference_snapshot(present=False)
+    stale["public_tables"]["reference_values"] = {"checks": []}
+    assert any("남아 있음" in p for p in expect_reference_checks(stale, present=False))
+
+
+def test_reference_checks_detect_a_doubled_constraint_name():
+    problems = expect_reference_checks(
+        _reference_snapshot(present=True, doubled=True), present=True
+    )
     assert any("이중" in p for p in problems) and any("제약이 없다" in p for p in problems)

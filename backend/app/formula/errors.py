@@ -5,9 +5,9 @@
   번호**이며 `start` 포함, `end` 미포함이다(JavaScript의 UTF-16 번호와는 이모지 같은 보충 평면
   문자에서
   다르다. 화면이 변환한다). 문구에는 SQL 용어를 쓰지 않는다.
-- 셀 오류 코드 `E1`~`E3`: 오류 칸의 코드다(API 오류가 아니다). 뷰 `de_<번호>`의
+- 셀 오류 코드 `E1`~`E4`: 오류 칸의 코드다(API 오류가 아니다). 뷰 `de_<번호>`의
   `e_<열>`(smallint)에는
-  숫자 1~3으로 저장한다.
+  숫자 1~4로 저장한다(`E4`는 FU-3 `REF`가 기준 날짜 연도의 기준값을 못 찾음).
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ CELL_ERROR_MESSAGES_KO: dict[str, str] = {
     "E1": "0으로 나눌 수 없어 계산하지 못했습니다.",
     "E2": "글자를 자르는 길이(0~10000)가 범위를 벗어났습니다.",
     "E3": "날짜가 범위(0001-01-01~9999-12-31)를 벗어났습니다.",
+    "E4": "이 행의 기준 날짜가 속한 연도의 기준값이 등록되어 있지 않아 계산하지 못했습니다. "
+    "기준값 화면에서 그 연도 값을 추가하세요.",
 }
 CELL_ERROR_NUMBERS: dict[str, int] = {code: int(code[1:]) for code in CELL_ERROR_MESSAGES_KO}
 CELL_ERROR_BY_NUMBER: dict[int, str] = {number: code for code, number in CELL_ERROR_NUMBERS.items()}
@@ -66,6 +68,11 @@ MESSAGES_KO: dict[str, str] = {
     "TOO_COMPLEX": "계산이 너무 복잡해 처리할 수 없습니다. 수식을 나눠 여러 열로 계산해 주세요.",
     "CONSTANT_ERROR": "이 계산은 항상 오류가 됩니다({reason}). 값을 확인하세요.",
     "CONSTANT_PROBE_FAILED": "이 계산은 상수만으로 이루어져 있는데 계산할 수 없습니다.",
+    # FU-3 `REF`(07 §3-2). 인수 개수·상수 오류는 기존 ARG_COUNT·CONST_REQUIRED가 맡는다.
+    "REF_UNKNOWN": "'{name}' 기준값 항목을 찾을 수 없습니다. "
+    "기준값 화면에 등록된 이름인지 확인하세요.{suggest}",
+    "BASE_DATE_REQUIRED": "REF는 기준 날짜 열이 있는 데이터셋에서만 쓸 수 있습니다. "
+    "먼저 데이터셋 설정에서 기준 날짜 열을 지정하세요.",
 }
 
 # 상수 부분식 오류의 이유 문구(셀 오류 코드별).

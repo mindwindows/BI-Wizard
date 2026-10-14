@@ -17,6 +17,10 @@ export const FORMULA_RULES: { title: string; text: string }[] = [
   },
   { title: "글자 비교", text: "글자 비교는 대문자·소문자를 구별하지 않습니다." },
   { title: "자동 변환 없음", text: "숫자·글자·날짜는 서로 자동으로 바뀌지 않습니다. 종류가 다르면 오류 안내가 나옵니다." },
+  {
+    title: "기준값",
+    text: 'REF("이름")은 그 행의 기준 날짜가 속한 연도의 기준값(기준값 화면에 등록한 숫자)을 가져옵니다. 전년 값을 이월하지 않으며, 그 연도 값이 없으면 빈 값이 되고 오류 E4로 점검 화면에 표시됩니다. 기준 날짜 열이 있는 데이터셋에서만 쓸 수 있습니다.',
+  },
   { title: "쓰는 법", text: "열은 [열 이름]으로, 글자는 \"큰따옴표\"로 씁니다. 같은 태그의 숫자 열을 모두 더하려면 SUMTAG(\"태그\")를 씁니다." },
 ];
 
@@ -25,7 +29,13 @@ export const DEFAULT_CELL_ERRORS: Record<string, string> = {
   E1: "0으로 나누어 계산할 수 없습니다.",
   E2: "글자 길이 범위를 벗어났습니다.",
   E3: "날짜 범위를 벗어났습니다.",
+  // FU-3(07 §3-1): REF가 그 행의 기준 날짜 연도 값을 찾지 못함. 서버(D1 cell_errors)가 준 문구가 있으면 그것이 우선한다.
+  E4: "이 행의 기준 날짜가 속한 연도의 기준값이 등록되어 있지 않아 계산하지 못했습니다. 기준값 화면에서 그 연도 값을 추가하세요.",
 };
+
+/** 기준값 없음(E4): 다른 셀 오류와 구별해 표시하고 기준값 화면으로 안내한다(FU-3). */
+export const REFERENCE_MISSING_CODE = "E4";
+export const REFERENCE_MISSING_LABEL = "기준값 없음";
 
 export function cellErrorText(code: string, catalog: Record<string, string> | undefined): string {
   return catalog?.[code] ?? DEFAULT_CELL_ERRORS[code] ?? "계산할 수 없는 값입니다.";

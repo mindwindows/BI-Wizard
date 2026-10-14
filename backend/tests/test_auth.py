@@ -385,6 +385,12 @@ SUPERSET_PATHS = {
     "/api/dashboards/{dashboard_id}",
     "/api/dashboards/{dashboard_id}/guest-token",
 }
+REFERENCE_PATHS = {  # R1~R6(FU-3): 기준값 항목·값(R1~R5)과 쓰는 수식 조회(R6, 관리자)
+    "/api/reference-items",
+    "/api/reference-items/{item_id}/values",
+    "/api/reference-items/{item_id}/values/{value_id}",
+    "/api/reference-items/{item_id}/usage",
+}
 AUDIT_PATHS = {"/api/audit-logs"}  # F1(FU-2a): 읽기 전용 한 경로뿐이다(수정·삭제·내보내기 없음)
 
 
@@ -401,6 +407,7 @@ def test_real_app_routes_are_public_health_plus_access_dataset_entry_formula_and
         | FORMULA_PATHS
         | SUPERSET_PATHS
         | AUDIT_PATHS
+        | REFERENCE_PATHS
     )
     with TestClient(app) as client:
         assert paths_open_without_auth(client) == []

@@ -119,6 +119,14 @@ const DASHBOARD_FIELDS: Record<string, FieldSpec> = {
   },
 };
 
+/**
+ * 기준값(FU-3, 04 §5-1): 십진 문자열만 값으로 쓴다(숫자 모양이 아니면 그 부분을 버린다). 이 값은 기준값(포털 전역 설정값)이며 행 값이 아니다.
+ * 길이는 38자리 + 부호·소수점 여유로 제한해, 이상한 긴 글자가 와도 그대로 화면에 퍼지지 않게 한다.
+ */
+const DECIMAL_TEXT = /^[+-]?(\d+(\.\d*)?|\.\d+)$/;
+const decimal = (v: unknown): string | null => (typeof v === "string" && v.length <= 42 && DECIMAL_TEXT.test(v) ? v : null);
+const yearOf = (v: unknown): number | null => (int(v) !== null && (v as number) >= 1900 && (v as number) <= 9999 ? (v as number) : null);
+
 const SPECS: Record<AuditAction, ActionSpec> = {
   "dataset.create": {
     keys: ["team_id", "date_unit", "def_version"],
@@ -214,6 +222,28 @@ const SPECS: Record<AuditAction, ActionSpec> = {
   "dashboard.create": {
     keys: ["embedded_uuid"],
     build: (d) => ({ parts: [typeof d.embedded_uuid === "string" ? `임베드 번호 ${d.embedded_uuid.slice(0, 40)}` : null] }),
+  },
+  "reference.create": {
+    keys: ["description_length"],
+    build: () => ({ parts: ["항목 만들기"] }),
+  },
+  "reference_value.add": {
+    keys: ["year", "value"],
+    build: (d) => {
+      const year = yearOf(d.year);
+      const value = decimal(d.value);
+      return { parts: [year === null ? null : `${year}년 값 추가${value === null ? "" : ` (${value})`}`] };
+    },
+  },
+  "reference_value.update": {
+    keys: ["year", "value_from", "value_to"],
+    build: (d) => {
+      const year = yearOf(d.year);
+      const from = decimal(d.value_from);
+      const to = decimal(d.value_to);
+      if (year === null) return { parts: [null] };
+      return { parts: [from !== null && to !== null ? `${year}년 값 ${from}→${to} 정정` : `${year}년 값 정정`] };
+    },
   },
   "dashboard.update": {
     keys: ["changes"],

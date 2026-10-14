@@ -1182,3 +1182,46 @@ button.link {
   margin: 0;
   flex: 1;
 }
+
+/* ---- FU-3: 기준값(S11), 수식 REF 자동완성, 셀 오류 E4 ---- */
+.ref-guide p {
+  margin: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.ref-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 5fr) minmax(420px, 7fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.ref-layout h2 {
+  font-size: 16px;
+  margin: 8px 0;
+}
+
+.ref-selected {
+  background: #eef5ff;
+}
+
+.ref-affected ul {
+  margin: 4px 0;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+/* E4(기준값 없음)는 다른 계산 오류(E1~E3, 붉은색)와 구별되게 주황 점선으로 표시한다. */
+.entry-grid .cell-error.cell-error-e4 {
+  background: #fff1db;
+  color: #8a4b08;
+  outline: 1px dashed #d98a1f;
+  outline-offset: -2px;
+}
+
+.preview-table .preview-error.preview-error-e4 {
+  background: #fff1db;
+  color: #8a4b08;
+}

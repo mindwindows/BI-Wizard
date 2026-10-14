@@ -83,7 +83,7 @@ def test_d1_catalog_comes_from_the_dictionary(api, world):
         assert set(item) == {"name", "signature", "returns", "help_ko", "excel_diff"}
         assert all(isinstance(item[k], str) and item[k] for k in item)
     assert body["cell_errors"] == CELL_ERROR_MESSAGES_KO
-    assert set(body["cell_errors"]) == {"E1", "E2", "E3"}
+    assert set(body["cell_errors"]) == {"E1", "E2", "E3", "E4"}
     names = {f["name"] for f in body["functions"]}
     assert {"IF", "SUMTAG", "IFERROR", "ROUND", "DATE", "+", "/"} <= names
 

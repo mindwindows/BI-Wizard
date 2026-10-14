@@ -1048,6 +1048,22 @@ describe("계산 열 표시 자릿수(결정 2026-10-12): 칸은 소수 최대 6
     }
   });
 
+  it("E4(기준값 없음) 칸은 E1 오류 칸과 구별되는 표시와 설명을 보인다 (FU-3)", async () => {
+    const { grid } = await openGrid({ rows: [row(1, { "1": "2027-01-01", "2": "1" }, { "5": "E4" }), row(2, { "1": "2026-12-01", "2": "1" }, { "5": "E1" })] });
+    const e4 = cell(grid, "r1", "5");
+    const e1 = cell(grid, "r2", "5");
+    expect(e4.className).toContain("cell-error");
+    expect(e4.className).toContain("cell-error-e4");
+    expect(e1.className).toContain("cell-error");
+    expect(e1.className).not.toContain("cell-error-e4");
+    expect(text(grid, "r1", "5")).toBe("기준값 없음");
+    expect(text(grid, "r2", "5")).toBe("오류");
+    expect(e4.querySelector(".cell-errcode")?.textContent?.trim()).toBe("E4");
+    // 서버 문구(D1 cell_errors)가 없을 때의 기본 E4 문구가 툴팁·접근성 이름에 들어간다
+    expect(e4.querySelector(".cell-text")?.getAttribute("title")).toContain("기준값 화면에서 그 연도 값을 추가하세요");
+    expect(e4.querySelector("[aria-label^='계산 오류 E4']")).toBeTruthy();
+  });
+
   it("그리드 밖에서 일어난 복사는 가로채지 않는다", async () => {
     const { api } = await openGrid({ rows: LONG });
     await focusCell(api, "r4", "5");

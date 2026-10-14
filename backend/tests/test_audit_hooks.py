@@ -1,4 +1,4 @@
-"""감사 기록 훅 시험(04 §5-1 "시험 단정" 5가지): 행위 17개 각각에 대해
+"""감사 기록 훅 시험(04 §5-1 "시험 단정" 5가지): 행위 20개 각각에 대해
 
 ① 성공 = 감사 행 정확히 1건, `details` 키가 허용 목록과 같고 값이 기대와 같음
 ② 변경 없음 = 0건
@@ -6,7 +6,7 @@
 ④ 롤백(훅·DDL 실패 주입, 커밋 실패 주입) = 0건이고 변경도 없음
 ⑤ 감사 INSERT 실패 주입 = 변경도 롤백
 
-SQLite와 실제 PostgreSQL(`pg`) 두 변형으로 돈다. API로 부르는 16개는 아래 시나리오 표가, 서버 명령
+SQLite와 실제 PostgreSQL(`pg`) 두 변형으로 돈다. API로 부르는 19개는 아래 시나리오 표가, 서버 명령
 `create-admin`(`user.bootstrap_admin`)은 마지막 절이 맡는다.
 """
 
@@ -579,6 +579,103 @@ def error_dashboard_update(ctx: Ctx):
     return response, 404, "NOT_FOUND"
 
 
+# 16~18. 기준값(FU-3): reference.create(R2), reference_value.add(R4), reference_value.update(R5)
+def num(ctx: Ctx, text: str) -> str:
+    """기준값 십진 문자열 기대 표기. SQLite 변형은 숫자를 소수 10자리로 돌려준다(PG는 그대로)."""
+    if ctx.db.kind == "pg":
+        return text
+    from decimal import Decimal
+
+    return format(Decimal(text).quantize(Decimal(10) ** -10), "f")
+
+
+def setup_reference(ctx: Ctx) -> None:
+    response = ctx.call("admin", "POST", "/api/reference-items", json={"name": "전기요금"})
+    assert response.status_code == 201, response.text
+    ctx.vars["item"] = response.json()["id"]
+
+
+def setup_reference_value(ctx: Ctx) -> None:
+    setup_reference(ctx)
+    response = ctx.call(
+        "admin",
+        "POST",
+        f"/api/reference-items/{ctx.vars['item']}/values",
+        json={"year": 2026, "value": "10"},
+    )
+    assert response.status_code == 201, response.text
+    ctx.vars["value"] = response.json()["id"]
+
+
+def act_reference_create(ctx: Ctx):
+    return ctx.call(
+        "admin", "POST", "/api/reference-items", json={"name": "수도요금", "description": "단가"}
+    )
+
+
+def expect_reference_create(ctx: Ctx, response):
+    return response.json()["id"], "수도요금", {"description_length": 2}
+
+
+def error_reference_create(ctx: Ctx):
+    act_reference_create(ctx)
+    return act_reference_create(ctx), 409, "ALREADY_EXISTS"
+
+
+def act_reference_value_add(ctx: Ctx):
+    return ctx.call(
+        "admin",
+        "POST",
+        f"/api/reference-items/{ctx.vars['item']}/values",
+        json={"year": 2026, "value": "12"},
+    )
+
+
+def expect_reference_value_add(ctx: Ctx, response):
+    return ctx.vars["item"], "전기요금", {"year": 2026, "value": num(ctx, "12")}
+
+
+def error_reference_value_add(ctx: Ctx):
+    act_reference_value_add(ctx)
+    return act_reference_value_add(ctx), 409, "ALREADY_EXISTS"
+
+
+def act_reference_value_update(ctx: Ctx):
+    return ctx.call(
+        "admin",
+        "PATCH",
+        f"/api/reference-items/{ctx.vars['item']}/values/{ctx.vars['value']}",
+        json={"value": "20"},
+    )
+
+
+def expect_reference_value_update(ctx: Ctx, response):
+    return (
+        ctx.vars["item"],
+        "전기요금",
+        {"year": 2026, "value_from": num(ctx, "10"), "value_to": num(ctx, "20")},
+    )
+
+
+def noop_reference_value_update(ctx: Ctx):
+    return ctx.call(
+        "admin",
+        "PATCH",
+        f"/api/reference-items/{ctx.vars['item']}/values/{ctx.vars['value']}",
+        json={"value": "10.00"},  # 숫자로 같은 값
+    )
+
+
+def error_reference_value_update(ctx: Ctx):
+    response = ctx.call(
+        "admin",
+        "PATCH",
+        f"/api/reference-items/{ctx.vars['item']}/values/{ctx.vars['value']}",
+        json={"value": "abc"},
+    )
+    return response, 422, "VALIDATION_ERROR"
+
+
 SCENARIOS = [
     Scenario(
         "dataset.create",
@@ -728,6 +825,33 @@ SCENARIOS = [
         error_dashboard_update,
         noop=noop_dashboard_update,
     ),
+    Scenario(
+        "reference.create",
+        "admin",
+        nothing,
+        act_reference_create,
+        expect_reference_create,
+        error_reference_create,
+        success_status=201,
+    ),
+    Scenario(
+        "reference_value.add",
+        "admin",
+        setup_reference,
+        act_reference_value_add,
+        expect_reference_value_add,
+        error_reference_value_add,
+        success_status=201,
+    ),
+    Scenario(
+        "reference_value.update",
+        "admin",
+        setup_reference_value,
+        act_reference_value_update,
+        expect_reference_value_update,
+        error_reference_value_update,
+        noop=noop_reference_value_update,
+    ),
 ]
 BY_ACTION = {s.action: s for s in SCENARIOS}
 ids = [s.action for s in SCENARIOS]
@@ -735,9 +859,9 @@ scenarios = pytest.mark.parametrize("scn", SCENARIOS, ids=ids)
 
 
 def test_scenario_table_covers_every_api_action_except_the_server_command():
-    """17개 중 서버 명령(`user.bootstrap_admin`)만 아래 CLI 절이 맡고 나머지 16개는 이 표에 있다."""
+    """20개 중 서버 명령(`user.bootstrap_admin`)만 아래 CLI 절이 맡고 나머지 19개는 이 표에 있다."""
     assert set(BY_ACTION) == set(ACTIONS) - {"user.bootstrap_admin"}
-    assert len(ACTIONS) == 17
+    assert len(ACTIONS) == 20
 
 
 # --- ① 성공: 정확히 1건 ----

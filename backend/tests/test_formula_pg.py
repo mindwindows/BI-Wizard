@@ -31,6 +31,8 @@ def test_preview_and_view_renderings_agree_for_every_case(pg_app_engine):
     checked = 0
     with pg_app_engine.connect() as connection:
         for spec in registry.specs():
+            if spec.precheck is not None:
+                continue  # `REF`는 test_reference_pg.py
             for case in spec.cases:
                 if case.expect == REJECT:
                     continue

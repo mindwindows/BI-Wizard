@@ -645,7 +645,14 @@ def test_team_rename_through_api_updates_all_superset_names(sapi, db, world, fak
 
 @pytest.fixture
 def live_app(db: Db, superset_settings, fake):
-    """실제 작업 스레드까지 도는 앱(실제 시계)."""
+    """실제 작업 스레드까지 도는 앱(실제 시계).
+
+    SQLite 시험 DB는 연결 하나를 스레드 사이에 공유하므로(`StaticPool`) 앱의 시작 스레드가 같은
+    연결을 쓰는 동안 다른 픽스처가 시드하면 결과가 섞인다(`team_members` 유일 충돌이 간헐로 났다,
+    FU-3 이전부터). 이 시험은 PostgreSQL 변형만 의미가 있어 SQLite에서는 앱을 아예 띄우지 않는다.
+    """
+    if db.kind == "sqlite":
+        pytest.skip("SQLite 시험 DB는 연결 하나를 스레드 사이에 공유한다(PostgreSQL 변형에서 확인)")
     services = build_superset_services(
         superset_settings,
         transport=fake.transport,
@@ -726,7 +733,7 @@ def test_app_starts_instantly_and_other_apis_work_while_superset_is_down(
     )
 
 
-def test_startup_waits_for_superset_health_inside_the_worker_only(live_app, fake, db, world):
+def test_startup_waits_for_superset_health_inside_the_worker_only(db, world, fake, live_app):
     if db.kind == "sqlite":
         pytest.skip("SQLite 시험 DB는 연결 하나를 스레드 사이에 공유한다(PostgreSQL 변형에서 확인)")
     call, services = live_app

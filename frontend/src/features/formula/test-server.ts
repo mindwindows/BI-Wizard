@@ -14,9 +14,10 @@ export const CATALOG: FunctionCatalog = {
     { name: "ROUNDUP", signature: "ROUNDUP(수, 자릿수)", returns: "숫자", help_ko: "0에서 먼 쪽으로 올립니다.", excel_diff: "" },
     { name: "SUM", signature: "SUM(수, ...)", returns: "숫자", help_ko: "더합니다.", excel_diff: "빈 칸이 있으면 결과도 빈 값입니다." },
     { name: "SUMTAG", signature: 'SUMTAG("태그")', returns: "숫자", help_ko: "같은 태그의 숫자 열을 모두 더합니다.", excel_diff: "엑셀에 없는 함수입니다." },
+    { name: "REF", signature: 'REF("이름")', returns: "숫자", help_ko: "그 행의 기준 날짜가 속한 연도의 기준값을 가져옵니다.", excel_diff: "엑셀에 없는 함수입니다." },
     { name: "IF", signature: "IF(조건, 참, 거짓)", returns: "같은 종류", help_ko: "조건에 따라 값을 고릅니다.", excel_diff: "" },
   ],
-  cell_errors: { E1: "서버 문구: 0으로 나눌 수 없습니다.", E2: "서버 문구: 글자 길이가 범위를 벗어났습니다.", E3: "서버 문구: 날짜가 범위를 벗어났습니다." },
+  cell_errors: { E1: "서버 문구: 0으로 나눌 수 없습니다.", E2: "서버 문구: 글자 길이가 범위를 벗어났습니다.", E3: "서버 문구: 날짜가 범위를 벗어났습니다.", E4: "서버 문구: 기준값이 없습니다." },
 };
 
 export const SALES = [

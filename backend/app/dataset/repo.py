@@ -177,6 +177,25 @@ def list_formula_columns(session: Session) -> list[RowMapping]:
     return list(session.execute(stmt).mappings().all())
 
 
+def list_dataset_briefs(session: Session, dataset_ids: list[int]) -> list[RowMapping]:
+    """데이터셋 번호 목록의 요약(번호·이름·팀·상태; 활성·보관 모두), 데이터셋 이름 가나다순."""
+    if not dataset_ids:
+        return []
+    stmt = (
+        select(
+            datasets.c.id,
+            datasets.c.name,
+            datasets.c.team_id,
+            teams.c.name.label("team_name"),
+            datasets.c.status,
+        )
+        .join(teams, teams.c.id == datasets.c.team_id)
+        .where(datasets.c.id.in_(dataset_ids))
+        .order_by(by_name(datasets.c.name), datasets.c.id)
+    )
+    return list(session.execute(stmt).mappings().all())
+
+
 def max_position(session: Session, dataset_id: int) -> int | None:
     return session.execute(
         select(func.max(dataset_columns.c.position)).where(

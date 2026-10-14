@@ -88,3 +88,6 @@ description: 잘못 만든 열이나 데이터셋을 관리자가 수동으로 �
 - `permission-management`: 감사 기록 조회(5-1). 서비스로 한 변경은 `audit_log`에 남지만 이 문서의 수동 `psql` 정리는 남지 않는다.
 - `dashboard-link`: Superset 등록·동기 상태·다시 시도, 대시보드 연결(`superset_dashboards`)과 임베드 해제 절차. 정리 중에는 작업 스레드가 지워진 데이터셋의 요청을 조용히 건너뛴다.
 - 정적 표 구조나 `bi_data` 이름 규칙이 바뀌면(영구 삭제 단위 포함) 이 Skill도 함께 고친다. 보관·복구(FU-2b)는 `status` 값만 바꾸는 서비스 기능이라 이 수동 절차를 바꾸지 않는다.
+
+## 기준값 수동 정리 (FU-3)
+기준값 항목·연도 값을 지우는 API는 없다. 잘못 만든 것은 `bi_owner`로 `psql`에서 `DELETE FROM reference_values WHERE item_id = <번호>;` 다음 `DELETE FROM reference_items WHERE id = <번호>;`로 지운다(값이 먼저, 외래키 때문). 먼저 R6(`GET /api/reference-items/<번호>/usage`)로 그 항목을 쓰는 수식이 없는지 확인한다. 쓰는 수식이 있으면 값이 사라져 그 칸이 `E4`가 되고, 그 수식을 다시 저장하면 `REF_UNKNOWN`이 된다. **이 수동 정리는 감사 기록에 남지 않는다**(운영 노트에 적는다).

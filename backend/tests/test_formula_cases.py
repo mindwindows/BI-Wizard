@@ -27,7 +27,7 @@ from app.formula.cases import ERROR, OK, REJECT, Case, err, ok, reject
 from app.formula.literals import NUMBER
 from app.formula.registry import ErrorRule, Param
 from tests.formula_helpers import SqliteProbe
-from tests.formula_runner import case_columns, case_sources, evaluate_case
+from tests.formula_runner import case_columns, case_env, case_sources, evaluate_case
 
 REGISTRY = get_default_registry()
 ALL_CASES = [
@@ -44,7 +44,9 @@ def _case_id(item) -> str:
 def _sqlite_capable(case: Case) -> bool:
     """사례가 쓰는 함수가 모두 SQLite에서 평가 가능한가(정적 컴파일로 알아낸다)."""
     columns = case_columns(case)
-    result = compile_formula(case.expression, columns, registry=REGISTRY, build_sql=False)
+    result = compile_formula(
+        case.expression, columns, registry=REGISTRY, build_sql=False, env=case_env(case, columns)
+    )
     if not result.ok:  # 거부 사례
         return True
     return all(REGISTRY.get(name).sqlite for name in result.functions_used)
@@ -65,7 +67,13 @@ def test_cases_evaluate_on_sqlite_when_the_functions_allow_it(item, sqlite_conne
         columns = case_columns(case)
         probe = SqliteProbe()
         try:
-            result = compile_formula(case.expression, columns, registry=REGISTRY, const_probe=probe)
+            result = compile_formula(
+                case.expression,
+                columns,
+                registry=REGISTRY,
+                const_probe=probe,
+                env=case_env(case, columns),
+            )
         finally:
             probe.close()
         codes = [issue.code for issue in result.issues]
@@ -75,7 +83,13 @@ def test_cases_evaluate_on_sqlite_when_the_functions_allow_it(item, sqlite_conne
         return
     if case.expect == REJECT:
         columns = case_columns(case)
-        result = compile_formula(case.expression, columns, registry=REGISTRY, build_sql=False)
+        result = compile_formula(
+            case.expression,
+            columns,
+            registry=REGISTRY,
+            build_sql=False,
+            env=case_env(case, columns),
+        )
         assert not result.ok
         assert case.error in [issue.code for issue in result.issues], result.issues
         return
@@ -129,7 +143,9 @@ def test_every_case_compiles_for_postgresql_with_typed_constants(item):
     if case.expect == REJECT and case.error != "CONSTANT_ERROR":
         return
     columns = case_columns(case)
-    result = compile_formula(case.expression, columns, registry=REGISTRY)  # 상수 검사는 건너뜀
+    result = compile_formula(  # 상수 검사는 건너뜀
+        case.expression, columns, registry=REGISTRY, env=case_env(case, columns)
+    )
     assert result.ok, [i.as_dict() for i in result.issues]
     statement = _select_of(result)
     rendered = render_literal_sql(statement)  # pg8000 방언, 바인드 값 재검사 포함

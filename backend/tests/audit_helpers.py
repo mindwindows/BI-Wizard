@@ -20,6 +20,8 @@ from app.db_metadata import (
     datasets,
     formula_deps,
     formulas,
+    reference_items,
+    reference_values,
     superset_dashboards,
     superset_datasets,
     team_members,
@@ -59,6 +61,8 @@ def static_snapshot(db: Db) -> tuple[Any, ...]:
         db.rows(formula_deps, formula_deps.c.column_id, formula_deps.c.depends_on_column_id),
         db.rows(superset_datasets, superset_datasets.c.dataset_id),
         db.rows(superset_dashboards, superset_dashboards.c.id),
+        db.rows(reference_items, reference_items.c.id),
+        db.rows(reference_values, reference_values.c.id),
         dynamic,
     )
 

@@ -26,6 +26,7 @@ const DEEP_LINKS: Array<[string, string]> = [
   ["/admin/dashboards", "screen-S8"],
   ["/admin/status", "screen-S9"],
   ["/admin/audit", "screen-S10"],
+  ["/reference-values", "screen-S11"],
 ];
 
 describe("routerBasename", () => {
@@ -60,6 +61,12 @@ describe.each([
     expect(screen.getByRole("link", { name: "권한 관리" }).getAttribute("href")).toBe(
       `${basePath}/admin/permissions`,
     );
+  });
+
+  it("상단 메뉴 '기준값'은 basename을 포함한 주소로 연결된다(FU-3)", async () => {
+    render(<App router={createTestRouter(basePath, `${basePath}/datasets/42`)} />);
+    await screen.findByRole("navigation", { name: "주 메뉴" });
+    expect(screen.getByRole("link", { name: "기준값" }).getAttribute("href")).toBe(`${basePath}/reference-values`);
   });
 
   it("알 수 없는 경로는 셸 안에서 찾을 수 없음 화면", async () => {

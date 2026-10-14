@@ -15,9 +15,16 @@
 - 기간 규칙(기준 날짜 열): `NOT NULL` + CHECK(기간 첫날) + 유일 인덱스. CHECK 식의 단위 글자는 고정
   집합(`day`·`month`·`year`)에서만 온다.
 - 뷰(`dv_`·`de_`)는 `create_view`/`drop_view`로만 만든다. 만들기 전에 뷰 정의(SELECT)를 허용
-  목록 규칙으로 확인한다(자기 `ds_<번호>` 한 표만 읽음, `text()`·`literal_column` 없음, 서브쿼리
-  없음, 허용 목록 `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음, 바인드 값은 숫자·글자·참거짓·날짜뿐이며
-  글자는 NUL·역슬래시·제어·서식 문자가 없어야 한다(formula 렌더러의 1차 방어와 별개인 방어 중복)).
+  목록 규칙으로 확인한다(뷰는 자기 `ds_<번호>` 한 표를 읽고, 0009부터 `REF` 서브쿼리 안에서만
+  `public.reference_values` 한 표를 읽는다. `text()`·`literal_column` 없음, 허용 목록
+  `VIEW_ALLOWED_FUNCTIONS` 밖 SQL 함수 없음, 바인드 값은 숫자·글자·참거짓·날짜뿐이며 글자는 NUL·
+  역슬래시·제어·서식 문자가 없어야 한다(formula 렌더러의 1차 방어와 별개인 방어 중복)).
+  **서브쿼리는 `REF`의 한 가지 모양만 통과한다**(FU-3, 03b 32-3 안 B): 호출자가 넘긴
+  `ReferenceLookup(항목 번호, 기준 날짜 열 번호)`로 만든 기대 모양(`reference_lookup.py`, 읽는 표는
+  `public.reference_values` 하나, 항목 번호는 정수 상수, 연도는 자기 `ds_`의 기준 날짜 열에서 뽑은
+  값뿐)과 컴파일 결과(정규형)가 정확히 같을 때만 허용하고 그 밖의 서브쿼리(다른 표·다른 열·비상수·
+  중첩·UNION·LATERAL·열 식 밖 위치 등)는 모두 거부한다. 목록을 주지 않으면 서브쿼리는 하나도
+  허용하지 않는다. 이 모듈은 `bi_data`를 만들 뿐 `public` 표를 만들거나 바꾸지 않는다(읽기 식만).
   상수의 SQL 글자 렌더는 호출한 쪽이 넘기는 `render`(formula의 `render_literal_sql` 접점)만 쓰므로
   이 모듈은 `literal_binds`를 직접 쓰지 않는다(`CreateView`가 내부에서 같은 렌더러로 그린다).
   렌더 글자와 `CreateView`가 그리는 정의의 대조는 **어떤 DB 문장도 실행하기 전에** 한다.
@@ -90,6 +97,7 @@ from sqlalchemy.sql.elements import (
 )
 from sqlalchemy.sql.functions import FunctionElement
 from sqlalchemy.sql.operators import custom_op
+from sqlalchemy.sql.selectable import ScalarSelect
 from sqlalchemy.types import TypeEngine
 
 from app.core.db_errors import sqlstate
@@ -108,6 +116,7 @@ from app.ddl.names import (
     period_index_name,
     view_name,
 )
+from app.ddl.reference_lookup import ReferenceLookup, expected_lookup_key, lookup_key
 
 # 원본 열 형 -> PostgreSQL 형(06 §3-1). choice는 선택 목록 값 자체를 text로 저장한다.
 _COLUMN_SQL_TYPES: dict[str, type[TypeEngine]] = {
@@ -241,15 +250,50 @@ def _check_table(table: Table) -> None:
             check_dynamic_name(constraint.name)
 
 
-def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
-    """뷰 정의 SELECT를 확인하고 출력 열 이름 목록을 돌려준다(허용 목록 밖이면 거부)."""
+def _check_reference_subqueries(
+    selectable: Select, dataset_id: int, references: SequenceABC[ReferenceLookup]
+) -> set[int]:
+    """뷰 정의 안의 서브쿼리를 확인한다. 통과한 서브쿼리 `Select`의 `id` 집합을 돌려준다.
+
+    허용하는 것은 **`REF`의 한 가지 모양**(`reference_lookup.py`)과 정규형(컴파일 글자·상수 값)이
+    정확히 같고, 호출자가 넘긴 `(항목 번호, 기준 날짜 열 번호)` 목록에 있는 서브쿼리뿐이다. 그 밖의
+    서브쿼리(다른 표·다른 열·비상수 항목 번호·다른 연도 식·중첩·JOIN·`UNION`·`LATERAL`·파생 표·
+    CTE·함수 호출 등)는 모양이 달라 전부 거부된다. 서브쿼리는 바깥 SELECT의 **열 식 안**에서만 쓸 수
+    있다(WHERE·ORDER BY·FROM 등 다른 자리는 거부).
+    """
+    allowed = {expected_lookup_key(dataset_id, lookup) for lookup in references}
+    in_columns = {
+        id(node) for column in selectable.selected_columns for node in visitors.iterate(column)
+    }
+    matched: set[int] = set()
+    for node in visitors.iterate(selectable):
+        if not isinstance(node, ScalarSelect):
+            continue
+        if id(node) not in in_columns:
+            raise DdlNotAllowedError("뷰 정의의 서브쿼리는 열 식 안에서만 쓸 수 있다.")
+        inner = node.element
+        if not isinstance(inner, Select) or lookup_key(inner) not in allowed:
+            raise DdlNotAllowedError("뷰 정의에 허용된 기준값 조회 모양이 아닌 서브쿼리가 있다.")
+        matched.add(id(inner))
+    return matched
+
+
+def _check_view_select(
+    selectable: object, dataset_id: int, references: SequenceABC[ReferenceLookup] = ()
+) -> list[str]:
+    """뷰 정의 SELECT를 확인하고 출력 열 이름 목록을 돌려준다(허용 목록 밖이면 거부).
+
+    `references`는 이 뷰의 `REF` 서브쿼리가 쓸 수 있는 (항목 번호, 기준 날짜 열 번호) 목록이다.
+    비어 있으면 서브쿼리는 하나도 허용하지 않는다.
+    """
     if not isinstance(selectable, Select):
         raise DdlNotAllowedError("뷰 정의는 SELECT여야 한다.")
-    selects = 0
+    matched = _check_reference_subqueries(selectable, dataset_id, references)
     for node in visitors.iterate(selectable):
         _check_node_parts(node)
         if isinstance(node, Select):
-            selects += 1
+            if node is not selectable and id(node) not in matched:
+                raise DdlNotAllowedError("뷰 정의에 서브쿼리를 쓸 수 없다.")
         elif isinstance(node, TextClause):
             raise DdlNotAllowedError("뷰 정의에 text()를 쓸 수 없다.")
         elif isinstance(node, ColumnClause) and node.is_literal:
@@ -259,8 +303,6 @@ def _check_view_select(selectable: object, dataset_id: int) -> list[str]:
                 raise DdlNotAllowedError("뷰 정의에 허용 목록 밖 SQL 함수를 쓸 수 없다.")
         elif isinstance(node, BindParameter):
             _check_bind_value(node.effective_value)
-    if selects != 1:
-        raise DdlNotAllowedError("뷰 정의에 서브쿼리를 쓸 수 없다.")
     froms = selectable.get_final_froms()
     if len(froms) != 1:
         raise DdlNotAllowedError("뷰는 자기 원본 표 하나만 읽는다.")
@@ -286,14 +328,16 @@ def _check_view_target(view: Table, kind: str | None = None) -> None:
         raise DdlNameError("뷰 종류와 이름이 맞지 않는다.")
 
 
-def _check_element(element: ExecutableDDLElement) -> None:
+def _check_element(
+    element: ExecutableDDLElement, references: SequenceABC[ReferenceLookup] = ()
+) -> None:
     if not isinstance(element, ALLOWED_DDL_ELEMENTS):
         raise DdlNotAllowedError(f"허용되지 않는 DDL 구문: {type(element).__name__}")
     if isinstance(element, CreateView):
         if element.temporary or element.materialized:
             raise DdlNotAllowedError("임시·구체화 뷰는 만들지 않는다.")
         _check_view_target(element.table)
-        _check_view_select(element.selectable, int(element.table.name.split("_", 1)[1]))
+        _check_view_select(element.selectable, int(element.table.name.split("_", 1)[1]), references)
         return
     if isinstance(element, DropView):
         if element.materialized:
@@ -318,9 +362,17 @@ def _check_element(element: ExecutableDDLElement) -> None:
         check_dynamic_name(target.name, "constraint")
 
 
-def run_ddl(conn: Connection, element: ExecutableDDLElement) -> None:
-    """허용 목록을 확인하고 DDL 구문을 실행한다. 규칙 밖이면 실행 전에 거부한다."""
-    _check_element(element)
+def run_ddl(
+    conn: Connection,
+    element: ExecutableDDLElement,
+    *,
+    references: SequenceABC[ReferenceLookup] = (),
+) -> None:
+    """허용 목록을 확인하고 DDL 구문을 실행한다. 규칙 밖이면 실행 전에 거부한다.
+
+    `references`는 `CreateView`의 `REF` 서브쿼리 허용 목록이다(그 밖의 구문에는 쓰이지 않는다).
+    """
+    _check_element(element, references)
     conn.execute(element)
 
 
@@ -554,7 +606,9 @@ def _compile_rendered_select(element: RenderedSelect, compiler: Any, **_kw: Any)
     return check_rendered_echo(rendered, element.selectable, dialect)
 
 
-def _execute_view_statement(conn: Connection, statement: Any) -> Any:
+def _execute_view_statement(
+    conn: Connection, statement: Any, references: SequenceABC[ReferenceLookup] = ()
+) -> Any:
     """뷰 정의·확인 질의를 실행한다. 문장에 사용자 상수가 들어 있으므로 DB 오류는 SQL 없이 올린다.
 
     잠금 대기 초과·교착(재시도 가능)과 열 형 변경 거부(42P16, 지우고 다시 만들기로 처리)는
@@ -563,7 +617,7 @@ def _execute_view_statement(conn: Connection, statement: Any) -> Any:
     """
     try:
         if isinstance(statement, ExecutableDDLElement):
-            run_ddl(conn, statement)
+            run_ddl(conn, statement, references=references)
             return None
         return conn.execute(statement)
     except DBAPIError as error:
@@ -615,8 +669,12 @@ def create_view(
     *,
     render: Renderer,
     echo: SequenceABC[tuple[Select, tuple[Any, ...]]] = (),
+    references: SequenceABC[ReferenceLookup] = (),
 ) -> bool:
     """`dv_<번호>`/`de_<번호>`를 만들거나 바꾼다. 방식을 바꿨으면(지우고 다시 만듦) True.
+
+    `references`: 이 뷰의 `REF` 서브쿼리가 쓸 수 있는 (항목 번호, 기준 날짜 열 번호) 목록(없으면
+    서브쿼리 불허). 서브쿼리는 `reference_lookup.py`의 한 가지 모양과 정규형이 같아야 한다.
 
     - 뷰가 없으면 `CREATE VIEW`. 있고 기존 열이 새 열의 앞부분(이름·순서 같음)이면
       `CREATE OR REPLACE VIEW`(끝에 열 추가만 가능, X-11), 열 제거·순서·이름·형 변경이면
@@ -628,7 +686,7 @@ def create_view(
     """
     if kind not in VIEW_KINDS:
         raise DdlNotAllowedError(f"허용되지 않는 뷰 종류: {kind!r}")
-    expected = _check_view_select(selectable, dataset_id)
+    expected = _check_view_select(selectable, dataset_id, references)
     dialect = conn.dialect
     rendered = render(selectable, dialect)  # 상수 검증 + 같은 렌더러로 그린 정의 글자
     # 렌더러가 그린 정의 글자가 실제 `CREATE VIEW`에 그대로 들어가는지 **실행 전에** 대조한다.
@@ -644,13 +702,17 @@ def create_view(
     rebuilt = False
     if existing is None:
         _execute_view_statement(
-            conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+            conn,
+            _create_view_statement(kind, dataset_id, selectable, or_replace=False),
+            references,
         )
     elif expected[: len(existing)] == existing:
         try:
             with conn.begin_nested():
                 _execute_view_statement(
-                    conn, _create_view_statement(kind, dataset_id, selectable, or_replace=True)
+                    conn,
+                    _create_view_statement(kind, dataset_id, selectable, or_replace=True),
+                    references,
                 )
         except DBAPIError as error:
             if sqlstate(error) != _INVALID_TABLE_DEFINITION:
@@ -658,13 +720,17 @@ def create_view(
             # 열 형이 바뀌었다(예: 계산 열의 결과 형). 지우고 다시 만든다.
             drop_view(conn, kind, dataset_id)
             _execute_view_statement(
-                conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+                conn,
+                _create_view_statement(kind, dataset_id, selectable, or_replace=False),
+                references,
             )
             rebuilt = True
     else:
         drop_view(conn, kind, dataset_id)
         _execute_view_statement(
-            conn, _create_view_statement(kind, dataset_id, selectable, or_replace=False)
+            conn,
+            _create_view_statement(kind, dataset_id, selectable, or_replace=False),
+            references,
         )
         rebuilt = True
     _verify_view(conn, kind, dataset_id, expected, render, echo)

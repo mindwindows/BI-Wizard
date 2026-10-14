@@ -33,12 +33,13 @@ import sqlalchemy as sa
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.ddl.names import column_name
+from app.ddl.reference_lookup import ReferenceLookup
 from app.formula.analyze import MAX_EXPANDED_NODES, NEW_COLUMN_ID, Analysis, TNode
 from app.formula.columns import ColumnInfo, is_supported_column_type
-from app.formula.context import ConvertContext
+from app.formula.context import ConvertContext, ReferenceEnv
 from app.formula.convert import ConstProbe, Converter, run_const_probes
 from app.formula.errors import FormulaError, FormulaIssue, make_issue
-from app.formula.functions import build_default_registry, get_default_registry
+from app.formula.functions import REF_NAME, build_default_registry, get_default_registry
 from app.formula.literals import LITERALS, Literals
 from app.formula.nodes import (
     MAX_EXPANDED_DEPTH,
@@ -73,6 +74,10 @@ class CompileResult:
     source_columns: tuple[int, ...] = ()  # 펼친 식이 읽는 원본 열 번호(오름차순)
     sumtag_columns: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
     functions_used: frozenset[str] = frozenset()
+    # 펼친 식이 읽는 기준값 조회(`REF`): 뷰 게이트가 허용할
+    # (항목 번호, 기준 날짜 열 번호) 목록(정렬).
+    # SQL이 아니라 C0가 푼 이름·환경에서 만든다(게이트가 SQL 모양과 독립적으로 대조하기 위해서다).
+    reference_uses: tuple[ReferenceLookup, ...] = ()
     node_count: int = 0  # 펼친 AST 노드 수
     value: ColumnElement[Any] | None = None
     error: ColumnElement[Any] | None = None  # None이면 오류가 날 수 없는 식
@@ -138,6 +143,25 @@ def _raw_columns(root: TNode) -> tuple[int, ...]:
     return tuple(sorted(found))
 
 
+def _reference_uses(root: TNode, env: ReferenceEnv | None) -> tuple[ReferenceLookup, ...]:
+    """펼친 트리의 `REF` 호출이 쓰는 (항목 번호, 기준 날짜 열 번호)(중복 제거, 정렬)."""
+    if env is None or env.base_date_column_id is None:
+        return ()
+    found: set[ReferenceLookup] = set()
+    seen: set[int] = set()
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if node.kind == "call" and node.spec is not None and node.spec.name == REF_NAME:
+            name = node.args[0].value
+            found.add(ReferenceLookup(env.item_ids[name], env.base_date_column_id))
+        stack.extend(node.args)
+    return tuple(sorted(found, key=lambda r: (r.item_id, r.base_column_id)))
+
+
 def _sumtag_columns(
     analysis: Analysis, ast: Node, registry: FunctionRegistry
 ) -> dict[str, tuple[int, ...]]:
@@ -168,8 +192,12 @@ def compile_formula(
     const_probe: ConstProbe | None = None,
     build_sql: bool = True,
     literals: Literals = LITERALS,
+    env: ReferenceEnv | None = None,
 ) -> CompileResult:
     """수식 글자를 검사(C0)하고 (값 식, 오류 식)까지 만든다. 오류가 있으면 `ok=False`와 `issues`.
+
+    `env`(기준값 환경, 07 §3-2): `REF`를 쓰는 수식은 필수다. 없는 채로 `REF`를 만나면 구현 오류
+    (`RuntimeError`)이며 사용자 문구가 아니다(호출 지점을 빠뜨리면 시험에서 크게 실패한다).
 
     단계: 파싱 -> 열 이름 해석 -> `SUMTAG` 바꿔 쓰기 -> 순환·사슬 검사 -> 형 검사(참조한 계산 열은
     펼침)
@@ -188,7 +216,9 @@ def compile_formula(
     own = existing.get(root_id)
     root_tag = own.tag if own is not None else tag
     root_name = column_name_hint or (own.name if own is not None else "이 열")
-    analysis = Analysis(registry, columns, root_id=root_id, root_tag=root_tag, root_name=root_name)
+    analysis = Analysis(
+        registry, columns, root_id=root_id, root_tag=root_tag, root_name=root_name, env=env
+    )
     issues: list[FormulaIssue] = []
 
     try:
@@ -215,6 +245,7 @@ def compile_formula(
         "source_columns": _raw_columns(root),
         "sumtag_columns": _sumtag_columns(analysis, resolved, registry),
         "functions_used": frozenset(analysis.functions_used),
+        "reference_uses": _reference_uses(root, env),
         "node_count": root.size,
     }
     if not build_sql:
@@ -222,7 +253,7 @@ def compile_formula(
 
     by_id = {c.id: c for c in columns if is_supported_column_type(c.type)}
     source = _source_lookup(source_columns, by_id)
-    converter = Converter(ConvertContext(lit=literals, source=source))
+    converter = Converter(ConvertContext(lit=literals, source=source, env=env))
     try:
         compiled = converter.convert(root)
     except FormulaError as exc:
@@ -264,10 +295,12 @@ def check_formula(
     tag: str | None = None,
     registry: FunctionRegistry | None = None,
     const_probe: ConstProbe | None = None,
+    env: ReferenceEnv | None = None,
 ) -> CompileResult:
     """편집기 검사(05 D2).
 
-    `const_probe`를 주면 상수 부분식 오류까지, 없으면 DB 없이 정적 검사만 한다.
+    `const_probe`를 주면 상수 부분식 오류까지, 없으면 DB 없이 정적 검사만 한다. `env`는
+    `REF`를 쓰는 수식이면 필수다(`compile_formula`).
     """
     return compile_formula(
         expression,
@@ -277,6 +310,7 @@ def check_formula(
         registry=registry,
         const_probe=const_probe,
         build_sql=const_probe is not None,
+        env=env,
     )
 
 
@@ -284,6 +318,7 @@ __all__ = [
     "CompileResult",
     "ConstProbe",
     "FunctionRegistry",
+    "ReferenceEnv",
     "ast_canonical_json",
     "build_default_registry",
     "check_formula",

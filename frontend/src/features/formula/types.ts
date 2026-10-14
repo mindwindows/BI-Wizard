@@ -16,7 +16,7 @@ export interface FunctionInfo {
 /** D1 */
 export interface FunctionCatalog {
   functions: FunctionInfo[];
-  /** 셀 오류 코드(E1~E3)의 쉬운 말. 05 §3 */
+  /** 셀 오류 코드(E1~E4)의 쉬운 말. 05 §3 */
   cell_errors: Record<string, string>;
 }
 

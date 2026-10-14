@@ -24,8 +24,8 @@ TEXT_WRAPPERS = {"text"}  # sa.text("고정문"), text("고정문")
 # test_migrations_do_not_manage_bi_data_objects가 막는다.
 # 확인을 받았다면 {"revision 파일 이름": "DROP 확인: 사용자 승인 (날짜, 근거)"} 형태로
 # 여기에 기록한다. **확인이 아직 없는 항목**은 `DROP_PENDING_PREFIX`로 시작하는 문구로 기록하며
-# 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 지금은 대기 항목이 없고(0007은
-# 2026-10-14 승인, 0008도 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이
+# 승인으로 읽지 않는다(문구에 "사용자 승인"을 쓰지 않는다). 지금은 대기 항목이 없고(0007·0008·0009는
+# 모두 2026-10-14 승인), 아래 `test_no_pending_drop_confirmations`가 대기 항목이
 # 생기는 것을 막는다.
 DROP_PENDING_PREFIX = "사용자 확인 대기("
 DROP_APPROVED: dict[str, str] = {
@@ -76,6 +76,16 @@ DROP_APPROVED: dict[str, str] = {
         "DROP 확인: 사용자 승인 (2026-10-14, 03b 30-1 결정 4: drop_constraint 4개 = "
         "upgrade·downgrade 각각의 ck_datasets_status, ck_audit_log_action 교체. "
         "표·열 DROP 없음. 대기 표시 없음)"
+    ),
+    # 0009의 op.drop_constraint 4개(upgrade 2 + downgrade 2: ck_audit_log_action,
+    # ck_audit_log_target_type 교체)와 downgrade()의 op.drop_table 2개(reference_values,
+    # reference_items, 외래키 역순).
+    "20261014_0009_reference_values.py": (
+        "DROP 확인: 사용자 승인 (2026-10-14, 03b 32-3 D12: drop_constraint 4개 = upgrade·"
+        "downgrade 각각의 ck_audit_log_action, ck_audit_log_target_type 교체와 downgrade()의 "
+        "drop_table 2개 reference_values, reference_items. 정적 표 대상, 동적 객체 아님. "
+        "downgrade는 기준값을 읽는 뷰나 기준값 감사 행이 있으면 사전 점검으로 거부한다. "
+        "대기 표시 없음)"
     ),
 }
 
@@ -195,12 +205,13 @@ def test_single_head():
     """head가 둘이면 두 브랜치가 동시에 revision을 추가한 것이다(병합 필요). DB 없이 검사한다."""
     heads = ScriptDirectory.from_config(_alembic_config()).get_heads()
     assert len(heads) == 1, f"head가 {len(heads)}개: {heads}"
-    assert heads == ["0008"]
+    assert heads == ["0009"]
 
 
 def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     script = ScriptDirectory.from_config(_alembic_config())
     assert [r.revision for r in script.walk_revisions()] == [
+        "0009",
         "0008",
         "0007",
         "0006",
@@ -218,6 +229,7 @@ def test_revision_chain_baseline_privileges_access_then_dataset_tables():
     assert script.get_revision("0006").down_revision == "0005"
     assert script.get_revision("0007").down_revision == "0006"
     assert script.get_revision("0008").down_revision == "0007"
+    assert script.get_revision("0009").down_revision == "0008"
 
 
 def test_every_revision_defines_upgrade_and_downgrade():
@@ -279,7 +291,7 @@ def test_drop_requires_recorded_user_approval():
 
 
 def test_no_pending_drop_confirmations():
-    """확인 대기 DROP은 없다. 0007(03b 29-3)·0008(03b 30-1)은 2026-10-14에 승인됐다.
+    """확인 대기 DROP은 없다. 0007(03b 29-3)·0008(03b 30-1)·0009(03b 32-3)는 2026-10-14에 승인됐다.
 
     새 대기 항목이 조용히 생기지 않게 하고(대기 문구는 이 시험을 깨뜨린다), 모든 DROP 기록이
     승인 문구인지 확인한다.
@@ -290,6 +302,9 @@ def test_no_pending_drop_confirmations():
     assert "2026-10-14" in DROP_APPROVED["20261013_0007_audit_log.py"]
     note = DROP_APPROVED["20261014_0008_dataset_archive.py"]
     assert "DROP 확인: 사용자 승인 (2026-10-14" in note and "03b 30-1" in note
+    assert "대기" not in note.replace("대기 표시 없음", "")
+    note = DROP_APPROVED["20261014_0009_reference_values.py"]
+    assert "DROP 확인: 사용자 승인 (2026-10-14, 03b 32-3" in note
     assert "대기" not in note.replace("대기 표시 없음", "")
 
 
@@ -504,9 +519,35 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
     action_check = re.findall(
         r"CONSTRAINT ck_audit_log_action CHECK \((action IN \([^)]*\))\)", upgrade_sql
     )
-    assert len(action_check) == 2  # 0007(표 안, 15개)과 0008(제약 교체, 17개)
-    assert action_check[0].count("'") == 30 and action_check[1].count("'") == 34
+    # 0007(표 안, 15개), 0008(제약 교체, 17개), 0009(제약 교체, 20개)
+    assert len(action_check) == 3
+    assert [c.count("'") for c in action_check] == [30, 34, 40]
     assert "'dataset.archive'" in action_check[1] and "'dataset.archive'" not in action_check[0]
+    assert "'reference_value.update'" in action_check[2]
+    assert "'reference.create'" not in action_check[1]
+    # 0009: 기준값 표 두 개, 열 단위 GRANT 4줄(DELETE 없음), 감사 CHECK 두 개 교체(op.f 이름).
+    for table in ("reference_items", "reference_values"):
+        assert f"CREATE TABLE {table} (" in upgrade_sql
+    for line in (
+        "GRANT SELECT, INSERT ON reference_items TO bi_app",
+        "GRANT UPDATE (description) ON reference_items TO bi_app",
+        "GRANT SELECT, INSERT ON reference_values TO bi_app",
+        "GRANT UPDATE (number_value) ON reference_values TO bi_app",
+    ):
+        assert line in upgrade_sql
+    assert "CONSTRAINT uq_reference_values_item_id_year UNIQUE (item_id, year)" in upgrade_sql
+    assert "CONSTRAINT ck_reference_values_year CHECK (year BETWEEN 1900 AND 9999)" in upgrade_sql
+    assert "CONSTRAINT ck_reference_values_finite CHECK" in upgrade_sql
+    assert "CONSTRAINT ck_reference_items_name_length CHECK" in upgrade_sql
+    assert "ALTER TABLE audit_log DROP CONSTRAINT ck_audit_log_target_type;" in upgrade_sql
+    assert (
+        "ALTER TABLE audit_log ADD CONSTRAINT ck_audit_log_target_type "
+        "CHECK (target_type IN ('team', 'user', 'dataset', 'dashboard', 'reference'));"
+    ) in upgrade_sql
+    assert "ck_reference_ck_" not in upgrade_sql and "ck_audit_log_ck_" not in upgrade_sql
+    assert upgrade_sql.index("CREATE TABLE reference_values (") < upgrade_sql.index(
+        "GRANT UPDATE (number_value) ON reference_values TO bi_app"
+    )
     command.downgrade(config, "head:base", sql=True)
     downgrade_sql = capsys.readouterr().out
     # 0008 downgrade: 옛 정의(활성만, 15개)로 되돌리는 제약 교체. 오프라인에서는 사전 점검이 없다.
@@ -514,6 +555,15 @@ def test_offline_upgrade_and_downgrade_generate_sql(capsys):
         "ALTER TABLE datasets ADD CONSTRAINT ck_datasets_status CHECK (status IN ('active'));"
     ) in downgrade_sql
     assert "SELECT 1 FROM" not in downgrade_sql and "SELECT EXISTS" not in downgrade_sql
+    # 0009 downgrade가 먼저: 옛 CHECK로 되돌리고(오프라인에는 사전 점검이 없다)
+    # 표를 외래키 역순으로 지운다.
+    assert "pg_depend" not in downgrade_sql
+    assert downgrade_sql.index("DROP TABLE reference_values") < downgrade_sql.index(
+        "DROP TABLE reference_items"
+    )
+    assert downgrade_sql.index("DROP TABLE reference_items") < downgrade_sql.index(
+        "ADD CONSTRAINT ck_datasets_status"
+    )
     assert downgrade_sql.index("ADD CONSTRAINT ck_datasets_status") < downgrade_sql.index(
         "DROP TABLE audit_log"
     )
@@ -613,6 +663,10 @@ def _audit_revision() -> Path:
     return next(p for p in _revision_files() if "_0007_" in p.name)
 
 
+def _reference_revision() -> Path:
+    return next(p for p in _revision_files() if "_0009_" in p.name)
+
+
 def test_revisions_create_exactly_the_static_metadata_tables():
     """revision들이 만드는 표 이름은 정적 MetaData와 같다(alembic check는 DB 왕복 시험이 한다)."""
     from app.db_metadata import metadata
@@ -625,6 +679,7 @@ def test_revisions_create_exactly_the_static_metadata_tables():
             _formula_revision(),
             _superset_revision(),
             _audit_revision(),
+            _reference_revision(),
         )
         for n in ast.walk(_function(_parse(path), "upgrade"))
         if isinstance(n, ast.Call) and _call_name(n) == "create_table"
@@ -771,7 +826,7 @@ def _check_constraints_in(path: Path, function: str) -> dict[str, str]:
 
 
 def test_audit_revision_checks_match_static_metadata_and_audit_actions():
-    """0007의 CHECK 5개는 정적 MetaData와 같고, action만 17개 중 앞선 15개다(0008이 17개로 교체)."""
+    """0007의 CHECK 4개는 정적 MetaData와 같고 action·target_type만 옛 정의다(0008·0009가 교체)."""
     from app.audit.actions import ACTIONS
     from app.db_metadata import (
         AUDIT_ACTIONS,
@@ -780,7 +835,7 @@ def test_audit_revision_checks_match_static_metadata_and_audit_actions():
         AUDIT_TARGET_TYPES,
     )
 
-    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(AUDIT_ACTIONS) == 17
+    assert tuple(ACTIONS) == AUDIT_ACTIONS and len(AUDIT_ACTIONS) == 20
     assert {spec.target_type for spec in ACTIONS.values()} <= set(AUDIT_TARGET_TYPES)
     assert set(AUDIT_TARGET_TYPES) == {spec.target_type for spec in ACTIONS.values()}
     assert AUDIT_ACTOR_SOURCES == ("user", "cli")
@@ -797,16 +852,19 @@ def test_audit_revision_checks_match_static_metadata_and_audit_actions():
         )
     }
     for full_name, sql in in_revision.items():
-        if full_name == "ck_audit_log_action":
-            continue  # 0008이 교체한다: 아래에서 0007의 15개 = 17개 중 새 2개를 뺀 것
+        if full_name in {"ck_audit_log_action", "ck_audit_log_target_type"}:
+            continue  # 0008·0009가 교체한다: 아래에서 옛 정의를 대조한다
         assert sql == _constraint_sql("audit_log", full_name), full_name
     old_actions = tuple(re.findall(r"'([^']+)'", in_revision["ck_audit_log_action"]))
-    assert old_actions == tuple(a for a in AUDIT_ACTIONS if a not in NEW_IN_0008)
+    assert old_actions == tuple(a for a in AUDIT_ACTIONS if a not in (*NEW_IN_0008, *NEW_IN_0009))
     assert len(old_actions) == 15
+    old_types = tuple(re.findall(r"'([^']+)'", in_revision["ck_audit_log_target_type"]))
+    assert old_types == tuple(t for t in AUDIT_TARGET_TYPES if t != "reference")
     assert f"<= {AUDIT_DETAILS_MAX_BYTES}" in in_revision["ck_audit_log_details_size"]
 
 
 NEW_IN_0008 = ("dataset.archive", "dataset.restore")
+NEW_IN_0009 = ("reference.create", "reference_value.add", "reference_value.update")
 
 
 def _archive_revision() -> Path:
@@ -847,8 +905,10 @@ def test_archive_revision_replaces_exactly_two_checks_and_nothing_else():
     # upgrade의 새 정의가 정적 MetaData와 같다
     in_upgrade = _check_constraints_in(path, "upgrade")
     assert in_upgrade["ck_datasets_status"] == _constraint_sql("datasets", "ck_datasets_status")
-    assert in_upgrade["ck_audit_log_action"] == _constraint_sql("audit_log", "ck_audit_log_action")
-    assert tuple(re.findall(r"'([^']+)'", in_upgrade["ck_audit_log_action"])) == AUDIT_ACTIONS
+    # 0008 시점의 17개: 지금의 20개에서 0009가 더한 3개를 뺀 것(0009가 20개로 다시 교체한다)
+    assert tuple(re.findall(r"'([^']+)'", in_upgrade["ck_audit_log_action"])) == tuple(
+        a for a in AUDIT_ACTIONS if a not in NEW_IN_0009
+    )
     assert in_upgrade["ck_datasets_status"].endswith("IN ('active', 'archived')")
     # downgrade는 0007의 정의(15개, 활성만)로 되돌린다
     in_down = _check_constraints_in(path, "downgrade")
@@ -881,6 +941,157 @@ def test_archive_revision_downgrade_guard_is_fixed_sql_and_runs_before_any_chang
         isinstance(first, ast.Expr) and _call_name(first.value) == "_refuse_if_archive_data_exists"
     )
     # 모든 execute 인자가 고정 문자열이다(test_migration_sql_has_no_interpolation도 같은 검사)
+    for n in ast.walk(guard):
+        if isinstance(n, ast.Call) and _call_name(n) == "execute":
+            assert _is_fixed_sql(n.args[0])
+
+
+def test_reference_revision_creates_two_tables_with_metadata_checks_and_minimal_grants():
+    """0009: 표 둘, 열 단위 GRANT 4줄(DELETE·TRUNCATE·PUBLIC·bi_readonly 없음), CHECK는 MetaData와
+    같다."""
+    path = _reference_revision()
+    tree = _parse(path)
+    assert not _is_trivial_body(_function(tree, "upgrade"))
+    assert not _is_trivial_body(_function(tree, "downgrade"))
+    grants = _execute_args(path, "upgrade")
+    assert grants == [
+        "GRANT SELECT, INSERT ON reference_items TO bi_app",
+        "GRANT UPDATE (description) ON reference_items TO bi_app",
+        "GRANT SELECT, INSERT ON reference_values TO bi_app",
+        "GRANT UPDATE (number_value) ON reference_values TO bi_app",
+    ]
+    joined = " ".join(grants).upper()
+    for forbidden in ("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "PUBLIC", "BI_READONLY"):
+        assert forbidden not in joined, forbidden
+    assert "ALL" not in joined.replace(",", " ").split() and "SEQUENCE" not in joined
+    created = _check_constraints_in(path, "upgrade")
+    for table, name in (
+        ("reference_items", "ck_reference_items_name_length"),
+        ("reference_values", "ck_reference_values_year"),
+        ("reference_values", "ck_reference_values_finite"),
+    ):
+        assert created[name] == _constraint_sql(table, name), name
+    from app.db_metadata import (
+        REFERENCE_NAME_MAX_LENGTH,
+        REFERENCE_YEAR_MAX,
+        REFERENCE_YEAR_MIN,
+    )
+
+    assert f"BETWEEN 1 AND {REFERENCE_NAME_MAX_LENGTH}" in created["ck_reference_items_name_length"]
+    assert (
+        f"BETWEEN {REFERENCE_YEAR_MIN} AND {REFERENCE_YEAR_MAX}"
+        in (created["ck_reference_values_year"])
+    )
+    upgrade_calls = [
+        _call_name(n) for n in ast.walk(_function(tree, "upgrade")) if isinstance(n, ast.Call)
+    ]
+    assert upgrade_calls.count("create_table") == 2
+    assert upgrade_calls.count("create_index") == 0  # UNIQUE 인덱스가 조회와 FK 검사를 맡는다
+    assert upgrade_calls.count("drop_table") == 0 and upgrade_calls.count("drop_column") == 0
+
+
+def test_reference_revision_replaces_exactly_the_two_audit_checks():
+    """0009 upgrade·downgrade의 제약 교체는 감사 CHECK 둘뿐이고 새 정의가 MetaData와 같다."""
+    from app.db_metadata import AUDIT_ACTIONS, AUDIT_TARGET_TYPES
+
+    path = _reference_revision()
+    tree = _parse(path)
+    for name in ("upgrade", "downgrade"):
+        calls = [
+            (_call_name(n), n.args[0].args[0].value, n.args[1].value)
+            for n in ast.walk(_function(tree, name))
+            if isinstance(n, ast.Call)
+            and _call_name(n) in {"drop_constraint", "create_check_constraint"}
+        ]
+        assert sorted(calls) == sorted(
+            [
+                ("drop_constraint", "ck_audit_log_action", "audit_log"),
+                ("create_check_constraint", "ck_audit_log_action", "audit_log"),
+                ("drop_constraint", "ck_audit_log_target_type", "audit_log"),
+                ("create_check_constraint", "ck_audit_log_target_type", "audit_log"),
+            ]
+        ), name
+        for check in ("ck_audit_log_action", "ck_audit_log_target_type"):
+            order = [c for c, n, _t in calls if n == check]
+            assert order == ["drop_constraint", "create_check_constraint"], (name, check)
+    new = _check_constraints_in(path, "upgrade")
+    assert tuple(re.findall(r"'([^']+)'", new["ck_audit_log_action"])) == AUDIT_ACTIONS
+    assert tuple(re.findall(r"'([^']+)'", new["ck_audit_log_target_type"])) == AUDIT_TARGET_TYPES
+    assert new["ck_audit_log_action"] == _constraint_sql("audit_log", "ck_audit_log_action")
+    assert new["ck_audit_log_target_type"] == _constraint_sql(
+        "audit_log", "ck_audit_log_target_type"
+    )
+    assert len(AUDIT_ACTIONS) == 20 and len(AUDIT_TARGET_TYPES) == 5
+    old = _check_constraints_in(path, "downgrade")  # downgrade는 0008의 정의(17개, 4개)로 되돌린다
+    assert tuple(re.findall(r"'([^']+)'", old["ck_audit_log_action"])) == tuple(
+        a for a in AUDIT_ACTIONS if a not in NEW_IN_0009
+    )
+    assert tuple(re.findall(r"'([^']+)'", old["ck_audit_log_target_type"])) == tuple(
+        t for t in AUDIT_TARGET_TYPES if t != "reference"
+    )
+    assert (
+        old["ck_audit_log_action"]
+        == _check_constraints_in(_archive_revision(), "upgrade")["ck_audit_log_action"]
+    )
+    # DROP은 승인된 곳에만: upgrade는 drop_constraint 2개,
+    # downgrade는 drop_constraint 2 + drop_table 2
+    assert [f.split("(")[0] for f in _drop_findings_in(_function(tree, "upgrade"))] == [
+        "drop_constraint",
+        "drop_constraint",
+    ]
+    downgrade_drops = [f.split("(")[0] for f in _drop_findings_in(_function(tree, "downgrade"))]
+    assert sorted(downgrade_drops) == ["drop_constraint"] * 2 + ["drop_table"] * 2
+    dropped = [
+        n.args[0].value
+        for n in ast.walk(_function(tree, "downgrade"))
+        if isinstance(n, ast.Call) and _call_name(n) == "drop_table"
+    ]
+    assert dropped == ["reference_values", "reference_items"]  # 외래키 역순
+    assert not _bi_data_findings(tree)
+
+
+def test_reference_revision_downgrade_guard_is_fixed_sql_and_runs_before_any_change():
+    """downgrade 사전 점검: `pg_depend` 의존 점검과 감사 행 점검(고정 SELECT), 오프라인 생략."""
+    path = _reference_revision()
+    tree = _parse(path)
+    guard = _function(tree, "_refuse_if_reference_data_exists")
+    sqls = [
+        n.args[0].args[0].value
+        for n in ast.walk(guard)
+        if isinstance(n, ast.Call) and _call_name(n) == "execute"
+    ]
+    assert len(sqls) == 2
+    assert sqls[0] == (
+        "SELECT 1 FROM pg_depend d "
+        "JOIN pg_rewrite r ON r.oid = d.objid "
+        "JOIN pg_class c ON c.oid = r.ev_class "
+        "WHERE d.classid = 'pg_rewrite'::regclass "
+        "AND d.refclassid = 'pg_class'::regclass "
+        "AND d.refobjid = 'public.reference_values'::regclass "
+        "AND c.relkind = 'v' LIMIT 1"
+    )
+    assert (
+        "pg_views" not in sqls[0] and "LIKE" not in sqls[0].upper()
+    )  # 정의 글자 검색을 쓰지 않는다
+    assert sqls[1] == (
+        "SELECT 1 FROM audit_log WHERE action IN "
+        "('reference.create', 'reference_value.add', 'reference_value.update') LIMIT 1"
+    )
+    assert any(
+        isinstance(n, ast.Call) and _call_name(n) == "is_offline_mode" for n in ast.walk(guard)
+    )
+    first = _function(tree, "downgrade").body[0]
+    assert (
+        isinstance(first, ast.Expr)
+        and _call_name(first.value) == "_refuse_if_reference_data_exists"
+    )
+    docstrings = _docstring_nodes(tree)
+    code_strings = [
+        n.value
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings
+    ]
+    assert not any("CASCADE" in text.upper() for text in code_strings)  # CASCADE는 절대 쓰지 않는다
     for n in ast.walk(guard):
         if isinstance(n, ast.Call) and _call_name(n) == "execute":
             assert _is_fixed_sql(n.args[0])
