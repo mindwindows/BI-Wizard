@@ -228,6 +228,35 @@ _RULE_BUILDERS = {
 }
 
 
+def _boolean(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def normalize_formula_rules(rules: dict[str, Any]) -> tuple[dict[str, Any] | None, list[Problem]]:
+    """계산 열의 표시 형식(`display_decimals` 0~10 정수, `display_thousands` 불리언)을 검사한다.
+
+    표시 전용이라 값 검증에는 쓰이지 않는다(03b 33-2). 알 수 없는 키는 위반이고 비면 None이다.
+    입력 열의 `decimals`(입력 검증)와 다른 키다.
+    """
+    problems = _unknown_keys(rules, {"display_decimals", "display_thousands"})
+    out: dict[str, Any] = {}
+    if rules.get("display_decimals") is not None:
+        decimals = _integer(rules["display_decimals"])  # 불리언은 거부한다
+        if decimals is None:
+            problems.append(("rules.display_decimals", FieldErrorCode.BAD_FORMAT))
+        elif not 0 <= decimals <= NUMBER_DECIMALS_MAX:
+            problems.append(("rules.display_decimals", FieldErrorCode.OUT_OF_RANGE))
+        else:
+            out["display_decimals"] = decimals
+    if rules.get("display_thousands") is not None:
+        thousands = _boolean(rules["display_thousands"])
+        if thousands is None:
+            problems.append(("rules.display_thousands", FieldErrorCode.BAD_FORMAT))
+        else:
+            out["display_thousands"] = thousands
+    return (out or None), problems
+
+
 def normalize_rules(
     column_type: str, rules: dict[str, Any] | None
 ) -> tuple[dict[str, Any] | None, list[Problem]]:
