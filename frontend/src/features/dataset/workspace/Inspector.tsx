@@ -31,7 +31,7 @@ import {
 } from "../types";
 
 export type Selection = { kind: "dataset" } | { kind: "add" } | { kind: "addFormula" } | { kind: "column"; id: number };
-export type Feedback = null | { kind: "ok"; text: string } | { kind: "error"; error: unknown };
+export type Feedback = null | { kind: "ok"; text: string } | { kind: "error"; error: unknown; note?: string };
 
 /** 저장 동작. expected_version은 작업공간이 붙이고, 실패는 Feedback으로 올라가므로 여기서는 던지지 않는다. */
 export interface Actions {
@@ -125,7 +125,7 @@ export function Inspector({ detail, columns, canDefine: canDefineByRole, archive
           {feedback.text}
         </p>
       ) : null}
-      {feedback?.kind === "error" ? <ErrorNotice error={feedback.error} /> : null}
+      {feedback?.kind === "error" ? <ErrorNotice error={feedback.error}>{feedback.note ? <p data-testid="feedback-note">{feedback.note}</p> : null}</ErrorNotice> : null}
       {selection.kind === "dataset" ? (
         <DatasetSettingsForm key={`d${detail.def_version}`} detail={detail} columns={columns} readOnly={!canDefine} archived={archived} actions={actions} />
       ) : null}
@@ -147,13 +147,14 @@ export function Inspector({ detail, columns, canDefine: canDefineByRole, archive
             save={actions.saveFormula}
           />
           <FormulaColumnSettings
-            key={`s${selected.id}:${selected.display_name}:${selected.tag ?? ""}`}
+            key={`s${selected.id}:${selected.display_name}:${selected.tag ?? ""}:${JSON.stringify(selected.rules)}`}
             column={selected}
             columns={columns}
             canDefine={canDefineByRole}
             archived={archived}
             onSave={(body) => actions.updateColumn(selected.id, body)}
             onMove={(direction) => actions.moveColumn(selected.id, direction)}
+            onSaveRules={(rules) => actions.updateColumn(selected.id, { rules })}
           />
           <details className="column-info">
             <summary>열 정보</summary>

@@ -43,23 +43,47 @@ export interface ComputedDisplay {
   truncated: boolean;
 }
 
+/** 계산 열 숫자의 열별 표시 설정(03b 33절). 표시 전용이며 저장값·API 값·복사 값은 바꾸지 않는다. */
+export interface ComputedFormatOptions {
+  /** 소수 자릿수(0~10). 있으면 이 자릿수까지 반올림하고 끝자리 0을 채운다. 없으면 소수 6자리, 끝자리 0 제거. */
+  decimals?: number;
+  /** false면 천 단위 쉼표를 붙이지 않는다. 기본 켬. */
+  thousands?: boolean;
+}
+
+export const DISPLAY_DECIMALS_MAX = 10;
+
+/** 열 규칙의 display_decimals(정수 0~10, 아니면 없는 것으로 본다). 입력 열의 decimals(입력 검증)와 다른 키다. */
+export function displayDecimalsOf(column: Pick<Column, "rules">): number | undefined {
+  const value = column.rules?.display_decimals;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= DISPLAY_DECIMALS_MAX ? value : undefined;
+}
+
+/** 열 규칙에서 계산 열 표시 설정을 읽는다. 알 수 없는 값은 무시한다(기본 표시). */
+export function computedFormatOf(column: Pick<Column, "rules">): ComputedFormatOptions {
+  return { decimals: displayDecimalsOf(column), thousands: column.rules?.display_thousands !== false };
+}
+
 /**
  * 계산 열 숫자의 표시 서식. 부동소수점으로 바꾸지 않고 문자열만 다룬다.
- * 반올림은 '0에서 먼 쪽'(half away from zero): 7번째 소수 자리가 5 이상이면 6번째 자리를 올린다(음수도 크기 기준).
+ * 반올림은 '0에서 먼 쪽'(half away from zero): 다음 소수 자리가 5 이상이면 올린다(음수도 크기 기준).
  * 반올림 결과가 0이면 부호를 떼어 "-0"이 나오지 않게 한다. 십진 형식이 아니면 받은 글자를 그대로 돌려준다.
+ * options.decimals가 있으면 그 자릿수로 맞추고 끝자리 0을 채운다. 없으면 소수 최대 6자리, 끝자리 0 제거.
  */
-export function formatComputedNumber(raw: string): ComputedDisplay {
+export function formatComputedNumber(raw: string, options: ComputedFormatOptions = {}): ComputedDisplay {
   if (!DECIMAL.test(raw)) return { text: raw, full: raw, truncated: false };
+  const fixed = options.decimals !== undefined;
+  const scale = options.decimals ?? COMPUTED_MAX_DECIMALS;
   const negative = raw.startsWith("-");
   const [int, frac = ""] = (negative ? raw.slice(1) : raw).split(".");
-  let digits = int + frac.slice(0, COMPUTED_MAX_DECIMALS).padEnd(COMPUTED_MAX_DECIMALS, "0");
-  const rest = frac.slice(COMPUTED_MAX_DECIMALS);
+  let digits = int + frac.slice(0, scale).padEnd(scale, "0");
+  const rest = frac.slice(scale);
   if (rest !== "" && rest[0] >= "5") digits = incrementDigits(digits);
-  const scale = COMPUTED_MAX_DECIMALS;
   const intPart = digits.slice(0, digits.length - scale).replace(/^0+(?=\d)/, "") || "0";
-  const fracPart = digits.slice(digits.length - scale).replace(/0+$/, "");
-  const zero = /^0*$/.test(intPart) && fracPart === "";
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const rawFrac = digits.slice(digits.length - scale);
+  const fracPart = fixed ? rawFrac : rawFrac.replace(/0+$/, "");
+  const zero = /^0*$/.test(intPart) && !/[1-9]/.test(rawFrac);
+  const grouped = options.thousands === false ? intPart : intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return {
     text: `${negative && !zero ? "-" : ""}${grouped}${fracPart ? `.${fracPart}` : ""}`,
     full: raw,
@@ -95,7 +119,7 @@ export function displayText(column: Column, value: CellValue | undefined, errorC
   if (isBlank(value)) return "";
   switch (column.type) {
     case "number":
-      if (isComputedNumber(column)) return formatComputedNumber(String(value)).text;
+      if (isComputedNumber(column)) return formatComputedNumber(String(value), computedFormatOf(column)).text;
       return formatNumber(String(value), decimalsOf(column));
     case "boolean": {
       const flag = asBool(value as CellValue);

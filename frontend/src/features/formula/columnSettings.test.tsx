@@ -266,9 +266,24 @@ describe("계산 열 위/아래 이동", () => {
     select(/^비율/);
     const before = calls.filter((c) => c.method === "GET" && c.path === "/datasets/7").length;
     fireEvent.click(btn("위로 이동"));
-    expect((await within(inspector()).findByRole("alert")).textContent).toMatch(/잠시 뒤|다시 시도/);
+    const alert = await within(inspector()).findByRole("alert");
+    expect(alert.textContent).toMatch(/잠시 뒤|다시 시도/);
+    expect(within(alert).getByTestId("feedback-note").textContent).toBe("순서를 다시 확인해 주세요");
     expect(patches).toHaveLength(2);
     await waitFor(() => expect(calls.filter((c) => c.method === "GET" && c.path === "/datasets/7").length).toBe(before + 1));
+  });
+
+  it("두 번째 호출이 409로 실패해도 '순서를 다시 확인해 주세요'를 안내하고, 첫 호출 실패에는 붙이지 않는다", async () => {
+    await open({ override: (_call, n) => (n === 2 ? apiError(409, "DEFINITION_VERSION_MISMATCH", "서버 문구", { current_version: 9 }) : null) });
+    select(/^비율/);
+    fireEvent.click(btn("위로 이동"));
+    expect((await within(inspector()).findByTestId("feedback-note")).textContent).toBe("순서를 다시 확인해 주세요");
+    cleanup();
+    await open({ override: () => apiError(503, "DEFINITION_BUSY", "서버 문구", { retry_after: 2 }) });
+    select(/^비율/);
+    fireEvent.click(btn("위로 이동"));
+    await within(inspector()).findByRole("alert");
+    expect(within(inspector()).queryByTestId("feedback-note")).toBeNull();
   });
 
   it("422(순서 변경이 거부됨)도 쉬운 말로 보여 준다", async () => {
@@ -276,6 +291,109 @@ describe("계산 열 위/아래 이동", () => {
     select(/^비율/);
     fireEvent.click(btn("위로 이동"));
     expect((await within(inspector()).findByRole("alert")).textContent).toContain("위치: 허용 범위를 벗어났습니다");
+  });
+});
+
+const formatForm = () => within(settings()).getByRole("form", { name: "표시 형식" });
+
+describe("계산 열 표시 형식(rules: display_decimals·display_thousands)", () => {
+  /** 가짜 B6: 계산 열 rules 허용 키만 받는다(전체 대체, {}는 지움). */
+  const rulesOverride: Override = (call) => {
+    const rules = (call.body as { rules?: Record<string, unknown> }).rules;
+    if (rules === undefined) return null;
+    for (const [key, value] of Object.entries(rules)) {
+      if (key === "display_decimals" ? !Number.isInteger(value) || (value as number) < 0 || (value as number) > 10 : key !== "display_thousands" || typeof value !== "boolean") {
+        return apiError(422, "VALIDATION_ERROR", "서버 문구", { fields: [{ field: "rules", code: key === "display_decimals" ? "OUT_OF_RANGE" : "BAD_FORMAT" }] });
+      }
+    }
+    return null;
+  };
+
+  it("자릿수·쉼표를 정해 저장하면 rules 전체를 B6로 보내고 입력칸이 저장값으로 돌아온다", async () => {
+    const { patches } = await open({ override: rulesOverride });
+    select(/^비율/);
+    expect(within(formatForm()).getByTestId("format-hint").textContent).toMatch(/표시 전용.*ROUND\*.*Superset 차트와 SQL Lab에는 적용되지 않습니다.*YEAR.*쉼표를 끄십시오/);
+    expect(btn("표시 형식 저장").disabled).toBe(true);
+    fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "2" } });
+    fireEvent.click(within(formatForm()).getByLabelText("천 단위 쉼표"));
+    fireEvent.click(btn("표시 형식 저장"));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].body).toEqual({ expected_version: 3, rules: { display_decimals: 2, display_thousands: false } });
+    expect((await within(inspector()).findByRole("status")).textContent).toBe("열을 저장했습니다.");
+    expect((within(formatForm()).getByLabelText(/소수 자릿수/) as HTMLInputElement).value).toBe("2");
+    expect((within(formatForm()).getByLabelText("천 단위 쉼표") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("'기본'(빈 칸)으로 되돌리면 자릿수 키를 빼고, 모두 기본이면 빈 객체를 보내며 다른 키는 보존한다", async () => {
+    const d = detail();
+    d.columns = d.columns.map((c) => (c.id === 6 ? { ...c, rules: { display_decimals: 1, display_thousands: false, future_key: "x" } } : c));
+    const { patches } = await open({ detail: d, override: rulesOverride });
+    select(/^비율/);
+    fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "" } });
+    fireEvent.click(btn("표시 형식 저장"));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].body).toEqual({ expected_version: 3, rules: { display_thousands: false, future_key: "x" } });
+  });
+
+  it("전부 기본으로 되돌리면 {}(설정 지움)를 보낸다", async () => {
+    const d = detail();
+    d.columns = d.columns.map((c) => (c.id === 6 ? { ...c, rules: { display_decimals: 0 } } : c));
+    const { patches } = await open({ detail: d });
+    select(/^비율/);
+    fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "" } });
+    fireEvent.click(btn("표시 형식 저장"));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].body).toEqual({ expected_version: 3, rules: {} });
+  });
+
+  it("범위 밖·정수 아닌 자릿수는 보내기 전에 막는다", async () => {
+    const { patches } = await open();
+    select(/^비율/);
+    const input = within(formatForm()).getByLabelText(/소수 자릿수/);
+    for (const bad of ["11", "1.5", "-1", "abc"]) {
+      fireEvent.change(input, { target: { value: bad } });
+      expect(within(formatForm()).getByTestId("format-error").textContent).toContain("0부터 10까지");
+      expect(btn("표시 형식 저장").disabled).toBe(true);
+    }
+    fireEvent.change(input, { target: { value: "10" } });
+    expect(within(formatForm()).queryByTestId("format-error")).toBeNull();
+    expect(btn("표시 형식 저장").disabled).toBe(false);
+    expect(patches).toHaveLength(0);
+  });
+
+  it("서버 422(rules)·409 버전 충돌은 기존 방식으로 안내한다", async () => {
+    await open({ override: () => apiError(422, "VALIDATION_ERROR", "서버 문구", { fields: [{ field: "rules", code: "OUT_OF_RANGE" }] }) });
+    select(/^비율/);
+    fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "3" } });
+    fireEvent.click(btn("표시 형식 저장"));
+    expect((await within(inspector()).findByRole("alert")).textContent).toContain("허용 범위를 벗어났습니다");
+    cleanup();
+    await open({ override: () => apiError(409, "DEFINITION_VERSION_MISMATCH", "서버 문구", { current_version: 9 }) });
+    select(/^비율/);
+    fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "3" } });
+    fireEvent.click(btn("표시 형식 저장"));
+    expect((await within(inspector()).findByRole("alert")).textContent).toContain("다른 사람이 먼저");
+  });
+
+  it("글자 결과 계산 열은 입력칸 없이 안내만 보인다", async () => {
+    await open();
+    select(/^문구/);
+    expect(within(formatForm()).queryByLabelText(/소수 자릿수/)).toBeNull();
+    expect(within(formatForm()).queryByRole("button")).toBeNull();
+    expect(within(formatForm()).getByTestId("format-number-only").textContent).toContain("숫자");
+  });
+
+  it("읽기 전용(정의 담당자 아님)·보관 시 입력칸이 비활성이고 저장 버튼이 없거나 비활성이다", async () => {
+    await open({ detail: detail({ permissions: { define: false, enter: true } }) });
+    select(/^비율/);
+    expect((within(formatForm()).getByLabelText(/소수 자릿수/) as HTMLInputElement).disabled).toBe(true);
+    expect((within(formatForm()).getByLabelText("천 단위 쉼표") as HTMLInputElement).disabled).toBe(true);
+    expect(within(formatForm()).queryByRole("button")).toBeNull();
+    cleanup();
+    await open({ detail: detail({ status: "archived" }) });
+    select(/^비율/);
+    expect((within(formatForm()).getByLabelText(/소수 자릿수/) as HTMLInputElement).disabled).toBe(true);
+    expect(btn("표시 형식 저장").disabled).toBe(true);
   });
 });
 

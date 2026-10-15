@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COL } from "../dataset/test-server";
+import { cellTitle } from "./gridColumns";
+import { ENTRY_ROW, type GridRow } from "./model";
 import { displayText, editorText, formatComputedNumber, formatNumber, parseEditInput, pasteCellValue, sameValue } from "./values";
 
 const NUM = COL(1, "매출", "number", { rules: { decimals: 2 } });
@@ -169,5 +171,80 @@ describe("formatComputedNumber: 계산 열 표시(소수 최대 6자리, 끝자�
     expect(displayText(raw, "1234.5")).toBe("1,234.50");
     expect(displayText(raw, "0.1234567")).toBe("0.1234567"); // 입력 열은 깎지 않음
     expect(displayText(COL(10, "메모", "text", { kind: "formula" }), "0.1234567")).toBe("0.1234567"); // 숫자가 아닌 계산 열은 그대로
+  });
+});
+
+describe("formatComputedNumber: 열별 표시 형식(display_decimals, display_thousands)", () => {
+  it.each([
+    ["1234.5", 2, "1,234.50"], // 끝자리 0 채움
+    ["1234", 2, "1,234.00"],
+    ["0", 3, "0.000"],
+    ["2026", 0, "2,026"],
+    ["1234.5", 0, "1,235"], // 경계 반올림(5는 올림)
+    ["1234.4999", 0, "1,234"],
+    ["0.125", 2, "0.13"],
+    ["0.124999", 2, "0.12"],
+    ["-0.125", 2, "-0.13"], // 음수도 0에서 먼 쪽
+    ["-1234.5", 0, "-1,235"],
+    ["-0.004", 2, "0.00"], // 반올림 결과가 0이면 부호 없음
+    ["-0", 0, "0"],
+    ["-0.0", 1, "0.0"],
+    ["0.995", 2, "1.00"], // 자리 올림이 정수부까지
+    ["999.999", 2, "1,000.00"],
+    ["-999.999", 2, "-1,000.00"],
+    ["1.5", 10, "1.5000000000"],
+    ["0.12345678905", 10, "0.1234567891"],
+    ["12345678901234567890123456789012345678.5", 0, "12,345,678,901,234,567,890,123,456,789,012,345,679"],
+    ["99999999999999999999999999999999999999.99", 1, "100,000,000,000,000,000,000,000,000,000,000,000,000.0"],
+  ])("%s, 자릿수 %i -> %s", (raw, decimals, expected) => {
+    const shown = formatComputedNumber(raw, { decimals });
+    expect(shown.text).toBe(expected);
+    expect(shown.full).toBe(raw);
+  });
+
+  it("쉼표를 끄면 정수부에 쉼표가 없다(YEAR 결과 등)", () => {
+    expect(formatComputedNumber("2026", { thousands: false }).text).toBe("2026");
+    expect(formatComputedNumber("2026").text).toBe("2,026");
+    expect(formatComputedNumber("-1234567.5", { thousands: false }).text).toBe("-1234567.5");
+    expect(formatComputedNumber("1234567.891", { decimals: 1, thousands: false }).text).toBe("1234567.9");
+    expect(formatComputedNumber("999.9999995", { thousands: false }).text).toBe("1000");
+  });
+
+  it("옵션이 없거나 thousands만 있으면 소수 6자리·끝자리 0 제거 규칙 그대로", () => {
+    expect(formatComputedNumber("1234.5000000", {}).text).toBe("1,234.5");
+    expect(formatComputedNumber("0.1234567", { thousands: true }).text).toBe("0.123457");
+  });
+
+  it("truncated는 표시 자릿수 밖에 0이 아닌 자릿수가 있을 때 true", () => {
+    expect(formatComputedNumber("1.239", { decimals: 2 }).truncated).toBe(true);
+    expect(formatComputedNumber("1.200", { decimals: 2 }).truncated).toBe(false);
+  });
+
+  it("displayText: 열 rules를 읽고, 숫자가 아닌 계산 열·입력 열은 무시한다(지우지 않음)", () => {
+    const calc = COL(9, "합계", "number", { kind: "formula", rules: { display_decimals: 2, display_thousands: false } });
+    expect(displayText(calc, "12345.678")).toBe("12345.68");
+    expect(displayText(calc, "7")).toBe("7.00");
+    expect(displayText({ ...calc, rules: { display_decimals: 0 } }, "2026")).toBe("2,026");
+    expect(displayText({ ...calc, rules: { display_decimals: 11, display_thousands: "no" } as never }, "1234.5000000")).toBe("1,234.5"); // 범위 밖·불리언 아님은 무시
+    expect(displayText({ ...calc, rules: { display_decimals: 1.5 } }, "1.25")).toBe("1.25");
+    const text = COL(10, "메모", "text", { kind: "formula", rules: { display_decimals: 2 } });
+    expect(displayText(text, "0.1234567")).toBe("0.1234567");
+    const input = COL(1, "매출", "number", { rules: { display_decimals: 0, display_thousands: false } });
+    expect(displayText(input, "1234.5")).toBe("1,234.5"); // 입력 열은 이번에 제외
+    expect(displayText(calc, "abc")).toBe("abc");
+  });
+
+  it("복사·API 값(원본 문자열)은 서식과 무관하다", () => {
+    expect(formatComputedNumber("1234.5678", { decimals: 1 }).full).toBe("1234.5678");
+  });
+});
+
+describe("cellTitle(툴팁): 열 표시 자릿수에 맞춰 잘린 칸만 전체 값을 알려 준다", () => {
+  const row = (value: string): GridRow => ({ ...ENTRY_ROW, key: "r1", rowId: 1, draft: false, entry: false, cells: { "9": value } });
+  it("자릿수 설정에서 반올림된 칸은 전체 값, 같은 칸이 아니면 일반 안내", () => {
+    const calc = COL(9, "합계", "number", { kind: "formula", rules: { display_decimals: 2 } });
+    expect(cellTitle(calc, row("1.239"))).toBe("전체 값: 1.239");
+    expect(cellTitle(calc, row("1.2"))).toContain("직접 고칠 수 없습니다");
+    expect(cellTitle({ ...calc, rules: null }, row("1.239"))).toContain("직접 고칠 수 없습니다"); // 기본은 6자리
   });
 });

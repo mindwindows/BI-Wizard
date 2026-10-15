@@ -19,6 +19,9 @@ import {
 } from "../types";
 import { Inspector, type Actions, type Feedback, type Selection } from "./Inspector";
 
+/** 이동의 두 번째 호출이 실패했을 때(앞 호출은 이미 저장됨) 오류 문구 아래에 붙이는 안내 */
+const MOVE_PARTIAL_NOTE = "순서를 다시 확인해 주세요";
+
 /** S4 작업공간 골격(C 3분할). 라우트가 바뀌면 상태를 새로 시작한다. */
 export function WorkspacePage() {
   const { datasetId } = useParams();
@@ -98,14 +101,14 @@ function Workspace({ datasetId }: { datasetId: number }) {
   }, [datasetId]);
 
   /** 저장 한 번: 성공하면 안내, 버전 충돌이면 최신 상태를 다시 읽는다. 실패는 Inspector 위에 문구로 보여 준다. */
-  async function run(action: () => Promise<string>) {
+  async function run(action: () => Promise<string>, noteOnError?: () => string | undefined) {
     setFeedback(null);
     try {
       setFeedback({ kind: "ok", text: await action() });
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEFINITION_VERSION_MISMATCH") await refetch();
       if (error instanceof ApiError && error.code === "DATASET_ARCHIVED") markArchived();
-      setFeedback({ kind: "error", error });
+      setFeedback({ kind: "error", error, note: noteOnError?.() });
     }
   }
 
@@ -149,8 +152,9 @@ function Workspace({ datasetId }: { datasetId: number }) {
         void refetch();
         return "열을 저장했습니다.";
       }),
-    moveColumn: (columnId, direction) =>
-      run(async () => {
+    moveColumn: (columnId, direction) => {
+      let partial = false;
+      return run(async () => {
         const order = columns.map((c) => c.id);
         const from = order.indexOf(columnId);
         const to = direction === "up" ? from - 1 : from + 1;
@@ -172,12 +176,16 @@ function Workspace({ datasetId }: { datasetId: number }) {
             }
           }
         } catch (error) {
-          if (done > 0) await refetch(); // 일부만 바뀌었으니 실제 순서를 다시 읽어 보여 준다(버전 충돌이면 run이 읽는다).
+          if (done > 0) {
+            partial = true; // 앞선 호출은 이미 저장됐다(비원자적, 03b 33-1 6): 순서를 다시 확인하도록 안내한다.
+            await refetch();
+          } // 일부만 바뀌었으니 실제 순서를 다시 읽어 보여 준다(버전 충돌이면 run이 읽는다).
           throw error;
         }
         void refetch();
         return "열 순서를 바꿨습니다.";
-      }),
+      }, () => (partial ? MOVE_PARTIAL_NOTE : undefined));
+    },
     saveFormula: async (input: SaveInput): Promise<SaveOutcome> => {
       setFeedback(null);
       try {

@@ -3,7 +3,7 @@ import type { CustomCellRendererProps } from "ag-grid-react";
 import { COLUMN_TYPE_LABELS, type Column } from "../dataset/types";
 import { REFERENCE_MISSING_CODE, REFERENCE_MISSING_LABEL, cellErrorText } from "../formula/messages";
 import type { GridRow } from "./model";
-import { BOOL_FALSE, BOOL_TRUE, displayText, editorText, formatComputedNumber, isBlank, isComputedNumber } from "./values";
+import { BOOL_FALSE, BOOL_TRUE, displayText, editorText, computedFormatOf, formatComputedNumber, isBlank, isComputedNumber } from "./values";
 
 export const ROW_COLUMN_ID = "__row";
 
@@ -32,8 +32,8 @@ export function cellTitle(column: Column, row: GridRow | undefined, cellErrors?:
   const code = row.errors[key];
   if (code) return `계산 오류(${code}): ${cellErrorText(code, cellErrors)}`;
   if (isComputedNumber(column) && !isBlank(row.cells[key])) {
-    const shown = formatComputedNumber(String(row.cells[key]));
-    // 소수 6자리를 넘어 줄여 보이는 칸만 전체 값을 알려 준다(결정 2026-10-12).
+    const shown = formatComputedNumber(String(row.cells[key]), computedFormatOf(column));
+    // 소수 6자리(또는 열의 표시 자릿수)를 넘어 줄여 보이는 칸만 전체 값을 알려 준다(결정 2026-10-12).
     if (shown.truncated) return `전체 값: ${shown.full}`;
   }
   if (column.kind === "formula") return "계산 열은 수식으로 채워지므로 직접 고칠 수 없습니다.";
