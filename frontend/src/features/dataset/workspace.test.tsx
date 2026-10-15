@@ -434,6 +434,9 @@ describe("Inspector 데이터셋 설정 (B4)", () => {
 describe("정의 버전 충돌과 재시도", () => {
   it("DEFINITION_VERSION_MISMATCH: 다시 읽기 안내 + 최신 상태 재로딩 뒤 새 버전으로 저장된다", async () => {
     const { fake, calls } = await openWorkspace(makeDetail({ columns: [COL(1, "기준일", "date")] }));
+    // 그리드의 첫 행 조회가 끝난 뒤에 서버 상태를 바꾼다. 조회가 바꾼 뒤에 나가면 응답의 def_version(9)이
+    // 작업공간의 재읽기(noteVersion)를 한 번 더 일으켜 GET /datasets/7이 3번이 되는 간헐 실패가 있었다(2026-10-15 확인).
+    await waitFor(() => expect(calls.some((c) => c.method === "GET" && c.path === "/datasets/7/rows")).toBe(true));
     // 다른 사람이 먼저 열을 추가했다.
     fake.state.columns.push(COL(2, "남이 추가", "text"));
     fake.state.def_version = 9;

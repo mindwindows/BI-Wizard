@@ -72,7 +72,7 @@ describe("계산 열 추가(D4)", () => {
     await waitFor(() => expect(of(calls, "GET", "/datasets/7/rows").length).toBeGreaterThanOrEqual(2));
     const grid = screen.getByRole("group", { name: "입력 그리드 표" });
     await waitFor(() => expect(Array.from(grid.querySelectorAll(".header-formula")).map((h) => h.textContent?.trim())).toContain("이익률"));
-  });
+ });
 
   it("정의 권한이 없으면 '계산 열 추가' 버튼이 없다", async () => {
     await openWorkspace(salesDetail({ permissions: { define: false, enter: true } }));
@@ -185,7 +185,7 @@ describe("수식 보기(D6)와 수식 고치기(D5)", () => {
     fireEvent.click(within(inspector()).getByRole("button", { name: "수식 저장" }));
     await waitFor(() => expect(of(calls, "PUT", "/datasets/7/formulas/5")).toHaveLength(2));
     expect(of(calls, "PUT", "/datasets/7/formulas/5")[1].body).toMatchObject({ expected_version: 4 });
-  });
+ });
 
   it("FORMULA_CIRCULAR(422)는 순환 경로를 열 이름으로 보여 준다", async () => {
     await openWorkspace(salesDetail(), ROWS, {
@@ -318,7 +318,7 @@ describe("선택한 계산 칸의 전체 값(결정 2026-10-12)", () => {
     await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toBe("12345678901234567890123456789012345678"));
     fireEvent.click(cellAt("r2", "5"));
     await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toContain("오류 E1"));
-  });
+ });
 
   it("고른 칸이 없으면 안내 문구만 보인다", async () => {
     const { fake } = await openWorkspace(salesDetail(), LONG_ROWS);

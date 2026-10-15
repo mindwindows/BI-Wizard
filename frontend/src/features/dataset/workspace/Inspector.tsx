@@ -3,6 +3,7 @@ import { ErrorNotice } from "../../../components";
 import type { SelectedCell } from "../../entry/selectedCell";
 import { FormulaEditor, type SaveInput, type SaveOutcome } from "../../formula/FormulaEditor";
 import { FormulaPanel } from "../../formula/FormulaPanel";
+import { FormulaColumnSettings, type MoveDirection } from "./FormulaColumnSettings";
 import {
   FORBIDDEN_HINT,
   RESERVED_HINT,
@@ -30,7 +31,7 @@ import {
 } from "../types";
 
 export type Selection = { kind: "dataset" } | { kind: "add" } | { kind: "addFormula" } | { kind: "column"; id: number };
-export type Feedback = null | { kind: "ok"; text: string } | { kind: "error"; error: unknown };
+export type Feedback = null | { kind: "ok"; text: string } | { kind: "error"; error: unknown; note?: string };
 
 /** 저장 동작. expected_version은 작업공간이 붙이고, 실패는 Feedback으로 올라가므로 여기서는 던지지 않는다. */
 export interface Actions {
@@ -46,6 +47,8 @@ export interface Actions {
     columnId: number,
     body: { display_name?: string; required?: boolean; rules?: ColumnRules; tag?: string | null; position?: number },
   ) => Promise<void>;
+  /** 한 칸 위/아래로 옮긴다(B6 position). 실패는 던지지 않고 Feedback으로 올라간다. */
+  moveColumn: (columnId: number, direction: MoveDirection) => Promise<void>;
   updateDataset: (body: { name?: string; date_unit?: DateUnit; base_date_column_id?: number | null }) => Promise<void>;
   /** 계산 열 만들기(D4)·수식 바꾸기(D5). 실패는 던지지 않고 수식 편집기가 오류 위치와 함께 보여 주도록 돌려준다. */
   saveFormula: (input: SaveInput) => Promise<SaveOutcome>;
@@ -122,7 +125,7 @@ export function Inspector({ detail, columns, canDefine: canDefineByRole, archive
           {feedback.text}
         </p>
       ) : null}
-      {feedback?.kind === "error" ? <ErrorNotice error={feedback.error} /> : null}
+      {feedback?.kind === "error" ? <ErrorNotice error={feedback.error}>{feedback.note ? <p data-testid="feedback-note">{feedback.note}</p> : null}</ErrorNotice> : null}
       {selection.kind === "dataset" ? (
         <DatasetSettingsForm key={`d${detail.def_version}`} detail={detail} columns={columns} readOnly={!canDefine} archived={archived} actions={actions} />
       ) : null}
@@ -142,6 +145,16 @@ export function Inspector({ detail, columns, canDefine: canDefineByRole, archive
             version={detail.def_version}
             selectedCell={selectedCell}
             save={actions.saveFormula}
+          />
+          <FormulaColumnSettings
+            key={`s${selected.id}:${selected.display_name}:${selected.tag ?? ""}:${JSON.stringify(selected.rules)}`}
+            column={selected}
+            columns={columns}
+            canDefine={canDefineByRole}
+            archived={archived}
+            onSave={(body) => actions.updateColumn(selected.id, body)}
+            onMove={(direction) => actions.moveColumn(selected.id, direction)}
+            onSaveRules={(rules) => actions.updateColumn(selected.id, { rules })}
           />
           <details className="column-info">
             <summary>열 정보</summary>
@@ -463,11 +476,7 @@ function ColumnForm(props: ColumnFormProps) {
         <input id={ids.position} inputMode="numeric" value={position} disabled={readOnly} onChange={(event) => setPosition(event.target.value)} />
       </Field>
 
-      {readOnly && !(props.archived && column?.kind !== "formula") ? (
-        column?.kind === "formula" ? (
-          <p className="muted">계산 열의 이름·위치는 여기서 고칠 수 없습니다. 수식은 아래에서 확인하고 고칩니다.</p>
-        ) : null
-      ) : (
+      {readOnly && !(props.archived && column?.kind !== "formula") ? null : (
         <button type="submit" disabled={readOnly || blocked || !dirty || busy}>
           {column ? "저장" : "열 추가"}
         </button>

@@ -56,7 +56,7 @@ description: 팀의 데이터셋을 만들고 열(원본 열)을 정의하는 �
 빈 `rules`(`{}` 또는 `null`)는 저장하지 않는다(`null`).
 
 ### B6 `PATCH /api/datasets/{id}/columns/{col_id}` (보낸 필드만 바꾼다)
-`expected_version`(필수), `display_name?`, `required?`, `rules?`, `tag?`(`null`이면 지움), `position?`. **`type`·`kind`는 바꿀 수 없다**: 현재와 다른 값을 보내면 422 `COLUMN_LOCKED`(같은 값이면 무시). 다른 타입이 필요하면 새 열을 추가한다. 계산 열(`formula`)에는 `required: true`와 `rules`를 줄 수 없다(422). 이름을 바꿔도 원본 표의 열 이름(`c_<번호>`)은 그대로다.
+`expected_version`(필수), `display_name?`, `required?`, `rules?`, `tag?`(`null`이면 지움), `position?`. **`type`·`kind`는 바꿀 수 없다**: 현재와 다른 값을 보내면 422 `COLUMN_LOCKED`(같은 값이면 무시). 다른 타입이 필요하면 새 열을 추가한다. 계산 열(`formula`)에는 `required: true`를 줄 수 없고(422), `rules`는 표시 형식 키 `display_decimals`·`display_thousands`만 받는다(아래 "B6가 계산 열에 대해" 표, 03b 33절). 이름을 바꿔도 원본 표의 열 이름(`c_<번호>`)은 그대로다.
 
 ### B7 `POST /api/datasets/{id}/archive` · B8 `POST /api/datasets/{id}/restore` (FU-2b)
 본문 없음(있으면 422 `VALIDATION_ERROR`, 필드 `body`), `expected_version` 없음. 판정 순서는 인증 -> 없는 데이터셋 404 -> 정의 담당자 아님 403 -> 본문 422 -> 행 잠금이다. 자세한 뜻과 한계는 아래 "보관·복구 (FU-2b)".
@@ -209,7 +209,7 @@ curl -b jar -X POST "$BASE/datasets/<번호>/restore"
 
 #### 화면 변경(1d)
 - 왼쪽 "열 목록" 아래에 정의 담당자에게만 **계산 열 추가** 버튼이 생겼다(원본 열은 기존 **열 추가**). 계산 열은 B5가 아니라 D4(`POST /formulas`)로 만든다.
-- 계산 열을 선택했을 때 Inspector: 열 정보 양식(읽기 전용, 타입·종류 잠김) 아래에 **수식 보기**와(정의 담당자만) **수식 고치기**가 붙는다. 문구 "계산 열은 여기서 고칠 수 없습니다"는 "계산 열의 이름·위치는 여기서 고칠 수 없습니다. 수식은 아래에서 확인하고 고칩니다."로 바뀌었다.
+- 계산 열을 선택했을 때 Inspector: 열 정보 양식(읽기 전용, 타입·종류 잠김) 아래에 **수식 보기**와(정의 담당자만) **수식 고치기**가 붙는다. FU-4부터 같은 Inspector에서 계산 열의 이름·태그·위치도 B6로 고친다(아래 절).
 - 오류 문구 표에 `FORMULA_CIRCULAR`에 순환 경로가 붙고(`details.path`), `FORMULA_INVALID`·`FORMULA_RUNTIME_ERROR` 문구가 추가됐다(B6 태그 변경의 순환 거부도 같은 경로 표시).
 
 ### 화면에 나오는 오류 문구
@@ -255,7 +255,8 @@ curl -b jar -X POST "$BASE/datasets/<번호>/restore"
   - `test_static_acl.py` — 정적 표 `datasets`·`dataset_columns`의 `bi_app` 권한(표·열 단위 카탈로그 대조 + 실제 거부 42501), `bi_readonly` 접근 불가, 제약·복합 FK
   - `test_ddl.py`, `test_ddl_names.py` — 이름 규칙, 허용 목록 밖 거부(실행 전; 표 생성의 외래키·유일 제약·계산 열 거부 포함, 모든 DDL 보조 함수가 이름 규칙을 거침), `text()`·`exec_driver_sql`·ddl 모듈 밖 DDL이 없음을 코드에서 검사, 실제 DB에서 표·열·기준 날짜 열 규칙, 롤백 시 표가 남지 않음, `bi_app`이 `public`에 만들 수 없음, 시작 자가 점검이 새 객체를 허용, `alembic check`, `downgrade 0004` 뒤 `ds_*` 보존
   - `test_dataset_concurrency.py` — 동시 정의 변경(`DEFINITION_VERSION_MISMATCH`), 락 대기 초과(`DEFINITION_BUSY`), `FOR NO KEY UPDATE`가 읽기·FK 자식 INSERT를 막지 않음, `FOR SHARE` 상호 대기와 굶음 관찰(앞지름을 단정으로 고정), 이름 변경 중 FK 자식 INSERT 대기 관찰, 같은 이름 동시 등록
-  - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리(JSON 부동소수점·큰 정수 거부 회귀 포함), 구조 해시
+  - `test_dataset_rules.py` — 열 이름·태그·`rules` 정리(JSON 부동소수점·큰 정수 거부 회귀 포함), 계산 열 표시 형식 키 검사, 구조 해시
+  - `test_formula_column_rules.py` — 계산 열 `rules`(B6): 허용·거부, 대체/지움/null, 숫자 아닌 열 거부, D5 형 변경 뒤 유지, 보관 우선, 감사 `rules_changed`(값 없음), 입력 열 회귀, 동점 위치 번호의 목록 순서 `(position, id)`
   - `test_migrations.py`, `test_roundtrip_tools.py` — 0004·0005·0008 revision 규칙(고정 SQL, `downgrade` 구현, `DROP_APPROVED`, 0008의 `ck_datasets_status` 교체)
   - `test_formula_api.py`, `test_formula_views_pg.py` — 정의 변경 훅이 뷰를 만들고 `def_hash`를 기록하는 동작(`formula-column` 8절)
 - 마이그레이션 왕복(**새** 빈 `postgres-test`에서): `python -m migrations.roundtrip`, `alembic check` (`skills/local-environment/SKILL.md`).
@@ -275,3 +276,59 @@ curl -b jar -X POST "$BASE/datasets/<번호>/restore"
 - `admin-cleanup`: 잘못 만든 열·데이터셋을 지우는 수동 절차(FU-1에는 삭제 API가 없다)
 - `local-environment`: 마이그레이션 왕복, 시작 자가 점검 대응
 - `reference-values`(FU-3): `REF`가 기준 날짜 열의 연도로 기준값을 읽으므로 기준 날짜 열이 필요하다. 해제하려 하면 `BASE_DATE_IN_USE`. 데이터셋 목록은 R6 `usage`가 쓴다(`list_dataset_briefs`).
+
+## 계산 열 이름 변경·위치 이동·태그 편집 (S4 Inspector, FU-4)
+화면 절차 (정의 담당자, 보관되지 않은 데이터셋):
+1. 열 목록(또는 그리드 머리글)에서 계산 열을 고른다. Inspector에 수식 보기, 아래에 "계산 열 이름·순서·태그" 구역이 나온다.
+2. 이름 변경: "열 이름"을 고치고 "이름·태그 저장". 보내기 전에 빈 이름, `[ ] "`와 제어 문자, 예약 이름(team·팀·row_id·행 번호, 대소문자 무시), 100자 초과를 막는다. 서버가 거부하면 같은 이름이면 "같은 이름의 열이 이미 있습니다."(409), 그 밖의 규칙 위반은 "입력한 내용을 확인해 주세요. (표시 이름: …)"(422)로 보인다.
+3. 구분 태그: 결과가 숫자인 계산 열에만 입력칸이 있다(글자·날짜 결과 열은 안내만). 비우고 저장하면 태그가 지워진다. 50자 이하, `"`·제어 문자 금지. 태그가 바뀌면 SUMTAG를 쓰는 수식의 값이 달라질 수 있고, 계산 열 순환이 생기면 422 FORMULA_CIRCULAR(순환 경로 표시)로 저장되지 않는다.
+4. 위치 이동: "위로 이동"/"아래로 이동"은 열 목록·그리드의 한 칸 이동이다(맨 앞 열은 위로, 맨 뒤 열은 아래로 비활성). B6에는 순서를 한 번에 바꾸는 호출이 없어 이웃한 두 열의 `position`을 서로 바꾼다. B6 호출 수: 번호가 모두 다르면 2회, 겹쳐 있으면 달라지는 열마다 한 번씩(열 수 이하(최대 열 수회)) 부르며, 호출마다 정의 버전이 오르고 감사 행이 남는다(겹쳐 있으면 0부터 다시 매긴다). 두 번째 호출이 실패하면 화면이 서버 순서를 다시 읽어 보여 준다.
+5. 이름 변경이 수식에 미치는 영향: 없다. 수식은 열 이름이 아니라 열 번호로 저장되고(07 §1), 수식 보기와 "쓰는 열" 목록은 현재 이름으로 풀어 쓴다. 뷰 열도 번호 기반(`c_<번호>`)이라 뷰 재생성이 없다. (실측: 전기요금 → 전기요금(원) 변경 뒤 이를 쓰는 부가세 수식 보기가 `[전기요금(원)] * 0.1`.)
+6. 저장 성공 시 "열을 저장했습니다."/"열 순서를 바꿨습니다.", 정의 버전이 올라가고 수식 보기를 다시 읽는다.
+
+읽기 전용·보관:
+- 정의 담당자가 아니면(입력자·열람자) 입력칸이 읽기 전용이고 저장·이동 버튼이 없다. 안내문 "이 데이터셋은 팀의 정의 담당자만 바꿀 수 있습니다."
+- 보관된 데이터셋은 입력칸과 저장·이동 버튼이 비활성이고 보관 배너가 보인다. 저장 중 다른 사람이 보관하면 409 DATASET_ARCHIVED 안내 뒤 읽기 전용으로 바뀐다.
+
+오류 처리(기존 방식 그대로): 409 DEFINITION_VERSION_MISMATCH("다른 사람이 먼저 …") 뒤 최신 정의를 다시 읽는다, 503 DEFINITION_BUSY는 잠시 뒤 다시 시도 안내.
+
+## B6가 계산 열에 대해 허용/거부하는 것 (backend/app/dataset/service.py `update_column` 읽은 결과)
+| 항목 | 계산 열(`kind=formula`) | 비고 |
+| --- | --- | --- |
+| `display_name` | 허용 | 현재와 다르면 같은 데이터셋 안 중복 검사(409 ALREADY_EXISTS field=display_name). 길이·금지 문자·예약 이름은 스키마(`ColumnName`)가 422로 거부 |
+| `position` | 허용 | 0~1,000,000 정수. 다른 열의 번호는 자동으로 밀리지 않고 중복도 허용된다(정렬은 position, id). 한 칸 이동은 번호가 모두 다르면 호출 2회, 겹쳐 있으면 달라지는 열마다 1회가 필요 |
+| `tag` | 허용(결과 `type=number`일 때만) | 숫자가 아닌 열에 값을 넣으면 422 VALIDATION_ERROR(tag BAD_FORMAT). 비우기(null/빈 글자)는 항상 허용. 50자·`"`·제어 문자 검사 |
+| `required` | `true`는 거부 | 422 VALIDATION_ERROR(required BAD_FORMAT). `false`는 변경 없음 |
+| `rules` | 표시 형식 키만 허용 | `display_decimals`(정수 0~10, 불리언 거부)·`display_thousands`(불리언)뿐이며 **표시 전용**이다(저장값·API 값·복사 값은 그대로, 입력 열의 `decimals`와 다른 키). 알 수 없는 키·형 오류는 422 VALIDATION_ERROR(`rules.<키>` BAD_FORMAT), 범위 밖은 OUT_OF_RANGE. 결과 `type`이 `number`가 아닌 열에 값이 있는 규칙은 422(`rules` BAD_FORMAT, `tag`와 같다). 보낸 객체가 저장된 `rules` 전체를 대체하고 `{}`는 지우며(지우기는 형과 무관하게 허용) `null`은 변경 없음이다(입력 열의 `null`은 규칙을 지운다: 서로 다르다). D5로 결과 형이 바뀌어도 `rules`는 지우지 않고 화면이 숫자가 아니면 무시한다. 감사는 `column.update`의 `rules_changed`뿐이고 값은 기록하지 않는다. 응답 Column의 `rules`는 계산 열에서도 저장 객체(없으면 `null`)다 |
+| `type`·`kind` | 다르면 거부 | 422 COLUMN_LOCKED |
+| 낡은 `expected_version` | 거부 | 409 DEFINITION_VERSION_MISMATCH(보관 판정이 먼저, 05 §2-2) |
+| 보관 데이터셋 | 거부 | 409 DATASET_ARCHIVED |
+| 변경 없음 | 200 | 버전·감사 기록 없음. 변경이 있으면 정의 훅(뷰 재컴파일 등)이 같은 트랜잭션에서 돈다 |
+
+## 계산 열 표시 형식과 이동 실패 안내 (S4 Inspector, FU-4, 03b 33절)
+
+### 표시 형식 절차(정의 담당자)
+1. 데이터셋 작업공간 > 열 목록에서 계산 열을 고른다 > 우측 Inspector의 "표시 형식" 구역.
+2. 결과 종류가 숫자인 계산 열만 입력칸이 있다. 숫자가 아니면 안내문만 나온다(저장된 설정이 있어도 무시되고 지워지지 않는다).
+3. "소수 자릿수"에 0~10 정수를 넣거나 비운다(비움 = 기본: 소수 6자리까지, 끝자리 0 감춤). 자릿수를 정하면 그 자릿수까지 0에서 먼 쪽으로 반올림하고 끝자리 0을 채워 보인다(예: 8.166667 -> 8.17, 8.8 -> 8.80).
+4. "천 단위 쉼표"는 기본 켬. 끄면 정수부에 쉼표가 없다. YEAR 결과 열은 쉼표를 끈다(그대로면 2,026).
+5. "표시 형식 저장"은 B6(`PATCH /datasets/{id}/columns/{col}`)로 `expected_version`과 `rules`를 보낸다. rules는 전체 대체다: `display_decimals`(정수 0~10, 기본이면 키 없음), `display_thousands`(false일 때만 키가 있음). 서버가 `display_*` 밖의 키를 422로 거부하므로 보존하지 않고 표시 형식 두 키만 보낸다. 모두 기본으로 되돌리면 `{}`를 보낸다.
+6. 정의 담당자가 아니거나 보관된 데이터셋이면 입력칸이 비활성이고 저장 버튼이 없거나 비활성이다.
+7. 오류는 기존 열 저장과 같다: 409 `DEFINITION_VERSION_MISMATCH`(다른 사람이 먼저 바꿈, 최신 정의를 다시 읽음), 409 `DATASET_ARCHIVED`, 503 `DEFINITION_BUSY`, 422 `VALIDATION_ERROR`(예: `rules.display_decimals` 허용 범위 밖).
+
+### 안내문(화면 문구와 같은 뜻으로 쓴다)
+- 표시 전용이며 저장된 값과 복사되는 값은 바뀌지 않는다.
+- 값을 반올림하는 ROUND* 함수와 다르다(ROUND*는 값 자체를 바꾼다).
+- 포털 그리드에만 적용되고 Superset 차트와 SQL Lab에는 적용되지 않는다.
+- YEAR 결과 열은 쉼표를 끄십시오. 수식을 보고 자동으로 끄지 않는다.
+
+### 적용 범위(구현 사실)
+- 같은 열 설정을 읽는 곳: 그리드 칸 글자(`displayText`), 칸 툴팁(`cellTitle`: 표시 자릿수 밖에 0이 아닌 자릿수가 있으면 "전체 값: ..."). 복사(EntryGrid)는 원본 십진 문자열 그대로다.
+- 수식 미리보기(수식 편집기)는 열 설정이 없는 새 수식·수정 중 수식이라 기본 표시(소수 6자리, 쉼표 켬)를 쓴다. 저장된 열 설정을 따르지 않는다.
+- 입력(raw) 열의 `decimals`(입력 검증)와 다른 키다. 입력 열에는 쉼표·자릿수 표시 설정이 없다.
+- 키 해석은 엄격하다: `display_decimals`가 정수 0~10이 아니거나 `display_thousands`가 불리언이 아니면 화면은 그 키를 무시하고 기본 표시를 쓴다.
+
+### 열 위/아래 이동 실패 안내
+- 이동은 B6를 여러 번 부른다(번호가 모두 다르면 2회, 겹쳐 있으면 달라지는 열마다 한 번씩(열 수 이하(최대 열 수회)) 부르며, 호출마다 정의 버전이 오르고 감사 행이 남는다; 비원자적). 두 번째 호출이 실패하면 첫 호출은 이미 저장된 상태이므로 오류 문구 아래에 "순서를 다시 확인해 주세요"를 붙이고, 실제 순서를 다시 읽어 보여 준다(기존 재조회 유지).
+- 첫 호출이 실패하면 아무것도 바뀌지 않으므로 이 안내는 붙지 않는다.
+- 일괄 순서 변경 API는 후속 목록이다.

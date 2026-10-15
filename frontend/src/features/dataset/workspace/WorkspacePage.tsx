@@ -14,9 +14,13 @@ import {
   COLUMN_TYPE_LABELS,
   DATE_UNIT_LABELS,
   type Column,
+  type ColumnRules,
   type DatasetDetail,
 } from "../types";
 import { Inspector, type Actions, type Feedback, type Selection } from "./Inspector";
+
+/** 이동의 두 번째 호출이 실패했을 때(앞 호출은 이미 저장됨) 오류 문구 아래에 붙이는 안내 */
+const MOVE_PARTIAL_NOTE = "순서를 다시 확인해 주세요";
 
 /** S4 작업공간 골격(C 3분할). 라우트가 바뀌면 상태를 새로 시작한다. */
 export function WorkspacePage() {
@@ -97,15 +101,35 @@ function Workspace({ datasetId }: { datasetId: number }) {
   }, [datasetId]);
 
   /** 저장 한 번: 성공하면 안내, 버전 충돌이면 최신 상태를 다시 읽는다. 실패는 Inspector 위에 문구로 보여 준다. */
-  async function run(action: () => Promise<string>) {
+  async function run(action: () => Promise<string>, noteOnError?: () => string | undefined) {
     setFeedback(null);
     try {
       setFeedback({ kind: "ok", text: await action() });
     } catch (error) {
       if (error instanceof ApiError && error.code === "DEFINITION_VERSION_MISMATCH") await refetch();
       if (error instanceof ApiError && error.code === "DATASET_ARCHIVED") markArchived();
-      setFeedback({ kind: "error", error });
+      setFeedback({ kind: "error", error, note: noteOnError?.() });
     }
+  }
+
+  /** B6 한 건. 응답으로 로컬 목록과 정의 버전을 바로 갱신한다(연속 호출이 새 버전을 쓰게 ref도 올린다). */
+  async function patchColumn(
+    columnId: number,
+    body: { display_name?: string; required?: boolean; rules?: ColumnRules; tag?: string | null; position?: number },
+  ) {
+    const saved = await updateColumn(datasetId, columnId, { expected_version: versionRef.current, ...body });
+    versionRef.current = saved.def_version;
+    setLoaded((previous) =>
+      previous && "detail" in previous
+        ? {
+            detail: {
+              ...previous.detail,
+              def_version: saved.def_version,
+              columns: previous.detail.columns.map((c) => (c.id === saved.column.id ? saved.column : c)),
+            },
+          }
+        : previous,
+    );
   }
 
   const actions: Actions = {
@@ -124,22 +148,44 @@ function Workspace({ datasetId }: { datasetId: number }) {
       }),
     updateColumn: (columnId, body) =>
       run(async () => {
-        const saved = await updateColumn(datasetId, columnId, { expected_version: versionRef.current, ...body });
-        versionRef.current = saved.def_version;
-        setLoaded((previous) =>
-          previous && "detail" in previous
-            ? {
-                detail: {
-                  ...previous.detail,
-                  def_version: saved.def_version,
-                  columns: previous.detail.columns.map((c) => (c.id === saved.column.id ? saved.column : c)),
-                },
-              }
-            : previous,
-        );
+        await patchColumn(columnId, body);
         void refetch();
         return "열을 저장했습니다.";
       }),
+    moveColumn: (columnId, direction) => {
+      let partial = false;
+      return run(async () => {
+        const order = columns.map((c) => c.id);
+        const from = order.indexOf(columnId);
+        const to = direction === "up" ? from - 1 : from + 1;
+        if (from < 0 || to < 0 || to >= order.length) return "더 옮길 곳이 없습니다.";
+        [order[from], order[to]] = [order[to], order[from]];
+        const positions = new Map(columns.map((c) => [c.id, c.position]));
+        let done = 0;
+        try {
+          // B6에는 한 번에 순서를 바꾸는 호출이 없다. 지금 쓰는 위치 번호 자리를 새 순서대로 다시 나눠 주고,
+          // 번호가 달라지는 열만 한 건씩 고친다(번호가 모두 다르면 이웃한 두 열만 서로 바뀐다: 2회).
+          // 같은 번호가 겹쳐 있으면(순서가 id로만 갈리는 상태) 0부터 차례로 다시 매긴다.
+          const slots = columns.map((c) => c.position);
+          const unique = new Set(slots).size === slots.length;
+          for (const [index, id] of order.entries()) {
+            const target = unique ? slots[index] : index;
+            if (positions.get(id) !== target) {
+              await patchColumn(id, { position: target });
+              done += 1;
+            }
+          }
+        } catch (error) {
+          if (done > 0) {
+            partial = true; // 앞선 호출은 이미 저장됐다(비원자적, 03b 33-1 6): 순서를 다시 확인하도록 안내한다.
+            await refetch();
+          } // 일부만 바뀌었으니 실제 순서를 다시 읽어 보여 준다(버전 충돌이면 run이 읽는다).
+          throw error;
+        }
+        void refetch();
+        return "열 순서를 바꿨습니다.";
+      }, () => (partial ? MOVE_PARTIAL_NOTE : undefined));
+    },
     saveFormula: async (input: SaveInput): Promise<SaveOutcome> => {
       setFeedback(null);
       try {

@@ -1125,7 +1125,7 @@ def test_update_column_stale_version_is_409(api, world):
     assert err(response)["details"] == {"current_version": dataset["def_version"]}
 
 
-def test_formula_columns_cannot_be_required_or_have_rules(api, db, world):
+def test_formula_columns_cannot_be_required_and_only_accept_display_rules(api, db, world):
     dataset = make_dataset(api, world)
     formula_id = db.add_dataset(world.team_a, "계산", world.ids["definer"])
     with db.writer.begin() as conn:
@@ -1153,7 +1153,7 @@ def test_formula_columns_cannot_be_required_or_have_rules(api, db, world):
     ) == {"required": "BAD_FORMAT"}
     assert field_codes(
         api("definer", "PATCH", path, json={"expected_version": 1, "rules": {"min": 1}})
-    ) == {"rules": "BAD_FORMAT"}
+    ) == {"rules.min": "BAD_FORMAT"}  # 계산 열은 표시 형식 키만 받는다(03b 33-2)
     ok = api(
         "definer",
         "PATCH",

@@ -725,11 +725,16 @@ def update_column(
         if "rules" in fields:
             if current["kind"] == "raw":
                 new_rules, rule_problems = rules.normalize_rules(current["type"], values["rules"])
-            else:  # 계산 열에는 검증 규칙이 없다(결과 형은 수식이 정한다).
-                new_rules = None
-                rule_problems = [("rules", FieldErrorCode.BAD_FORMAT)] if values["rules"] else []
+                apply_rules = True
+            elif values["rules"] is None:  # 계산 열: null은 변경 없음(03b 33-2)
+                new_rules, rule_problems, apply_rules = None, [], False
+            else:  # 계산 열의 rules는 표시 형식뿐, 숫자 결과 열만 값을 가진다(tag와 같다)
+                new_rules, rule_problems = rules.normalize_formula_rules(values["rules"])
+                if new_rules is not None and current["type"] != "number":
+                    rule_problems.append(("rules", FieldErrorCode.BAD_FORMAT))
+                apply_rules = True
             problems.extend(rule_problems)
-            if not rule_problems and new_rules != current["rules"]:
+            if apply_rules and not rule_problems and new_rules != current["rules"]:
                 updates["rules"] = new_rules
         if "tag" in fields:
             tag, tag_problem = rules.clean_tag(values["tag"])

@@ -202,3 +202,48 @@ def test_structure_hash_ignores_display_names_and_rules_but_not_structure():
     assert base != structure_hash([column(1, kind="formula")])
     assert base != structure_hash([column(1), column(2)])
     assert structure_hash([]) != base
+
+
+# --- 계산 열 표시 형식 (03b 33-2) ----
+
+
+def test_formula_rules_accept_only_the_two_display_keys():
+    assert rules.normalize_formula_rules({}) == (None, [])
+    assert rules.normalize_formula_rules({"display_decimals": 0}) == ({"display_decimals": 0}, [])
+    both = {"display_decimals": 10, "display_thousands": False}
+    assert rules.normalize_formula_rules(both) == (both, [])
+    assert rules.normalize_formula_rules({"display_thousands": True}) == (
+        {"display_thousands": True},
+        [],
+    )
+    # null 값은 키가 없는 것과 같다
+    assert rules.normalize_formula_rules({"display_decimals": None, "display_thousands": None}) == (
+        None,
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "field", "code"),
+    [
+        ({"display_decimals": -1}, "rules.display_decimals", F.OUT_OF_RANGE),
+        ({"display_decimals": 11}, "rules.display_decimals", F.OUT_OF_RANGE),
+        ({"display_decimals": True}, "rules.display_decimals", F.BAD_FORMAT),  # bool은 int가 아니다
+        ({"display_decimals": False}, "rules.display_decimals", F.BAD_FORMAT),
+        ({"display_decimals": 1.5}, "rules.display_decimals", F.BAD_FORMAT),
+        ({"display_decimals": "2"}, "rules.display_decimals", F.BAD_FORMAT),
+        ({"display_thousands": 1}, "rules.display_thousands", F.BAD_FORMAT),
+        ({"display_thousands": "true"}, "rules.display_thousands", F.BAD_FORMAT),
+        ({"decimals": 2}, "rules.decimals", F.BAD_FORMAT),  # 입력 열 키는 계산 열에 없다
+        ({"min": "1"}, "rules.min", F.BAD_FORMAT),
+        ({"unknown": 1}, "rules.unknown", F.BAD_FORMAT),
+    ],
+)
+def test_formula_rules_rejections(value, field, code):
+    _, problems = rules.normalize_formula_rules(value)
+    assert (field, code) in problems
+
+
+def test_input_column_rules_do_not_accept_the_display_keys():
+    _, problems = rules.normalize_rules("number", {"display_decimals": 2})
+    assert problems == [("rules.display_decimals", F.BAD_FORMAT)]

@@ -24,8 +24,9 @@ export const TAG_MAX = 50;
 /**
  * 05 공통 형태 Column.rules. number {min, max, decimals} / text {max_length} / date {min, max} / choice {options[]}.
  * number의 min·max는 05 §1에 따라 십진 문자열로 보낸다(읽을 때는 숫자도 받아 문자열로 바꾼다).
+ * 계산 열(kind=formula)의 rules는 표시 전용 display_decimals(정수 0~10)·display_thousands(불리언, 기본 켬)만 쓴다(03b 33절).
  */
-export type ColumnRules = Record<string, unknown>;
+export type ColumnRules = Record<string, unknown> & { display_decimals?: number; display_thousands?: boolean };
 
 export interface Column {
   id: number;

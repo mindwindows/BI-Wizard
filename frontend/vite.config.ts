@@ -14,5 +14,9 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     // 레이아웃 시험(src/layout.test.ts)이 styles.css 원문을 읽을 수 있게 이 파일만 처리한다.
     css: { include: [/src\/styles\.css/] },
+    // CPU 부하에서 AG Grid 마운트·디바운스 시험이 기본 5초를 넘기므로 전역 제한을 늘린다(시험 실행에만 영향).
+    testTimeout: 20000,
+    hookTimeout: 20000,
+    setupFiles: ["./src/test-setup.ts"],
   },
 });

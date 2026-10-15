@@ -87,6 +87,18 @@
 - **컴파일 호출 지점(6곳, 모두 `env`를 만들어 넘겨야 한다):** ① D2 `formula/service.py` `check`, ② D3 `preview`, ③ D4·D5 `_compile_for_save`, ④ D6 `view_formula`(`build_sql=False`, C0만), ⑤ 정의 변경 훅 `formula/hook.py` `apply_definition`의 `compile_all`(모든 저장 수식을 다시 컴파일하므로 B4·B5·B6·D4·D5·D10 재시도가 모두 여기를 지난다), ⑥ 시작 대조 `formula/reconcile.py` `view_needs_rebuild`의 `compile_all`. 환경은 한 곳(`reference` service의 항목 목록 읽기 + `DefinitionView.base_date_column_id`)에서 만드는 도우미 하나를 ①~⑥이 공유한다(`Context` 안에 `env`를 두고 ⑤·⑥은 `defn`에서 만듦). **`env`가 없으면(`None`) `REF`를 만나는 즉시 구현 오류(`RuntimeError`, 사용자 문구 아님)를 올린다 [제안: fail-closed. 호출 지점을 빠뜨리면 조용히 `REF_UNKNOWN`이 나오지 않고 시험에서 크게 실패하게 한다].** 시험: 위 6곳을 각각 `REF`가 있는 수식으로 실행해 같은 결과를 확인하고, `formula` 패키지 안의 `compile_formula`·`check_formula`·`compile_all` 호출이 모두 `env=`를 넘기는지 AST 검사로 확인한다.
 - **기준값 값 변경과 뷰:** 정정(05 R5)·추가(R4)는 뷰 정의를 바꾸지 않으므로 `def_hash`가 같고 재생성이 없다(06 §3-4). 새 항목은 이미 저장된 수식에 영향이 없다(항목이 없어서 `REF_UNKNOWN`이던 수식은 저장되지 못했으므로 저장된 `REF`는 늘 풀린다). 시작 대조는 정상 경로에서 `REF` 뷰를 건너뛴다.
 
+### 3-3. 계산 열 숫자의 화면 표시 규칙 (FU-4, `03b` 33-2, 사용자 결정 2026-10-15)
+| 항목 | 내용 |
+| --- | --- |
+| 범위 | 포털 그리드에서 **결과 형이 숫자인 계산 열**만. 숫자 아닌 결과 열은 `rules`가 있어도 무시(지우지 않음, 05 B6). Superset 차트·SQL Lab에는 적용되지 않음 |
+| 키 | `rules.display_decimals`(정수 0~10), `rules.display_thousands`(불리언, 키가 없으면 켬). 저장·검증은 05 B6, 06 §3-2 |
+| `ROUND*`와의 구별 | `display_decimals`는 **표시 전용**이다. 값을 바꾸는 `ROUND`·`ROUNDUP`·`ROUNDDOWN`(§2)과 달리 뷰의 계산값, 다른 수식이 읽는 값, API 값은 그대로다. 결과 값 자체를 반올림하려면 수식에서 `ROUND*`를 쓴다 |
+| 반올림 | 지정 자릿수까지 **먼 쪽 반올림**(half away from zero, 0에서 먼 쪽). 모자라는 자릿수는 **끝자리 0을 채워** 보인다(`display_decimals=2`면 `1.5` → `1.50`) |
+| 키가 없을 때 | 현행 유지: 소수 최대 6자리, 끝자리 0 제거, 천 단위 쉼표 |
+| 쉼표 | `display_thousands`가 꺼지면 쉼표를 붙이지 않는다. `YEAR` 결과(`2,026`) 등은 열마다 끄는 방식이며 수식을 보고 자동으로 끄지 않는다(Q3). 정의 화면에 안내문을 둔다(04 S4) |
+| 복사·API | 복사한 텍스트와 API(C1) 값은 **전체 값**을 적는다(표시 형식을 적용하지 않음) |
+| 제외 | 입력 숫자 열의 쉼표(`thousands`), 접두·접미·퍼센트, Superset 지표 형식 연결(안내문만) |
+
 ## 4. 리터럴과 글자 상수 (`03b` 5-2 Z6 (가))
 SQLAlchemy 내장 `CreateView`가 `literal_binds`로 상수를 SQL 텍스트로 렌더한다(설치본 소스 `sql/ddl.py`, X-26, 확인됨). 공식 문서는 이 방식을 "debugging purposes only", "not to be passed to a live production database", "only with local, trusted input"으로 한정한다(`facts-db` Q6, 확인됨). 파라미터 없는 쿼리는 pg8000이 simple query로 보내 **여러 문장이 실행될 수 있다**(X-26, 확인됨). 방어는 우리 규칙과 시험에 달려 있다.
 ### 4-1. 타입 있는 리터럴 렌더러 (접점 한 곳, 나중에 (나)안으로 옮길 때 이 한 곳만 교체)

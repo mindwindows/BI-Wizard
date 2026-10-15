@@ -23,7 +23,7 @@
 | `teams` | `id`; `code text NN`(불변, `team` 열 값); `name text NN`(바꿀 수 있는 표시 이름); `is_active bool NN`; `created_at` | UNIQUE(`code`); CHECK(`code ~ '^[a-z0-9_]{1,32}$'` [제안]: 뷰에 글자로 들어가므로 문자 제한, 03c X-26); UNIQUE(`name`) [제안: 가상 데이터셋 이름 접두 구분]; 길이 상한 50자는 앱 검증 [제안] | SELECT, INSERT, UPDATE(`name`,`is_active`) |
 | `team_members` | `team_id`, `user_id`, `role text NN` | PK(`team_id`,`user_id`)(팀마다 역할 하나); FK 둘; CHECK(`role IN ('definer','entry')`); 인덱스(`user_id`) | SELECT, INSERT, UPDATE(`role`), DELETE(소속 해제) |
 | `datasets` | `id`; `team_id NN`; `name text NN`; `date_unit text NN`; `base_date_column_id` NULL(기준 날짜 열 없음); `status text NN default 'active'`(`active`·`archived`: 보관 중 입력·정의 동결, 표·뷰 불변, §3-3·§5); `def_version int NN default 1`; `def_hash text NN`(§5); `created_by NN`; `created_at` | FK `team_id`, `created_by`; UNIQUE(`team_id`,`name`); CHECK(`date_unit IN ('day','month','year')`), CHECK(`ck_datasets_status`: `status IN ('active','archived')`, FU-2b `0008`이 교체. `deleted`는 영구 삭제 단위가 교체); 이름 길이 100자는 앱 검증 [제안]; 복합 FK(`id`,`base_date_column_id`)→`dataset_columns`(`dataset_id`,`id`): 기준 열이 같은 데이터셋 소속임을 DB가 보장 [제안]; 순환 FK라 표 생성 뒤 추가 | SELECT, INSERT, UPDATE(`name`,`date_unit`,`base_date_column_id`,`status`,`def_version`,`def_hash`). `team_id`는 불변 [제안: 팀 열이 뷰에 상수로 들어감] |
-| `dataset_columns` | `id`; `dataset_id NN`; `display_name text NN`; `type text NN`; `kind text NN`; `required bool NN default false`; `rules jsonb`(범위 등, §3-2); `tag text`(열 구분 태그); `position int NN`(화면 순서) | FK `dataset_id`; UNIQUE(`dataset_id`,`id`)(복합 FK 대상); UNIQUE(`dataset_id`,`display_name`); CHECK(`type IN ('text','number','date','boolean','choice')`), CHECK(`kind IN ('raw','formula')`), CHECK(`kind='raw' OR (NOT required AND type<>'choice')`); `kind='formula'`의 `type`은 07이 정한 결과 형. `display_name`: 길이 100자와 금지 문자(`[` `]` `"`·제어문자)는 앱 검증 [제안, 07 §1] | SELECT, INSERT, UPDATE(`display_name`,`required`,`rules`,`tag`,`position`,`type`). `kind`·`dataset_id`는 DB가 불변 강제, `type`은 계산 열만 갱신(원본 열 금지는 앱 규칙, §2 머리말·§3-3) [제안] |
+| `dataset_columns` | `id`; `dataset_id NN`; `display_name text NN`; `type text NN`; `kind text NN`; `required bool NN default false`; `rules jsonb`(범위 등. 계산 열은 표시 형식 키, §3-2); `tag text`(열 구분 태그); `position int NN`(화면 순서) | FK `dataset_id`; UNIQUE(`dataset_id`,`id`)(복합 FK 대상); UNIQUE(`dataset_id`,`display_name`); CHECK(`type IN ('text','number','date','boolean','choice')`), CHECK(`kind IN ('raw','formula')`), CHECK(`kind='raw' OR (NOT required AND type<>'choice')`); `kind='formula'`의 `type`은 07이 정한 결과 형. `display_name`: 길이 100자와 금지 문자(`[` `]` `"`·제어문자)는 앱 검증 [제안, 07 §1] | SELECT, INSERT, UPDATE(`display_name`,`required`,`rules`,`tag`,`position`,`type`). `kind`·`dataset_id`는 DB가 불변 강제, `type`은 계산 열만 갱신(원본 열 금지는 앱 규칙, §2 머리말·§3-3) [제안] |
 | `formulas` | `column_id`; `expression text NN`(보관용 원문, 수식 보기는 AST에서 생성, 07 §9); `ast jsonb NN`(열 번호 참조, 07); `ast_hash text NN` | PK·FK `column_id`(열 하나에 수식 하나); `kind='formula'` 열인지는 앱이 확인 | SELECT, INSERT, UPDATE(`expression`,`ast`,`ast_hash`) |
 | `formula_deps` | `column_id`, `depends_on_column_id` | PK 둘; FK 둘; CHECK(둘이 다름); 태그 합산은 펼친 구체 열 목록을 07이 다시 계산해 넣음; 같은 데이터셋 여부는 앱 확인 | SELECT, INSERT, DELETE |
 | `superset_datasets` | `dataset_id`; `superset_dataset_id int`(등록 전 NULL); `display_name text NN`; `sync_status text NN default 'pending'`; `synced_at timestamptz`; `last_error text`(관리자 현황용 요약, 비밀·SQL 금지) [제안] | PK·FK `dataset_id`; CHECK(`sync_status IN ('pending','registered','failed')`) | SELECT, INSERT, UPDATE(`superset_dataset_id`,`display_name`,`sync_status`,`synced_at`,`last_error`) |
@@ -72,6 +72,15 @@
 | --- | --- | --- |
 | A 앱 검증(제안) | `rules` jsonb(number: `min`·`max`·`decimals`, text: `max_length`, date: `min`·`max`, choice: `options`)와 `required`를 서버가 입력·붙여넣기마다 검사. 새 행은 필수 열이 모두 있어야 저장(그래서 한 칸씩 채우는 새 행은 화면 메모리의 임시 행이고 서버·`ds_`에 draft 상태가 없다, 05 §2-3), 기존 행은 필수 칸을 비울 수 없음 | 규칙 변경이 DDL 없이 끝남. 규칙 변경 전의 기존 값은 그대로 두고 점검은 후속. DB는 위반 값을 막지 못함 |
 | B DB CHECK/NOT NULL | 규칙마다 제약을 `ds_`에 만듦 | 규칙을 바꿀 때마다 DDL + 기존 값 검증 필요, `ALTER TABLE`이 표를 잠금(03c X-7), 선택 목록 변경이 DDL이 됨 |
+- **`dataset_columns.rules` 허용 키(종류별, 앱 검증):**
+
+| 열 | 허용 키 | 값 |
+| --- | --- | --- |
+| 입력 열 number | `min`, `max`, `decimals` | 기존(입력 검증) |
+| 입력 열 text / date / choice | `max_length` / `min`·`max` / `options` | 기존 |
+| **계산 열(`kind=formula`, FU-4, `03b` 33)** | `display_decimals`, `display_thousands` | 정수 0~10 / 불리언. **표시 전용**(입력 검증이 아니며 저장값·`dv_` 값·API 값을 바꾸지 않음). 입력 열의 `decimals`와 다른 키. 결과 형이 숫자가 아니면 새로 저장할 수 없고, 저장 뒤 형이 바뀌어도 유지(화면이 무시) |
+
+  새 키에 **DB CHECK·DDL·마이그레이션·GRANT 변경은 없다**(`rules`는 jsonb이고 `bi_app`은 이미 `rules` UPDATE 권한이 있다, §2). 검증은 05 B6 규칙에 따라 앱이 한다.
 - 정규식·유일성 검증은 후속. 선택 목록 값이 목록 밖이어도 지우지 않고 점검에서 표시하는 원칙은 후속과 같다.
 
 ### 3-3. 기준 날짜 열과 변경 제한 **[제안]**
@@ -190,7 +199,7 @@ Superset 열 이름 = 내부 이름 `c_<id>`(팀 열은 `team` 고정), 읽기 �
 
 ## 9. 후속 기능 단위에서 결정
 - 기준값 표는 FU-3으로 정해졌다(`03b` 32: 숫자만, 연도 정확 일치, 이월 없음, 정정 가능, 삭제·이름 변경 없음). 후속: 기준값 항목 삭제·이름 변경·설명 수정(UPDATE GRANT만 선승인), 고정 연도 인수 `REF("이름", 연도)`, 글자 기준값, 적용 시작일·이월, 팀별 기준값, 대소문자 구별 이름 중복 방지, 정정 이력 조회 화면(`audit_log`로만 가능), 기준값 표 크기 상한.
-- 공통 요약(지표·연결·요약 뷰), 이전 행 참조·같은 데이터셋 집계(FU-4 잔여), 참조 열(`reference` 타입, FU-5, FU-3의 "기준값"과 다름). 정적 표를 읽는 뷰의 `downgrade` 막힘 규칙은 `reference_values`에 한해 FU-3 §6이 정했고 다른 정적 표를 읽는 뷰가 생기면 같은 방식(`pg_depend` 사전 점검)을 쓴다.
+- 공통 요약(지표·연결·요약 뷰), 이전 행 참조·같은 데이터셋 집계(FU-4R), 참조 열(`reference` 타입, FU-5, FU-3의 "기준값"과 다름). 정적 표를 읽는 뷰의 `downgrade` 막힘 규칙은 `reference_values`에 한해 FU-3 §6이 정했고 다른 정적 표를 읽는 뷰가 생기면 같은 방식(`pg_depend` 사전 점검)을 쓴다.
 - 엑셀 가져오기 원본 정보(이름·크기·해시, 03b 4-4 Z11), 가져오기 중 입력 차단, 업로드 상한(EW-2), 데이터셋 개수·크기 상한(K11 ㄹ).
 - 보관·삭제 정책 중 데이터셋 보관·복구는 FU-2b로 정해졌다(`03b` 30-1). 후속: 영구 삭제(`deleted` 상태, 보관 데이터를 감추는 수단, 30일 `DROP`, `DROP COLUMN`), 행·열·수식 보관과 숨은 열 `_archived_at`, 소급 변경·마감(K5), 팀 비활성의 효과(K10 ㄱ, Q3 본체). 질문 Q2·Q3 본체·Q5~Q7은 그 단위에서 다룬다.
 - `audit_log` 후속: 보존·삭제 정책(자동 삭제 없음), 행 값 수정·입장권 발급 기록(제외 결정), 검증 규칙 값·수식 원문 이전 값 기록, 삭제 행위 추가(`action` CHECK 교체. 기준값 변경 행위 3개는 FU-3 `0009`가 추가함), 내보내기, `action`·기간 조합 인덱스(느려질 때만), 하루 건수 측정.
