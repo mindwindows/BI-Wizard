@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../App";
 import { describeApiError } from "../../errors";
@@ -381,12 +381,29 @@ describe("정정(R5)과 확인창(R6)", () => {
   });
 
   it("R6가 오래 걸리면(시간 초과) 일반 경고로 바꾸고 기다리는 동안에도 정정할 수 있다", async () => {
-    usageTimeout.ms = 40;
-    open(makeFake(), { "GET /reference-items/1/usage": () => new Promise<Response>(() => undefined) });
-    await ready();
-    await startCorrection();
-    expect(screen.getByTestId("correction-usage").textContent).toContain("확인하는 중");
-    expect((screen.getByRole("button", { name: "정정하기" }) as HTMLButtonElement).disabled).toBe(false);
+    // 실제 시간에 기대지 않는다: 시간 초과용 setTimeout(표식 지연값)만 가로채 두었다가 시험이 직접 실행한다.
+    const SENTINEL = 123457;
+    usageTimeout.ms = SENTINEL;
+    const realSetTimeout = globalThis.setTimeout;
+    let fireTimeout: (() => void) | undefined;
+    const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+      if (ms === SENTINEL) {
+        fireTimeout = fn as () => void;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(fn as () => void, ms, ...rest);
+    }) as typeof setTimeout);
+    try {
+      open(makeFake(), { "GET /reference-items/1/usage": () => new Promise<Response>(() => undefined) });
+      await ready();
+      await startCorrection();
+      expect(fireTimeout).toBeDefined();
+      expect(screen.getByTestId("correction-usage").textContent).toContain("확인하는 중");
+      expect((screen.getByRole("button", { name: "정정하기" }) as HTMLButtonElement).disabled).toBe(false);
+      act(() => fireTimeout?.());
+    } finally {
+      spy.mockRestore();
+    }
     await waitFor(() => expect(screen.getByTestId("correction-usage").textContent).toBe(usageFailedText(2026)));
   });
 
