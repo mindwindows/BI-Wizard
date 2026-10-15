@@ -261,12 +261,29 @@ describe("계산 열 위/아래 이동", () => {
     expect(patches).toHaveLength(2);
   });
 
-  it("같은 번호 3열이면 달라지는 열마다 한 번씩(2회) 0,1,2로 다시 매긴다", async () => {
+  it("같은 번호(5) 3열이면 세 열 모두 달라져 정확히 3회, 본문은 0,1,2 재매김이다", async () => {
     const d = detail();
-    d.columns = d.columns.slice(0, 3);
+    d.columns = d.columns.filter((c) => [5, 6, 7].includes(c.id));
     for (const c of d.columns) c.position = 5;
     const { patches } = await open({ detail: d });
-    select(/^기준일/);
+    select(/^비율/);
+    fireEvent.click(btn("아래로 이동"));
+    await waitFor(() => expect(patches).toHaveLength(3));
+    await within(inspector()).findByRole("status");
+    expect(patches).toHaveLength(3);
+    expect(patches.map((p) => [p.path.split("/").at(-1), p.body])).toEqual([
+      ["5", { expected_version: 3, position: 0 }],
+      ["7", { expected_version: 4, position: 1 }],
+      ["6", { expected_version: 5, position: 2 }],
+    ]);
+  });
+
+  it("같은 번호(0) 3열이면 0번 자리는 그대로여서 정확히 2회(1, 2)다", async () => {
+    const d = detail();
+    d.columns = d.columns.filter((c) => [5, 6, 7].includes(c.id));
+    for (const c of d.columns) c.position = 0;
+    const { patches } = await open({ detail: d });
+    select(/^비율/);
     fireEvent.click(btn("아래로 이동"));
     await waitFor(() => expect(patches).toHaveLength(2));
     await within(inspector()).findByRole("status");
