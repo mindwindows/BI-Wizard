@@ -51,8 +51,6 @@ const inspector = () => screen.getByRole("complementary", { name: "Inspector" })
 const selectColumn = (name: RegExp) => fireEvent.click(within(screen.getByRole("region", { name: "열 목록" })).getByRole("button", { name }));
 const of = (calls: RecordedCall[], method: string, suffix: string) => calls.filter((c) => c.method === method && c.path.endsWith(suffix));
 const area = () => within(inspector()).getByLabelText("수식") as HTMLTextAreaElement;
-/** 검사 디바운스(400ms)·AG Grid 마운트가 실제 시간으로 걸려 부하에서 5초 기본 제한을 넘기므로 느린 시험에만 쓴다. */
-const SLOW = 20000;
 const typeExpr = (value: string) => fireEvent.change(area(), { target: { value } });
 
 describe("계산 열 추가(D4)", () => {
@@ -74,7 +72,7 @@ describe("계산 열 추가(D4)", () => {
     await waitFor(() => expect(of(calls, "GET", "/datasets/7/rows").length).toBeGreaterThanOrEqual(2));
     const grid = screen.getByRole("group", { name: "입력 그리드 표" });
     await waitFor(() => expect(Array.from(grid.querySelectorAll(".header-formula")).map((h) => h.textContent?.trim())).toContain("이익률"));
- }, SLOW);
+ });
 
   it("정의 권한이 없으면 '계산 열 추가' 버튼이 없다", async () => {
     await openWorkspace(salesDetail({ permissions: { define: false, enter: true } }));
@@ -187,7 +185,7 @@ describe("수식 보기(D6)와 수식 고치기(D5)", () => {
     fireEvent.click(within(inspector()).getByRole("button", { name: "수식 저장" }));
     await waitFor(() => expect(of(calls, "PUT", "/datasets/7/formulas/5")).toHaveLength(2));
     expect(of(calls, "PUT", "/datasets/7/formulas/5")[1].body).toMatchObject({ expected_version: 4 });
- }, SLOW);
+ });
 
   it("FORMULA_CIRCULAR(422)는 순환 경로를 열 이름으로 보여 준다", async () => {
     await openWorkspace(salesDetail(), ROWS, {
@@ -320,7 +318,7 @@ describe("선택한 계산 칸의 전체 값(결정 2026-10-12)", () => {
     await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toBe("12345678901234567890123456789012345678"));
     fireEvent.click(cellAt("r2", "5"));
     await waitFor(() => expect(within(inspector()).getByTestId("selected-cell-value").textContent).toContain("오류 E1"));
- }, SLOW);
+ });
 
   it("고른 칸이 없으면 안내 문구만 보인다", async () => {
     const { fake } = await openWorkspace(salesDetail(), LONG_ROWS);
