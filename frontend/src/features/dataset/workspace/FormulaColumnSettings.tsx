@@ -78,11 +78,8 @@ export function FormulaColumnSettings({ column, columns, canDefine, archived, on
   async function submitFormat(event: FormEvent) {
     event.preventDefault();
     if (readOnly || busy || !parsedDecimals.ok || !formatChanged) return;
-    // rules 전체 대체이므로 표시 형식이 아닌 키는 그대로 보존해서 보낸다.
-    const { display_decimals: _d, display_thousands: _t, ...others } = column.rules ?? {};
-    void _d;
-    void _t;
-    const rules: ColumnRules = { ...others };
+    // 서버는 display_* 밖의 키를 422로 거부하므로 표시 형식 두 키만 보낸다(모두 기본이면 {}).
+    const rules: ColumnRules = {};
     if (parsedDecimals.value !== undefined) rules.display_decimals = parsedDecimals.value;
     if (!thousands) rules.display_thousands = false;
     setBusy(true);

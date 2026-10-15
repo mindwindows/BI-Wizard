@@ -159,6 +159,24 @@ def test_archived_dataset_answers_archived_before_version_and_validation(ctx, fx
     assert stored_rules(ctx, fx["calc"]) is None
 
 
+def test_stale_version_answers_409_before_validation_422(ctx, fx):
+    url = f"/api/datasets/{fx['ds']}/columns/{fx['calc']}"
+    current = version(ctx.call, fx["ds"])
+    bad_rules = {"display_decimals": 99}
+    stale = ctx.call(
+        "definer", "PATCH", url, json={"expected_version": current - 1, "rules": bad_rules}
+    )
+    assert stale.status_code == 409 and err(stale)["code"] == "DEFINITION_VERSION_MISMATCH"
+    assert stored_rules(ctx, fx["calc"]) is None
+    fresh = ctx.call(
+        "definer", "PATCH", url, json={"expected_version": current, "rules": bad_rules}
+    )
+    assert fresh.status_code == 422 and err(fresh)["code"] == "VALIDATION_ERROR"
+    assert fields(fresh) == {"rules.display_decimals": "OUT_OF_RANGE"}
+    assert version(ctx.call, fx["ds"]) == current
+    assert stored_rules(ctx, fx["calc"]) is None
+
+
 def test_audit_records_rules_changed_without_the_values(ctx, fx):
     before = len(audit_rows_of(ctx.db, "column.update"))
     assert patch(ctx, fx, "calc", rules={"display_decimals": 7}).status_code == 200

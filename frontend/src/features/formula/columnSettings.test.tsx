@@ -245,9 +245,36 @@ describe("계산 열 위/아래 이동", () => {
     const { patches } = await open({ detail: d });
     select(/^이익/); // id 5 → 순서: 1 2 3 4 5 6 7 중 5번째
     fireEvent.click(btn("위로 이동"));
-    await waitFor(() => expect(patches.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(patches).toHaveLength(6));
     await within(inspector()).findByRole("status");
+    // 모두 0이던 7열을 0..6으로 재매김: 첫 열(0)은 그대로, 나머지 6열이 달라진다. 5번째와 4번째가 바뀐 순서.
+    expect(patches.map((p) => (p.body as { position: number }).position)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(order().slice(0, 5)).toEqual(["기준일", "매출", "비용", "이익", "메모"]);
+  });
+
+  it("위치 번호가 모두 다르면 정확히 2회만 부른다", async () => {
+    const { patches } = await open();
+    select(/^이익/);
+    fireEvent.click(btn("아래로 이동"));
+    await waitFor(() => expect(patches).toHaveLength(2));
+    await within(inspector()).findByRole("status");
+    expect(patches).toHaveLength(2);
+  });
+
+  it("같은 번호 3열이면 달라지는 열마다 한 번씩(2회) 0,1,2로 다시 매긴다", async () => {
+    const d = detail();
+    d.columns = d.columns.slice(0, 3);
+    for (const c of d.columns) c.position = 5;
+    const { patches } = await open({ detail: d });
+    select(/^기준일/);
+    fireEvent.click(btn("아래로 이동"));
+    await waitFor(() => expect(patches).toHaveLength(2));
+    await within(inspector()).findByRole("status");
+    expect(patches).toHaveLength(2);
+    expect(patches.map((p) => p.body)).toEqual([
+      { expected_version: 3, position: 1 },
+      { expected_version: 4, position: 2 },
+    ]);
   });
 
   it("첫 호출이 409로 실패하면 아무것도 바꾸지 않고 안내하며 최신 정의를 다시 읽는다", async () => {
@@ -324,7 +351,7 @@ describe("계산 열 표시 형식(rules: display_decimals·display_thousands)",
     expect((within(formatForm()).getByLabelText("천 단위 쉼표") as HTMLInputElement).checked).toBe(false);
   });
 
-  it("'기본'(빈 칸)으로 되돌리면 자릿수 키를 빼고, 모두 기본이면 빈 객체를 보내며 다른 키는 보존한다", async () => {
+  it("'기본'(빈 칸)으로 되돌리면 자릿수 키를 빼고, 표시 형식 두 키만 보낸다(다른 키는 보내지 않는다)", async () => {
     const d = detail();
     d.columns = d.columns.map((c) => (c.id === 6 ? { ...c, rules: { display_decimals: 1, display_thousands: false, future_key: "x" } } : c));
     const { patches } = await open({ detail: d, override: rulesOverride });
@@ -332,7 +359,8 @@ describe("계산 열 표시 형식(rules: display_decimals·display_thousands)",
     fireEvent.change(within(formatForm()).getByLabelText(/소수 자릿수/), { target: { value: "" } });
     fireEvent.click(btn("표시 형식 저장"));
     await waitFor(() => expect(patches).toHaveLength(1));
-    expect(patches[0].body).toEqual({ expected_version: 3, rules: { display_thousands: false, future_key: "x" } });
+    expect(patches[0].body).toEqual({ expected_version: 3, rules: { display_thousands: false } });
+    expect(Object.keys((patches[0].body as { rules: object }).rules)).toEqual(["display_thousands"]);
   });
 
   it("전부 기본으로 되돌리면 {}(설정 지움)를 보낸다", async () => {
